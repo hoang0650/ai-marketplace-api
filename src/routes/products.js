@@ -3,8 +3,18 @@ const Product = require('../models/Product');
 const { authenticate, requireRoles } = require('../middleware/auth');
 const { mapProduct } = require('../utils/mappers');
 const { slugify } = require('../utils/serialize');
+const { cached, deleteCachePattern } = require('../utils/cache');
 
 const router = express.Router();
+
+const LIST_TTL = 60; // s — listings change often (installs, new products)
+const DETAIL_TTL = 300; // s
+
+/** Product data changed — drop product + creator caches (fire-and-forget). */
+function invalidateProductCaches() {
+  deleteCachePattern('products:*').catch(() => {});
+  deleteCachePattern('creators:*').catch(() => {});
+}
 
 /** Escape user input before embedding in a RegExp (prevents ReDoS / regex injection). */
 function escapeRegExp(str) {
@@ -35,12 +45,16 @@ router.get('/', async (req, res, next) => {
     const limit = Math.min(Math.max(Number(req.query.limit) || DEFAULT_LIMIT, 1), MAX_LIMIT);
     const offset = Math.max(Number(req.query.offset) || 0, 0);
 
-    const products = await Product.find(filter)
-      .sort({ featured: -1, publishedAt: -1 })
-      .skip(offset)
-      .limit(limit)
-      .lean();
-    res.json(products.map(mapProduct));
+    const cacheKey = `products:list:${req.query.category || ''}:${req.query.creatorSlug || ''}:${req.query.featured || ''}:${q}:${limit}:${offset}`;
+    const result = await cached(cacheKey, LIST_TTL, async () => {
+      const products = await Product.find(filter)
+        .sort({ featured: -1, publishedAt: -1 })
+        .skip(offset)
+        .limit(limit)
+        .lean();
+      return products.map(mapProduct);
+    });
+    res.json(result);
   } catch (err) {
     next(err);
   }
@@ -48,9 +62,13 @@ router.get('/', async (req, res, next) => {
 
 router.get('/:slug', async (req, res, next) => {
   try {
-    const product = await Product.findOne({ slug: String(req.params.slug).toLowerCase() }).lean();
-    if (!product) return res.status(404).json({ message: 'Not found' });
-    res.json(mapProduct(product));
+    const slug = String(req.params.slug).toLowerCase();
+    const result = await cached(`products:slug:${slug}`, DETAIL_TTL, async () => {
+      const product = await Product.findOne({ slug }).lean();
+      return product ? mapProduct(product) : null;
+    });
+    if (!result) return res.status(404).json({ message: 'Not found' });
+    res.json(result);
   } catch (err) {
     next(err);
   }
@@ -92,6 +110,7 @@ router.post('/', authenticate, requireRoles('creator', 'admin'), async (req, res
       publishedAt: body.publishedAt ? new Date(body.publishedAt) : new Date(),
     });
 
+    invalidateProductCaches();
     res.status(201).json(mapProduct(product));
   } catch (err) {
     next(err);
@@ -128,6 +147,7 @@ router.put('/:id', authenticate, requireRoles('creator', 'admin'), async (req, r
     }
     if (body.slug) product.slug = slugify(body.slug) || product.slug;
     await product.save();
+    invalidateProductCaches();
     res.json(mapProduct(product));
   } catch (err) {
     next(err);
@@ -145,6 +165,7 @@ router.delete('/:id', authenticate, requireRoles('creator', 'admin'), async (req
       return res.status(403).json({ message: 'Forbidden' });
     }
     await product.deleteOne();
+    invalidateProductCaches();
     res.json({ ok: true });
   } catch (err) {
     next(err);

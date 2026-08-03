@@ -5,6 +5,7 @@ const WalletTx = require('../models/WalletTx');
 const Notification = require('../models/Notification');
 const { authenticate } = require('../middleware/auth');
 const { splitRevenue } = require('../utils/platform');
+const { deleteCachePattern } = require('../utils/cache');
 
 const router = express.Router();
 
@@ -39,6 +40,8 @@ router.post('/checkout', authenticate, async (req, res, next) => {
 
     product.installCount = (product.installCount || 0) + 1;
     await product.save();
+    // installCount is shown on listings — drop cached product views.
+    deleteCachePattern('products:*').catch(() => {});
 
     if (amount > 0) {
       const { sellerNet } = splitRevenue(amount);

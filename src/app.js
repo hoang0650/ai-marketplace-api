@@ -7,6 +7,7 @@ const mongoSanitize = require('express-mongo-sanitize');
 const morgan = require('morgan');
 const config = require('./config/env');
 const { isDbReady } = require('./config/db');
+const { isReady: isRedisReady } = require('./config/redis');
 const { notFound, errorHandler } = require('./middleware/error');
 
 const authRoutes = require('./routes/auth');
@@ -66,10 +67,14 @@ function createApp() {
   app.get('/health', (_req, res) => {
     res.json({ ok: true, service: 'ai-marketplace-api', uptime: process.uptime() });
   });
-  // Readiness — dependencies (MongoDB) available.
+  // Readiness — MongoDB required; Redis is optional (informational only).
   app.get('/health/ready', (_req, res) => {
     const ready = isDbReady();
-    res.status(ready ? 200 : 503).json({ ok: ready, db: ready ? 'connected' : 'disconnected' });
+    res.status(ready ? 200 : 503).json({
+      ok: ready,
+      db: ready ? 'connected' : 'disconnected',
+      cache: isRedisReady() ? 'connected' : 'off',
+    });
   });
 
   // Global API rate limit.

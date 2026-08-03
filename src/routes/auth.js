@@ -3,6 +3,7 @@ const bcrypt = require('bcryptjs');
 const User = require('../models/User');
 const { signToken, publicUser, authenticate } = require('../middleware/auth');
 const { slugify } = require('../utils/serialize');
+const { deleteCachePattern } = require('../utils/cache');
 
 const router = express.Router();
 
@@ -46,6 +47,11 @@ router.post('/register', async (req, res, next) => {
       avatarUrl: `https://api.dicebear.com/9.x/shapes/svg?seed=${encodeURIComponent(email)}`,
       affiliateCode: `PHAI-${slugify(name).slice(0, 8).toUpperCase() || 'USER'}`,
     });
+
+    if (asCreator) {
+      // New creator appears in /creators listings.
+      deleteCachePattern('creators:*').catch(() => {});
+    }
 
     const token = signToken(user);
     return res.status(201).json({ token, user: publicUser(user) });

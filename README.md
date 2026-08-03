@@ -9,6 +9,7 @@ Express + MongoDB backend for [`ai-marketplace`](../ai-marketplace) (PH AI Marke
 - MongoDB + Mongoose 8
 - JWT auth (`Authorization: Bearer <token>`)
 - Production hardening: `helmet`, `compression`, per-IP rate limiting (`express-rate-limit`), Mongo operator sanitization (`express-mongo-sanitize`)
+- Optional Redis cache (`ioredis`) — read-through cache cho products/creators với fail-fast + circuit breaker; app chạy bình thường khi không có Redis
 
 ## Production checklist
 
@@ -19,6 +20,7 @@ Express + MongoDB backend for [`ai-marketplace`](../ai-marketplace) (PH AI Marke
 - Graceful shutdown: SIGTERM/SIGINT → đóng HTTP server rồi đóng MongoDB, force-exit sau 10s.
 - Wallet: withdraw kiểm tra số dư ledger, mọi giao dịch cap 100.000 USD, amount làm tròn 2 số thập phân.
 - Search sản phẩm escape regex (chống ReDoS), listing mặc định limit 100 (max 200, hỗ trợ `limit`/`offset`).
+- Redis (optional): bật qua `REDIS_URL` hoặc `REDIS_ENABLED=true` + `REDIS_HOST`. Command timeout 250ms, circuit breaker mở 30s sau 3 lỗi liên tiếp — Redis chết thì mọi request fallback thẳng MongoDB, không bao giờ treo. Cache: `GET /products` (60s), `GET /products/:slug`, `GET /creators*` (300s); tự invalidate khi create/update/delete/checkout. Xóa key bằng SCAN, không dùng KEYS.
 
 ## Quick start
 

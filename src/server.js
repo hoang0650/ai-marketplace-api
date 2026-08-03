@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const config = require('./config/env');
 const { connectDb } = require('./config/db');
+const { closeRedis } = require('./config/redis');
 const { createApp } = require('./app');
 
 connectDb();
@@ -34,6 +35,7 @@ async function shutdown(signal) {
     } catch (_) {
       /* already closed */
     }
+    await closeRedis();
     console.log('[ai-marketplace-api] shutdown complete');
     process.exit(0);
   });
