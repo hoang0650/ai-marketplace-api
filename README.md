@@ -81,3 +81,9 @@ useMockApi: false,
 | GET | `/openclaw/ssh/active` | JWT — active SSH session |
 | POST | `/openclaw/ssh/revoke` | JWT — revoke SSH |
 | POST | `/wallet/deposit` | JWT — buyer nạp tiền |
+| POST | `/deployments` | JWT — deploy model/agent (config + visibility) |
+| GET | `/deployments/mine` | JWT — deployments của tôi (kèm API key) |
+| GET | `/deployments/browser` | — Agent Browser công khai |
+| PATCH/DELETE | `/deployments/:id` | JWT — start/stop/publish/config/xóa |
+| POST | `/deployments/:id/invoke` | JWT — chạy + đo token, trừ ví buyer, cộng ví seller (phí sàn 20%) |
+| GET | `/deployments/:id/usage` | JWT — lịch sử usage + tổng |
