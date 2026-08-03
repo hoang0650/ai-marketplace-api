@@ -81,9 +81,21 @@ useMockApi: false,
 | GET | `/openclaw/ssh/active` | JWT — active SSH session |
 | POST | `/openclaw/ssh/revoke` | JWT — revoke SSH |
 | POST | `/wallet/deposit` | JWT — buyer nạp tiền |
-| POST | `/deployments` | JWT — deploy model/agent (config + visibility) |
-| GET | `/deployments/mine` | JWT — deployments của tôi (kèm API key) |
-| GET | `/deployments/browser` | — Agent Browser công khai |
-| PATCH/DELETE | `/deployments/:id` | JWT — start/stop/publish/config/xóa |
+| POST | `/deployments` | JWT **seller** — deploy product với RunPod runtime (serverless, tokenize, gateway, public endpoint, .env, skills); `syncProduct` mặc định ghi lại `Product.runtime` |
+| GET | `/deployments/mine` | JWT seller — deployments của tôi (kèm API key + env) |
+| GET | `/deployments/browser` | — Agent Browser công khai (không lộ .env) |
+| PATCH/DELETE | `/deployments/:id` | JWT seller — start/stop/publish + cập nhật runtime; `syncProduct: true` để sync về Product |
 | POST | `/deployments/:id/invoke` | JWT — chạy + đo token, trừ ví buyer, cộng ví seller (phí sàn 20%) |
-| GET | `/deployments/:id/usage` | JWT — lịch sử usage + tổng |
+| GET | `/deployments/:id/usage` | JWT seller — lịch sử usage + tổng |
+
+### Product / Deployment `runtime`
+
+| Field | Ý nghĩa |
+|-------|---------|
+| `serverlessEndpoint` | RunPod serverless URL (`…/runsync`) |
+| `publicEndpoint` | Public RunPod / proxy URL |
+| `tokenizeEndpoint` | Endpoint đếm token (meter) |
+| `gatewayUrl` | Gateway (HTTP/WSS) |
+| `env` | Mảng `{key,value}` hoặc chuỗi `.env` khi tạo |
+| `skills` | Skill packs gắn runtime |
+| `baseModel` / `systemPrompt` / `temperature` / `maxTokens` | Inference defaults |

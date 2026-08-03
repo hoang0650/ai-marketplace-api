@@ -4,6 +4,7 @@ const { authenticate, requireRoles } = require('../middleware/auth');
 const { mapProduct } = require('../utils/mappers');
 const { slugify } = require('../utils/serialize');
 const { cached, deleteCachePattern } = require('../utils/cache');
+const { normalizeRuntime } = require('../utils/runtime');
 
 const router = express.Router();
 
@@ -103,6 +104,9 @@ router.post('/', authenticate, requireRoles('creator', 'admin'), async (req, res
       coverUrl: body.coverUrl || '',
       gallery: Array.isArray(body.gallery) ? body.gallery : [],
       pricing: body.pricing,
+      runtime: normalizeRuntime(body.runtime || {}, {
+        defaults: { baseModel: name },
+      }),
       tags: Array.isArray(body.tags) ? body.tags : [],
       apiDocsMarkdown: body.apiDocsMarkdown || '',
       changelog: Array.isArray(body.changelog) ? body.changelog : [],
@@ -111,7 +115,7 @@ router.post('/', authenticate, requireRoles('creator', 'admin'), async (req, res
     });
 
     invalidateProductCaches();
-    res.status(201).json(mapProduct(product));
+    res.status(201).json(mapProduct(product, { includeSecrets: true }));
   } catch (err) {
     next(err);
   }
@@ -145,10 +149,15 @@ router.put('/:id', authenticate, requireRoles('creator', 'admin'), async (req, r
     for (const key of fields) {
       if (body[key] !== undefined) product[key] = body[key];
     }
+    if (body.runtime !== undefined) {
+      product.runtime = normalizeRuntime(body.runtime, {
+        defaults: product.runtime?.toObject?.() || product.runtime || {},
+      });
+    }
     if (body.slug) product.slug = slugify(body.slug) || product.slug;
     await product.save();
     invalidateProductCaches();
-    res.json(mapProduct(product));
+    res.json(mapProduct(product, { includeSecrets: true }));
   } catch (err) {
     next(err);
   }

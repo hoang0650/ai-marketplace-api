@@ -1,4 +1,6 @@
-function mapProduct(doc) {
+const { publicRuntime } = require('./runtime');
+
+function mapProduct(doc, { includeSecrets = false } = {}) {
   if (!doc) return null;
   const o = typeof doc.toObject === 'function' ? doc.toObject({ virtuals: true }) : { ...doc };
   return {
@@ -14,6 +16,7 @@ function mapProduct(doc) {
     coverUrl: o.coverUrl || '',
     gallery: o.gallery || [],
     pricing: o.pricing,
+    runtime: publicRuntime(o.runtime, { includeSecrets }),
     rating: o.rating || 0,
     reviewCount: o.reviewCount || 0,
     installCount: o.installCount || 0,

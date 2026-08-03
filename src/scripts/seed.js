@@ -16,6 +16,8 @@ const Order = require('../models/Order');
 const WalletTx = require('../models/WalletTx');
 const Notification = require('../models/Notification');
 const UsageStat = require('../models/UsageStat');
+const Deployment = require('../models/Deployment');
+const UsageEvent = require('../models/UsageEvent');
 
 const MOCK_PATH = path.resolve(
   __dirname,
@@ -38,6 +40,8 @@ async function seed() {
     WalletTx.deleteMany({}),
     Notification.deleteMany({}),
     UsageStat.deleteMany({}),
+    Deployment.deleteMany({}),
+    UsageEvent.deleteMany({}),
   ]);
 
   const passwordHash = await bcrypt.hash('password', 10);
@@ -83,6 +87,7 @@ async function seed() {
       console.warn('[seed] skip product without creator', p.slug);
       continue;
     }
+    const slugSafe = String(p.slug || 'model').replace(/[^a-z0-9-]/gi, '-');
     const product = await Product.create({
       slug: p.slug,
       name: p.name,
@@ -95,6 +100,21 @@ async function seed() {
       coverUrl: p.coverUrl,
       gallery: p.gallery || [],
       pricing: p.pricing,
+      runtime: {
+        serverlessEndpoint: `https://api.runpod.ai/v2/${slugSafe}/runsync`,
+        publicEndpoint: `https://${slugSafe}.proxy.runpod.net/v1`,
+        tokenizeEndpoint: `https://${slugSafe}.proxy.runpod.net/tokenize`,
+        gatewayUrl: p.category === 'hire-agent' ? `wss://gateway.phaimarket.com/${slugSafe}` : '',
+        env: [
+          { key: 'RUNPOD_API_KEY', value: 'seed-replace-me' },
+          { key: 'MODEL_ID', value: p.name },
+        ],
+        skills: (p.tags || []).slice(0, 4),
+        baseModel: p.name,
+        systemPrompt: p.tagline || '',
+        temperature: 0.7,
+        maxTokens: 1024,
+      },
       rating: p.rating || 0,
       reviewCount: p.reviewCount || 0,
       installCount: p.installCount || 0,

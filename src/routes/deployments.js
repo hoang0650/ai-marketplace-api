@@ -5,11 +5,12 @@ const UsageEvent = require('../models/UsageEvent');
 const Product = require('../models/Product');
 const WalletTx = require('../models/WalletTx');
 const UsageStat = require('../models/UsageStat');
-const Notification = require('../models/Notification');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, requireRoles } = require('../middleware/auth');
 const { PLATFORM_FEE_RATE } = require('../utils/platform');
 const { getBalance } = require('../utils/wallet');
 const { slugify } = require('../utils/serialize');
+const { normalizeRuntime, publicRuntime, mergeRuntime } = require('../utils/runtime');
+const { deleteCachePattern } = require('../utils/cache');
 
 const router = express.Router();
 
@@ -23,7 +24,6 @@ const MODEL_CATEGORIES = [
   'fine-tune',
 ];
 const AGENT_CATEGORIES = ['hire-agent', 'hire-workflow', 'skill-pack'];
-const RUN_BASE = process.env.RUN_BASE_URL || 'https://run.phaimarket.com/v1';
 
 function kindForCategory(category) {
   if (MODEL_CATEGORIES.includes(category)) return 'model';
@@ -31,20 +31,19 @@ function kindForCategory(category) {
   return null;
 }
 
-/** ~4 chars per token — used when the caller doesn't report exact token counts. */
 function estimateTokens(text) {
   const s = String(text || '');
   return s.length === 0 ? 0 : Math.max(1, Math.ceil(s.length / 4));
 }
 
-/** USD cost for a usage-priced product: usageRate is per 1K tokens. */
 function computeCost(product, totalTokens) {
   if (product.pricing?.model !== 'usage') return 0;
   const rate = Number(product.pricing.usageRate) || 0;
-  return Math.round(((totalTokens / 1000) * rate) * 1e6) / 1e6;
+  return Math.round((totalTokens / 1000) * rate * 1e6) / 1e6;
 }
 
 function toPublic(dep, { includeSecrets = false } = {}) {
+  const runtime = publicRuntime(dep.runtime, { includeSecrets });
   return {
     id: dep._id.toString(),
     name: dep.name,
@@ -52,17 +51,21 @@ function toPublic(dep, { includeSecrets = false } = {}) {
     kind: dep.kind,
     status: dep.status,
     visibility: dep.visibility,
+    productId: dep.product ? String(dep.product._id || dep.product) : undefined,
     productSlug: dep.productSlug,
     productName: dep.productName,
     ownerName: dep.ownerName || undefined,
+    /** Primary public URL buyers hit (RunPod public or serverless). */
+    endpoint: runtime.publicEndpoint || runtime.serverlessEndpoint || '',
+    runtime,
+    /** Legacy alias used by older FE — same as runtime without secrets. */
     config: {
-      baseModel: dep.config?.baseModel || '',
-      systemPrompt: dep.config?.systemPrompt || '',
-      temperature: dep.config?.temperature ?? 0.7,
-      maxTokens: dep.config?.maxTokens ?? 1024,
-      tools: dep.config?.tools || [],
+      baseModel: runtime.baseModel,
+      systemPrompt: runtime.systemPrompt,
+      temperature: runtime.temperature,
+      maxTokens: runtime.maxTokens,
+      tools: runtime.skills,
     },
-    endpoint: dep.endpoint,
     ...(includeSecrets ? { apiKey: dep.apiKey } : {}),
     totals: {
       requests: dep.totals?.requests || 0,
@@ -71,6 +74,7 @@ function toPublic(dep, { includeSecrets = false } = {}) {
       cost: Math.round((dep.totals?.cost || 0) * 100) / 100,
     },
     createdAt: dep.createdAt ? new Date(dep.createdAt).toISOString() : undefined,
+    updatedAt: dep.updatedAt ? new Date(dep.updatedAt).toISOString() : undefined,
   };
 }
 
@@ -87,12 +91,22 @@ async function findOwnedDeployment(req, res) {
   return dep;
 }
 
-/** Deploy a product (model or agent) with a user-supplied configuration. */
-router.post('/', authenticate, async (req, res, next) => {
+/**
+ * Seller deploys their own product with RunPod / gateway runtime.
+ * Only the product creator (or admin) may create a deployment.
+ */
+router.post('/', authenticate, requireRoles('creator', 'admin'), async (req, res, next) => {
   try {
     const body = req.body || {};
-    const product = await Product.findById(body.productId).lean();
+    const product = await Product.findById(body.productId);
     if (!product) return res.status(404).json({ message: 'Product not found' });
+
+    if (
+      req.user.role !== 'admin' &&
+      String(product.creator) !== String(req.user._id)
+    ) {
+      return res.status(403).json({ message: 'Only the product seller can deploy this product' });
+    }
 
     const kind = kindForCategory(product.category);
     if (!kind) {
@@ -100,9 +114,22 @@ router.post('/', authenticate, async (req, res, next) => {
     }
 
     const name = String(body.name || product.name).trim().slice(0, 120);
-    let slug = `${slugify(name)}-${crypto.randomBytes(3).toString('hex')}`;
+    const slug = `${slugify(name)}-${crypto.randomBytes(3).toString('hex')}`;
 
-    const cfg = body.config || {};
+    // Start from product.runtime defaults, then apply seller overrides from body.runtime / body.config.
+    const runtime = normalizeRuntime(body.runtime || body.config || {}, {
+      defaults: {
+        ...product.runtime?.toObject?.() || product.runtime || {},
+        baseModel: product.runtime?.baseModel || product.name,
+      },
+    });
+
+    if (!runtime.serverlessEndpoint && !runtime.publicEndpoint) {
+      return res.status(400).json({
+        message: 'serverlessEndpoint or publicEndpoint (RunPod) is required',
+      });
+    }
+
     const deployment = await Deployment.create({
       owner: req.user._id,
       product: product._id,
@@ -112,18 +139,18 @@ router.post('/', authenticate, async (req, res, next) => {
       kind,
       name,
       slug,
-      status: 'running', // provisioning is instant in the simulated runtime
+      status: 'running',
       visibility: body.visibility === 'public' ? 'public' : 'private',
-      config: {
-        baseModel: String(cfg.baseModel || product.name).slice(0, 200),
-        systemPrompt: String(cfg.systemPrompt || '').slice(0, 4000),
-        temperature: Math.min(Math.max(Number(cfg.temperature) || 0.7, 0), 2),
-        maxTokens: Math.min(Math.max(Number(cfg.maxTokens) || 1024, 1), 32768),
-        tools: Array.isArray(cfg.tools) ? cfg.tools.slice(0, 20).map(String) : [],
-      },
+      runtime,
       apiKey: `pk_${crypto.randomBytes(24).toString('hex')}`,
-      endpoint: `${RUN_BASE}/${slug}`,
     });
+
+    // Keep catalog product runtime in sync when seller deploys (source of truth for listing).
+    if (body.syncProduct !== false) {
+      product.runtime = runtime;
+      await product.save();
+      deleteCachePattern('products:*').catch(() => {});
+    }
 
     res.status(201).json(toPublic(deployment, { includeSecrets: true }));
   } catch (err) {
@@ -131,17 +158,21 @@ router.post('/', authenticate, async (req, res, next) => {
   }
 });
 
-/** My deployments (secrets included — owner only). */
-router.get('/mine', authenticate, async (req, res, next) => {
+/** Seller's deployments (secrets included). */
+router.get('/mine', authenticate, requireRoles('creator', 'admin'), async (req, res, next) => {
   try {
-    const rows = await Deployment.find({ owner: req.user._id }).sort({ createdAt: -1 }).lean();
+    const filter =
+      req.user.role === 'admin' && req.query.all === '1'
+        ? {}
+        : { owner: req.user._id };
+    const rows = await Deployment.find(filter).sort({ createdAt: -1 }).lean();
     res.json(rows.map((d) => toPublic({ ...d, _id: d._id }, { includeSecrets: true })));
   } catch (err) {
     next(err);
   }
 });
 
-/** Public Agent Browser — running, publicly published deployments. */
+/** Public Agent Browser. */
 router.get('/browser', async (_req, res, next) => {
   try {
     const rows = await Deployment.find({ visibility: 'public', status: 'running' })
@@ -159,8 +190,11 @@ router.get('/browser', async (_req, res, next) => {
   }
 });
 
-/** Update config / rename / start / stop / publish / unpublish. */
-router.patch('/:id', authenticate, async (req, res, next) => {
+/**
+ * Seller updates runtime: RunPod serverless, tokenize, gateway, public endpoint, .env, skills.
+ * Optionally syncs back to Product.runtime.
+ */
+router.patch('/:id', authenticate, requireRoles('creator', 'admin'), async (req, res, next) => {
   try {
     const dep = await findOwnedDeployment(req, res);
     if (!dep) return;
@@ -171,26 +205,35 @@ router.patch('/:id', authenticate, async (req, res, next) => {
     if (body.visibility && ['private', 'public'].includes(body.visibility)) {
       dep.visibility = body.visibility;
     }
-    if (body.config && typeof body.config === 'object') {
-      const cfg = body.config;
-      if (cfg.baseModel !== undefined) dep.config.baseModel = String(cfg.baseModel).slice(0, 200);
-      if (cfg.systemPrompt !== undefined) dep.config.systemPrompt = String(cfg.systemPrompt).slice(0, 4000);
-      if (cfg.temperature !== undefined) {
-        dep.config.temperature = Math.min(Math.max(Number(cfg.temperature) || 0, 0), 2);
+
+    const runtimePatch = body.runtime || body.config;
+    if (runtimePatch && typeof runtimePatch === 'object') {
+      dep.runtime = mergeRuntime(dep.runtime?.toObject?.() || dep.runtime, runtimePatch);
+      if (!dep.runtime.serverlessEndpoint && !dep.runtime.publicEndpoint) {
+        return res.status(400).json({
+          message: 'serverlessEndpoint or publicEndpoint (RunPod) is required',
+        });
       }
-      if (cfg.maxTokens !== undefined) {
-        dep.config.maxTokens = Math.min(Math.max(Number(cfg.maxTokens) || 1024, 1), 32768);
-      }
-      if (Array.isArray(cfg.tools)) dep.config.tools = cfg.tools.slice(0, 20).map(String);
     }
+
     await dep.save();
+
+    if (body.syncProduct) {
+      const product = await Product.findById(dep.product);
+      if (product && (req.user.role === 'admin' || String(product.creator) === String(req.user._id))) {
+        product.runtime = normalizeRuntime(dep.runtime);
+        await product.save();
+        deleteCachePattern('products:*').catch(() => {});
+      }
+    }
+
     res.json(toPublic(dep, { includeSecrets: true }));
   } catch (err) {
     next(err);
   }
 });
 
-router.delete('/:id', authenticate, async (req, res, next) => {
+router.delete('/:id', authenticate, requireRoles('creator', 'admin'), async (req, res, next) => {
   try {
     const dep = await findOwnedDeployment(req, res);
     if (!dep) return;
@@ -202,15 +245,8 @@ router.delete('/:id', authenticate, async (req, res, next) => {
 });
 
 /**
- * Metered invocation — the billing heart of the marketplace.
- *
- * Tokens: taken from the caller when reported (inputTokens/outputTokens),
- * otherwise estimated from input/output text (~4 chars per token).
- * Billing (usage-priced products only):
- *   cost      = tokens/1000 × pricing.usageRate  → debited from buyer wallet
- *   sellerNet = cost − 20% platform fee          → credited to creator wallet
- * Every invocation is recorded as a UsageEvent (audit trail) and rolled up
- * into UsageStat (creator dashboard) + deployment totals.
+ * Metered invoke — buyers (or seller self-test) call through the marketplace.
+ * Tokens: client-reported → else estimate. Billing uses product usageRate / 1K tokens.
  */
 router.post('/:id/invoke', authenticate, async (req, res, next) => {
   try {
@@ -219,7 +255,6 @@ router.post('/:id/invoke', authenticate, async (req, res, next) => {
     if (dep.status !== 'running') {
       return res.status(409).json({ message: 'Deployment is not running' });
     }
-    // Private deployments are callable only by their owner (or admin).
     if (
       dep.visibility !== 'public' &&
       req.user.role !== 'admin' &&
@@ -229,12 +264,13 @@ router.post('/:id/invoke', authenticate, async (req, res, next) => {
     }
 
     const body = req.body || {};
+    const maxTok = dep.runtime?.maxTokens || 1024;
     const inputTokens = Number.isFinite(Number(body.inputTokens))
       ? Math.max(0, Math.floor(Number(body.inputTokens)))
       : estimateTokens(body.input);
     const outputTokens = Number.isFinite(Number(body.outputTokens))
       ? Math.max(0, Math.floor(Number(body.outputTokens)))
-      : Math.min(dep.config.maxTokens, Math.max(estimateTokens(body.input) * 2, 16));
+      : Math.min(maxTok, Math.max(estimateTokens(body.input) * 2, 16));
     const totalTokens = inputTokens + outputTokens;
     if (totalTokens > 1_000_000) {
       return res.status(400).json({ message: 'Token count too large for a single invocation' });
@@ -259,7 +295,6 @@ router.post('/:id/invoke', authenticate, async (req, res, next) => {
           message: `Insufficient wallet balance (need ${cost.toFixed(4)}, have ${balance.toFixed(4)}). Please top up.`,
         });
       }
-      // Same 20% take-rate as splitRevenue, but with micro-amount precision.
       platformFee = Math.round(cost * PLATFORM_FEE_RATE * 1e6) / 1e6;
       sellerNet = Math.round((cost - platformFee) * 1e6) / 1e6;
       charged = cost;
@@ -292,7 +327,6 @@ router.post('/:id/invoke', authenticate, async (req, res, next) => {
       sellerNet,
     });
 
-    // Roll up into creator daily stats (dashboard) + deployment totals.
     const day = new Date().toISOString().slice(0, 10);
     await UsageStat.updateOne(
       { creator: sellerId, date: day },
@@ -311,6 +345,7 @@ router.post('/:id/invoke', authenticate, async (req, res, next) => {
       }
     );
 
+    const rt = publicRuntime(dep.runtime);
     res.status(201).json({
       ok: true,
       eventId: event._id.toString(),
@@ -321,17 +356,19 @@ router.post('/:id/invoke', authenticate, async (req, res, next) => {
       sellerNet,
       platformFee,
       currency: 'USD',
+      endpoint: rt.publicEndpoint || rt.serverlessEndpoint || '',
+      tokenizeEndpoint: rt.tokenizeEndpoint || '',
+      gatewayUrl: rt.gatewayUrl || '',
       output:
         body.output ||
-        `[${dep.config.baseModel || dep.productName}] simulated completion (${outputTokens} tokens)`,
+        `[${rt.baseModel || dep.productName}] completion via ${rt.publicEndpoint || rt.serverlessEndpoint || 'runtime'} (${outputTokens} tokens)`,
     });
   } catch (err) {
     next(err);
   }
 });
 
-/** Usage history + totals for one deployment (owner only). */
-router.get('/:id/usage', authenticate, async (req, res, next) => {
+router.get('/:id/usage', authenticate, requireRoles('creator', 'admin'), async (req, res, next) => {
   try {
     const dep = await findOwnedDeployment(req, res);
     if (!dep) return;

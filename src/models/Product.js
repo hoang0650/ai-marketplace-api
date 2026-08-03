@@ -22,6 +22,31 @@ const changelogSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const envVarSchema = new mongoose.Schema(
+  {
+    key: { type: String, required: true, trim: true, maxlength: 128 },
+    value: { type: String, default: '', maxlength: 4000 },
+  },
+  { _id: false }
+);
+
+/** Seller RunPod / gateway runtime attached to the catalog product. */
+const runtimeSchema = new mongoose.Schema(
+  {
+    serverlessEndpoint: { type: String, default: '', trim: true, maxlength: 500 },
+    tokenizeEndpoint: { type: String, default: '', trim: true, maxlength: 500 },
+    gatewayUrl: { type: String, default: '', trim: true, maxlength: 500 },
+    publicEndpoint: { type: String, default: '', trim: true, maxlength: 500 },
+    env: { type: [envVarSchema], default: [] },
+    skills: { type: [String], default: [] },
+    baseModel: { type: String, default: '', trim: true, maxlength: 200 },
+    systemPrompt: { type: String, default: '', maxlength: 4000 },
+    temperature: { type: Number, default: 0.7, min: 0, max: 2 },
+    maxTokens: { type: Number, default: 1024, min: 1, max: 32768 },
+  },
+  { _id: false }
+);
+
 const productSchema = new mongoose.Schema(
   {
     slug: { type: String, required: true, unique: true, trim: true, lowercase: true },
@@ -35,6 +60,7 @@ const productSchema = new mongoose.Schema(
     coverUrl: { type: String, default: '' },
     gallery: { type: [String], default: [] },
     pricing: { type: pricingSchema, required: true },
+    runtime: { type: runtimeSchema, default: () => ({}) },
     rating: { type: Number, default: 0 },
     reviewCount: { type: Number, default: 0 },
     installCount: { type: Number, default: 0 },
