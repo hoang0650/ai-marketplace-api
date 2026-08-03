@@ -25,6 +25,7 @@ const affiliateRoutes = require('./routes/affiliate');
 const billingRoutes = require('./routes/billing');
 const adminRoutes = require('./routes/admin');
 const openclawRoutes = require('./routes/openclaw');
+const deploymentRoutes = require('./routes/deployments');
 
 function createApp() {
   const app = express();
@@ -120,6 +121,7 @@ function createApp() {
   app.use('/api/billing', billingRoutes);
   app.use('/api/admin', adminRoutes);
   app.use('/api/openclaw', openclawRoutes);
+  app.use('/api/deployments', deploymentRoutes);
 
   app.use(notFound);
   app.use(errorHandler);
