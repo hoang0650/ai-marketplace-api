@@ -1,0 +1,79 @@
+const express = require('express');
+const bcrypt = require('bcryptjs');
+const User = require('../models/User');
+const { signToken, publicUser, authenticate } = require('../middleware/auth');
+const { slugify } = require('../utils/serialize');
+
+const router = express.Router();
+
+router.post('/register', async (req, res, next) => {
+  try {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const name = String(req.body?.name || '').trim();
+    const password = String(req.body?.password || '');
+    const asCreator = !!req.body?.asCreator;
+
+    const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && email.length <= 254;
+    if (!emailOk) {
+      return res.status(400).json({ message: 'Invalid email address' });
+    }
+    if (!name || name.length > 120) {
+      return res.status(400).json({ message: 'Name is required (max 120 characters)' });
+    }
+    if (password.length < 8 || password.length > 128) {
+      return res.status(400).json({ message: 'Password must be 8-128 characters' });
+    }
+
+    const exists = await User.findOne({ email });
+    if (exists) {
+      return res.status(409).json({ message: 'Email already registered' });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12);
+    let creatorSlug;
+    if (asCreator) {
+      creatorSlug = slugify(name) || `creator-${Date.now()}`;
+      const clash = await User.findOne({ creatorSlug });
+      if (clash) creatorSlug = `${creatorSlug}-${Date.now().toString(36)}`;
+    }
+
+    const user = await User.create({
+      email,
+      name,
+      passwordHash,
+      role: asCreator ? 'creator' : 'buyer',
+      creatorSlug,
+      avatarUrl: `https://api.dicebear.com/9.x/shapes/svg?seed=${encodeURIComponent(email)}`,
+      affiliateCode: `PHAI-${slugify(name).slice(0, 8).toUpperCase() || 'USER'}`,
+    });
+
+    const token = signToken(user);
+    return res.status(201).json({ token, user: publicUser(user) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/login', async (req, res, next) => {
+  try {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const password = String(req.body?.password || '');
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(401).json({ message: 'Invalid credentials' });
+    }
+    const ok = await bcrypt.compare(password, user.passwordHash);
+    if (!ok) {
+      return res.status(401).json({ message: 'Invalid credentials' });
+    }
+    return res.json({ token: signToken(user), user: publicUser(user) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/me', authenticate, (req, res) => {
+  res.json(publicUser(req.user));
+});
+
+module.exports = router;
