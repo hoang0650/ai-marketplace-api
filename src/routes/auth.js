@@ -82,4 +82,34 @@ router.get('/me', authenticate, (req, res) => {
   res.json(publicUser(req.user));
 });
 
+router.patch('/me', authenticate, async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(401).json({ message: 'Unauthorized' });
+
+    if (req.body?.name !== undefined) {
+      const name = String(req.body.name || '').trim();
+      if (!name || name.length > 120) {
+        return res.status(400).json({ message: 'Name is required (max 120 characters)' });
+      }
+      user.name = name;
+    }
+    if (req.body?.bio !== undefined) {
+      user.bio = String(req.body.bio || '').slice(0, 2000);
+    }
+    if (req.body?.avatarUrl !== undefined) {
+      user.avatarUrl = String(req.body.avatarUrl || '').slice(0, 2000);
+    }
+    if (req.body?.coverUrl !== undefined) {
+      user.coverUrl = String(req.body.coverUrl || '').slice(0, 2000);
+    }
+
+    await user.save();
+    deleteCachePattern('creators:*').catch(() => {});
+    return res.json(publicUser(user));
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;

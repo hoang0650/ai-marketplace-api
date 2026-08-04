@@ -18,6 +18,7 @@ function publicUser(user) {
     email: u.email,
     name: u.name,
     avatarUrl: u.avatarUrl || undefined,
+    coverUrl: u.coverUrl || undefined,
     role: u.role,
     creatorSlug: u.creatorSlug || undefined,
     bio: u.bio || undefined,
