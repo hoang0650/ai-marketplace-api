@@ -26,6 +26,9 @@ const billingRoutes = require('./routes/billing');
 const adminRoutes = require('./routes/admin');
 const openclawRoutes = require('./routes/openclaw');
 const deploymentRoutes = require('./routes/deployments');
+const runpodRoutes = require('./routes/runpod');
+const playgroundRoutes = require('./routes/playground');
+const agentsRoutes = require('./routes/agents');
 
 function createApp() {
   const app = express();
@@ -99,6 +102,9 @@ function createApp() {
   app.use('/api/auth/login', authLimiter);
   app.use('/api/auth/register', authLimiter);
 
+  // Static RunPod Public Endpoints catalog (docs) — no DB required.
+  app.use('/api/runpod', runpodRoutes);
+
   app.use('/api', (req, res, next) => {
     if (isDbReady()) return next();
     return res.status(503).json({
@@ -122,6 +128,8 @@ function createApp() {
   app.use('/api/admin', adminRoutes);
   app.use('/api/openclaw', openclawRoutes);
   app.use('/api/deployments', deploymentRoutes);
+  app.use('/api/playground', playgroundRoutes);
+  app.use('/api/agents', agentsRoutes);
 
   app.use(notFound);
   app.use(errorHandler);

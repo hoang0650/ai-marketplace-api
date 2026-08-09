@@ -41,6 +41,15 @@ const config = {
   },
   // Behind a reverse proxy (Render/Vercel/NGINX) set TRUST_PROXY=1
   trustProxy: process.env.TRUST_PROXY === '1' || isProduction,
+  /** AI router (denglish-api) — not the same process as this platform API */
+  denglishApiUrl: (process.env.DENGLISH_API_URL || 'http://127.0.0.1:8000').trim(),
+  denglishServiceKey: (process.env.DENGLISH_SERVICE_KEY || '').trim(),
+  denglishTimeoutMs: Number(process.env.DENGLISH_TIMEOUT_MS || 180_000),
+  /** Dev fallback when denglish-api is down (default on outside production) */
+  denglishSandbox:
+    process.env.DENGLISH_SANDBOX === '1' ||
+    process.env.DENGLISH_SANDBOX === 'true' ||
+    (!isProduction && process.env.DENGLISH_SANDBOX !== '0'),
 };
 
 module.exports = config;

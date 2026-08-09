@@ -22,8 +22,8 @@ function escapeRegExp(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-const DEFAULT_LIMIT = 100;
-const MAX_LIMIT = 200;
+const DEFAULT_LIMIT = 200;
+const MAX_LIMIT = 500;
 
 router.get('/', async (req, res, next) => {
   try {

@@ -1,12 +1,12 @@
 const mongoose = require('mongoose');
 
 /**
- * One metered invocation of a deployment. This is the billing source of truth:
- * cost = buyer charge, sellerNet = creator payout, platformFee = take rate.
+ * One metered invocation (deployment invoke or playground run).
+ * Billing source of truth: cost / sellerNet / platformFee.
  */
 const usageEventSchema = new mongoose.Schema(
   {
-    deployment: { type: mongoose.Schema.Types.ObjectId, ref: 'Deployment', required: true },
+    deployment: { type: mongoose.Schema.Types.ObjectId, ref: 'Deployment', default: null },
     product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
     buyer: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     seller: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
@@ -17,11 +17,19 @@ const usageEventSchema = new mongoose.Schema(
     platformFee: { type: Number, required: true, min: 0 },
     sellerNet: { type: Number, required: true, min: 0 },
     currency: { type: String, default: 'USD' },
+    /** AI router provider id */
+    provider: { type: String, default: '', trim: true },
+    /** tokens | seconds | images | requests */
+    unit: { type: String, default: 'tokens' },
+    quantity: { type: Number, default: 0, min: 0 },
+    rawUsage: { type: mongoose.Schema.Types.Mixed, default: null },
+    source: { type: String, enum: ['deployment', 'playground', 'api'], default: 'deployment' },
   },
   { timestamps: { createdAt: true, updatedAt: false } }
 );
 
 usageEventSchema.index({ deployment: 1, createdAt: -1 });
+usageEventSchema.index({ product: 1, createdAt: -1 });
 usageEventSchema.index({ buyer: 1, createdAt: -1 });
 usageEventSchema.index({ seller: 1, createdAt: -1 });
 

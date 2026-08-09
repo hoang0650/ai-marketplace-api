@@ -1,7 +1,10 @@
 /**
- * Shared RunPod-style runtime shape for Product (catalog defaults)
+ * Shared runtime shape for Product (catalog defaults)
  * and Deployment (seller live instance).
+ * Buyer-facing URLs are white-labeled via gateway-urls (api/ai.aimarkets.vn).
  */
+const { maskRuntimeForPublic, isProviderUrl, withUpstreamEnv, extractProviderEndpointId } = require('./gateway-urls');
+
 function normalizeEnv(raw) {
   if (!raw) return [];
   if (typeof raw === 'string') {
@@ -60,14 +63,24 @@ function normalizeRuntime(raw = {}, { defaults = {} } = {}) {
   };
 }
 
-/** Public view — never leak .env secrets. */
-function publicRuntime(runtime, { includeSecrets = false } = {}) {
+/**
+ * Public view — never leak .env secrets or upstream provider hosts.
+ * @param {{ includeSecrets?: boolean, maskProviderUrls?: boolean, modelId?: string }} opts
+ *   includeSecrets: seller/admin edit — may include env; still masks URLs unless maskProviderUrls=false
+ *   maskProviderUrls: default true for all client responses
+ */
+function publicRuntime(runtime, { includeSecrets = false, maskProviderUrls = true, modelId } = {}) {
   const r = runtime || {};
+  const urls = maskProviderUrls
+    ? maskRuntimeForPublic(r, { modelId })
+    : {
+        serverlessEndpoint: r.serverlessEndpoint || '',
+        tokenizeEndpoint: r.tokenizeEndpoint || '',
+        gatewayUrl: r.gatewayUrl || '',
+        publicEndpoint: r.publicEndpoint || '',
+      };
   return {
-    serverlessEndpoint: r.serverlessEndpoint || '',
-    tokenizeEndpoint: r.tokenizeEndpoint || '',
-    gatewayUrl: r.gatewayUrl || '',
-    publicEndpoint: r.publicEndpoint || '',
+    ...urls,
     skills: r.skills || [],
     baseModel: r.baseModel || '',
     systemPrompt: r.systemPrompt || '',
@@ -77,6 +90,43 @@ function publicRuntime(runtime, { includeSecrets = false } = {}) {
       ? { env: r.env || [] }
       : { envKeys: (r.env || []).map((e) => e.key).filter(Boolean) }),
   };
+}
+
+/**
+ * When seller saves aimarkets.* public URLs but pasted/catalog had provider URLs,
+ * preserve upstream in env so playground/agent routing still works.
+ */
+function normalizeRuntimeForStorage(raw = {}, { defaults = {} } = {}) {
+  const next = normalizeRuntime(raw, { defaults });
+  const prev = normalizeRuntime(defaults);
+  let env = next.env;
+
+  const prevSync = prev.publicEndpoint;
+  const prevRun = prev.serverlessEndpoint;
+  if (isProviderUrl(prevSync) || isProviderUrl(prevRun)) {
+    env = withUpstreamEnv(env, {
+      runsync: isProviderUrl(prevSync) ? prevSync : undefined,
+      run: isProviderUrl(prevRun) ? prevRun : undefined,
+      gateway: isProviderUrl(prev.gatewayUrl) ? prev.gatewayUrl : undefined,
+      endpointId: extractProviderEndpointId(prevSync || prevRun),
+      provider: 'runpod_public',
+    });
+  }
+  if (isProviderUrl(next.publicEndpoint) || isProviderUrl(next.serverlessEndpoint)) {
+    env = withUpstreamEnv(env, {
+      runsync: isProviderUrl(next.publicEndpoint) ? next.publicEndpoint : undefined,
+      run: isProviderUrl(next.serverlessEndpoint) ? next.serverlessEndpoint : undefined,
+      gateway: isProviderUrl(next.gatewayUrl) ? next.gatewayUrl : undefined,
+      endpointId: extractProviderEndpointId(next.publicEndpoint || next.serverlessEndpoint),
+      provider: 'runpod_public',
+    });
+    const masked = maskRuntimeForPublic(next, {
+      modelId: extractProviderEndpointId(next.publicEndpoint || next.serverlessEndpoint) || next.baseModel,
+    });
+    Object.assign(next, masked);
+  }
+  next.env = env;
+  return next;
 }
 
 /** Merge patch into existing runtime (partial update). */
@@ -103,6 +153,7 @@ function mergeRuntime(existing, patch) {
 
 module.exports = {
   normalizeRuntime,
+  normalizeRuntimeForStorage,
   publicRuntime,
   mergeRuntime,
   normalizeEnv,

@@ -45,7 +45,15 @@ function bindListeners() {
 }
 
 function connectDb() {
-  if (isConnecting || mongoose.connection.readyState === 1) return;
+  if (mongoose.connection.readyState === 1) {
+    return Promise.resolve(mongoose.connection);
+  }
+  if (isConnecting) {
+    return new Promise((resolve, reject) => {
+      mongoose.connection.once('connected', () => resolve(mongoose.connection));
+      mongoose.connection.once('error', reject);
+    });
+  }
   isConnecting = true;
 
   try {
@@ -55,11 +63,13 @@ function connectDb() {
 
   bindListeners();
 
-  mongoose
+  return mongoose
     .connect(config.mongoUri, mongoOptions)
+    .then((conn) => conn)
     .catch((err) => {
       console.error('[db] Mongoose connection error:', err);
       scheduleReconnect('Retrying MongoDB connection...');
+      throw err;
     })
     .finally(() => {
       isConnecting = false;

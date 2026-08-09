@@ -18,6 +18,12 @@ const Notification = require('../models/Notification');
 const UsageStat = require('../models/UsageStat');
 const Deployment = require('../models/Deployment');
 const UsageEvent = require('../models/UsageEvent');
+const {
+  CREATOR: RUNPOD_CREATOR,
+  buildRunpodMarketplaceProducts,
+  buildRunpodUser,
+  buildRunpodCreator,
+} = require('../data/runpod-marketplace-products');
 
 const MOCK_PATH = path.resolve(
   __dirname,
@@ -29,8 +35,24 @@ async function seed() {
     throw new Error(`Mock file not found: ${MOCK_PATH}`);
   }
   const mock = JSON.parse(fs.readFileSync(MOCK_PATH, 'utf8'));
+  // Attach official RunPod Public Endpoints as marketplace listings.
+  const runpodUser = buildRunpodUser();
+  const runpodCreator = buildRunpodCreator();
+  if (!mock.users.some((u) => u.id === runpodUser.id || u.email === runpodUser.email)) {
+    mock.users.push(runpodUser);
+  }
+  if (!mock.creators.some((c) => c.slug === runpodCreator.slug)) {
+    mock.creators.push(runpodCreator);
+  }
+  const runpodProducts = buildRunpodMarketplaceProducts();
+  const existingSlugs = new Set(mock.products.map((p) => p.slug));
+  for (const p of runpodProducts) {
+    if (!existingSlugs.has(p.slug)) mock.products.push(p);
+  }
+
   await mongoose.connect(config.mongoUri);
   console.log('[seed] connected', config.mongoUri);
+  console.log(`[seed] products including RunPod public endpoints: ${mock.products.length}`);
 
   await Promise.all([
     User.deleteMany({}),
@@ -88,6 +110,39 @@ async function seed() {
       continue;
     }
     const slugSafe = String(p.slug || 'model').replace(/[^a-z0-9-]/gi, '-');
+    const runtime = p.runtime
+      ? {
+          serverlessEndpoint: p.runtime.serverlessEndpoint || '',
+          publicEndpoint: p.runtime.publicEndpoint || '',
+          tokenizeEndpoint: p.runtime.tokenizeEndpoint || '',
+          gatewayUrl: p.runtime.gatewayUrl || '',
+          env: Array.isArray(p.runtime.env)
+            ? p.runtime.env
+            : [
+                { key: 'RUNPOD_API_KEY', value: 'seed-replace-me' },
+                { key: 'MODEL_ID', value: p.name },
+              ],
+          skills: Array.isArray(p.runtime.skills) ? p.runtime.skills : (p.tags || []).slice(0, 4),
+          baseModel: p.runtime.baseModel || p.name,
+          systemPrompt: p.runtime.systemPrompt || p.tagline || '',
+          temperature: p.runtime.temperature ?? 0.7,
+          maxTokens: p.runtime.maxTokens ?? 1024,
+        }
+      : {
+          serverlessEndpoint: `https://api.runpod.ai/v2/${slugSafe}/runsync`,
+          publicEndpoint: `https://api.runpod.ai/v2/${slugSafe}/runsync`,
+          tokenizeEndpoint: '',
+          gatewayUrl: p.category === 'hire-agent' ? `wss://gateway.phaimarket.com/${slugSafe}` : '',
+          env: [
+            { key: 'RUNPOD_API_KEY', value: 'seed-replace-me' },
+            { key: 'MODEL_ID', value: p.name },
+          ],
+          skills: (p.tags || []).slice(0, 4),
+          baseModel: p.name,
+          systemPrompt: p.tagline || '',
+          temperature: 0.7,
+          maxTokens: 1024,
+        };
     const product = await Product.create({
       slug: p.slug,
       name: p.name,
@@ -100,21 +155,7 @@ async function seed() {
       coverUrl: p.coverUrl,
       gallery: p.gallery || [],
       pricing: p.pricing,
-      runtime: {
-        serverlessEndpoint: `https://api.runpod.ai/v2/${slugSafe}/runsync`,
-        publicEndpoint: `https://${slugSafe}.proxy.runpod.net/v1`,
-        tokenizeEndpoint: `https://${slugSafe}.proxy.runpod.net/tokenize`,
-        gatewayUrl: p.category === 'hire-agent' ? `wss://gateway.phaimarket.com/${slugSafe}` : '',
-        env: [
-          { key: 'RUNPOD_API_KEY', value: 'seed-replace-me' },
-          { key: 'MODEL_ID', value: p.name },
-        ],
-        skills: (p.tags || []).slice(0, 4),
-        baseModel: p.name,
-        systemPrompt: p.tagline || '',
-        temperature: 0.7,
-        maxTokens: 1024,
-      },
+      runtime,
       rating: p.rating || 0,
       reviewCount: p.reviewCount || 0,
       installCount: p.installCount || 0,
@@ -126,6 +167,10 @@ async function seed() {
     });
     productByMockId.set(p.id, product);
   }
+
+  console.log(
+    `[seed] RunPod Official products: ${[...productByMockId.values()].filter((p) => p.creatorSlug === RUNPOD_CREATOR.creatorSlug).length}`
+  );
 
   for (const r of mock.reviews || []) {
     const product = productByMockId.get(r.productId);

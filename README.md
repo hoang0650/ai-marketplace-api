@@ -77,6 +77,8 @@ useMockApi: false,
 | GET | `/affiliate` | JWT |
 | GET/POST | `/notifications`, `/notifications/read-all` | JWT |
 | POST | `/billing/checkout` | JWT |
+| POST | `/playground/run` | JWT — proxies AI via `denglish-api` (`DENGLISH_API_URL`), records `UsageEvent` + wallet debit |
+| POST | `/agents/chat` | JWT — hire-agent chat with persistent memory (`/v1/agent/turn`), wallet + `UsageEvent` |
 | POST | `/openclaw/ssh/generate` | JWT — temporary SSH desktop→server (60 min) |
 | GET | `/openclaw/ssh/active` | JWT — active SSH session |
 | POST | `/openclaw/ssh/revoke` | JWT — revoke SSH |

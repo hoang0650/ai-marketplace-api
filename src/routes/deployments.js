@@ -9,7 +9,7 @@ const { authenticate, requireRoles } = require('../middleware/auth');
 const { PLATFORM_FEE_RATE } = require('../utils/platform');
 const { getBalance } = require('../utils/wallet');
 const { slugify } = require('../utils/serialize');
-const { normalizeRuntime, publicRuntime, mergeRuntime } = require('../utils/runtime');
+const { normalizeRuntime, normalizeRuntimeForStorage, publicRuntime, mergeRuntime } = require('../utils/runtime');
 const { deleteCachePattern } = require('../utils/cache');
 
 const router = express.Router();
@@ -43,7 +43,11 @@ function computeCost(product, totalTokens) {
 }
 
 function toPublic(dep, { includeSecrets = false } = {}) {
-  const runtime = publicRuntime(dep.runtime, { includeSecrets });
+  const runtime = publicRuntime(dep.runtime, {
+    includeSecrets,
+    maskProviderUrls: true,
+    modelId: dep.productSlug || dep.slug,
+  });
   return {
     id: dep._id.toString(),
     name: dep.name,
@@ -55,7 +59,7 @@ function toPublic(dep, { includeSecrets = false } = {}) {
     productSlug: dep.productSlug,
     productName: dep.productName,
     ownerName: dep.ownerName || undefined,
-    /** Primary public URL buyers hit (RunPod public or serverless). */
+    /** Buyer-facing gateway URL (api.aimarkets.vn). */
     endpoint: runtime.publicEndpoint || runtime.serverlessEndpoint || '',
     runtime,
     /** Legacy alias used by older FE — same as runtime without secrets. */
@@ -117,7 +121,8 @@ router.post('/', authenticate, requireRoles('creator', 'admin'), async (req, res
     const slug = `${slugify(name)}-${crypto.randomBytes(3).toString('hex')}`;
 
     // Start from product.runtime defaults, then apply seller overrides from body.runtime / body.config.
-    const runtime = normalizeRuntime(body.runtime || body.config || {}, {
+    // Provider hosts are folded into UPSTREAM_* env; public fields stay on api.aimarkets.vn.
+    const runtime = normalizeRuntimeForStorage(body.runtime || body.config || {}, {
       defaults: {
         ...product.runtime?.toObject?.() || product.runtime || {},
         baseModel: product.runtime?.baseModel || product.name,
@@ -126,7 +131,7 @@ router.post('/', authenticate, requireRoles('creator', 'admin'), async (req, res
 
     if (!runtime.serverlessEndpoint && !runtime.publicEndpoint) {
       return res.status(400).json({
-        message: 'serverlessEndpoint or publicEndpoint (RunPod) is required',
+        message: 'serverlessEndpoint or publicEndpoint is required',
       });
     }
 
@@ -208,10 +213,13 @@ router.patch('/:id', authenticate, requireRoles('creator', 'admin'), async (req,
 
     const runtimePatch = body.runtime || body.config;
     if (runtimePatch && typeof runtimePatch === 'object') {
-      dep.runtime = mergeRuntime(dep.runtime?.toObject?.() || dep.runtime, runtimePatch);
+      const merged = mergeRuntime(dep.runtime?.toObject?.() || dep.runtime, runtimePatch);
+      dep.runtime = normalizeRuntimeForStorage(merged, {
+        defaults: dep.runtime?.toObject?.() || dep.runtime || {},
+      });
       if (!dep.runtime.serverlessEndpoint && !dep.runtime.publicEndpoint) {
         return res.status(400).json({
-          message: 'serverlessEndpoint or publicEndpoint (RunPod) is required',
+          message: 'serverlessEndpoint or publicEndpoint is required',
         });
       }
     }
@@ -221,7 +229,9 @@ router.patch('/:id', authenticate, requireRoles('creator', 'admin'), async (req,
     if (body.syncProduct) {
       const product = await Product.findById(dep.product);
       if (product && (req.user.role === 'admin' || String(product.creator) === String(req.user._id))) {
-        product.runtime = normalizeRuntime(dep.runtime);
+        product.runtime = normalizeRuntimeForStorage(dep.runtime, {
+          defaults: product.runtime?.toObject?.() || product.runtime || {},
+        });
         await product.save();
         deleteCachePattern('products:*').catch(() => {});
       }
@@ -325,6 +335,10 @@ router.post('/:id/invoke', authenticate, async (req, res, next) => {
       cost: charged,
       platformFee,
       sellerNet,
+      provider: '',
+      unit: 'tokens',
+      quantity: totalTokens,
+      source: 'deployment',
     });
 
     const day = new Date().toISOString().slice(0, 10);

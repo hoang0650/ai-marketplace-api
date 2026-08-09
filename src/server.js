@@ -3,8 +3,11 @@ const config = require('./config/env');
 const { connectDb } = require('./config/db');
 const { closeRedis } = require('./config/redis');
 const { createApp } = require('./app');
+const { ensureRunpodMarketplaceProducts } = require('./utils/ensure-runpod-products');
 
-connectDb();
+connectDb()
+  .then(() => ensureRunpodMarketplaceProducts())
+  .catch((err) => console.error('[runpod] ensure marketplace products failed:', err.message));
 
 const app = createApp();
 const server = app.listen(config.port, () => {
