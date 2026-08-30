@@ -35,7 +35,8 @@ npm run seed
 npm run dev
 ```
 
-API base: `http://localhost:4100/api`  
+API base: `http://localhost:4100/v1`  
+Gateway v2: `http://localhost:4100/v2`  
 Health: `http://localhost:4100/health` · Readiness: `http://localhost:4100/health/ready`
 
 ## Seed accounts (password: `password`)
@@ -54,7 +55,7 @@ Point Angular env to this API and disable mock interceptor:
 
 ```ts
 // environment.ts
-apiUrl: 'http://localhost:4100/api',
+apiUrl: 'http://localhost:4100/v1',
 useMockApi: false,
 ```
 
@@ -89,6 +90,18 @@ useMockApi: false,
 | PATCH/DELETE | `/deployments/:id` | JWT seller — start/stop/publish + cập nhật runtime; `syncProduct: true` để sync về Product |
 | POST | `/deployments/:id/invoke` | JWT — chạy + đo token, trừ ví buyer, cộng ví seller (phí sàn 20%) |
 | GET | `/deployments/:id/usage` | JWT seller — lịch sử usage + tổng |
+| GET/POST | `/servers` | JWT creator — GPU pods (RunPod via denglish-api). Không lộ API key / SSH |
+| POST | `/terminal/sessions` | JWT — tạo web terminal session |
+| WS | `/ws/terminal/:sessionId?access_token=` | JWT — PTY input/output (xterm protocol JSON) |
+| POST | `/game-sessions` | JWT — live game/desktop stream từ pod (host RunPod chỉ nằm trên Node) |
+| GET | `/game-sessions/:id/player` | JWT query token — player HTML; sandbox canvas hoặc iframe noVNC/HLS qua reverse-proxy |
+| ALL | `/game-sessions/:id/proxy/*` | JWT + cookie — HTTP/WS tới public port pod, không lộ IP |
+| GET | `/providers` | — provider registry (capabilities; Python-first, Node fallback) |
+| POST | `/api-keys` | JWT — mint `mk_live_` key (hash only in DB) |
+| POST | `/v1/chat/completions` | JWT or marketplace key — OpenAI-compatible gateway |
+| GET | `/agent-templates` | — generic agent runtime templates |
+| GET/POST | `/training-jobs` | JWT — training jobs via provider adapter |
+| POST | `/edge/infer/:slug` | JWT — inference qua cạnh ProxVN / API bán, trừ ví |
 
 ### Product / Deployment `runtime`
 

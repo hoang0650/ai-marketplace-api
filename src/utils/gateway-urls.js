@@ -7,7 +7,7 @@ const API_GATEWAY = (process.env.AIMARKETS_API_HOST || 'https://api.aimarkets.vn
 const AI_GATEWAY = (process.env.AIMARKETS_AI_HOST || 'https://ai.aimarkets.vn').replace(/\/$/, '');
 
 const PROVIDER_HOST_RE =
-  /(api\.runpod\.ai|proxy\.runpod\.net|api\.featherless\.ai|ai-gateway\.vercel\.sh|openai\.com)/i;
+  /(api\.runpod\.ai|proxy\.runpod\.net|api\.featherless\.ai|openrouter\.ai|ai-gateway\.vercel\.sh|openai\.com)/i;
 
 function isProviderUrl(url) {
   return !!url && PROVIDER_HOST_RE.test(String(url));

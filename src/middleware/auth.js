@@ -2,6 +2,7 @@ const jwt = require('jsonwebtoken');
 const config = require('../config/env');
 const User = require('../models/User');
 const { toClient } = require('../utils/serialize');
+const { liftExpired, effectiveStatus, denyMessage } = require('../utils/moderation');
 
 function signToken(user) {
   return jwt.sign(
@@ -29,14 +30,26 @@ function publicUser(user) {
 async function authenticate(req, res, next) {
   try {
     const header = req.headers.authorization || '';
-    const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+    let token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+    if (!token && req.query?.access_token) {
+      token = String(req.query.access_token).trim();
+    }
     if (!token) {
-      return res.status(401).json({ message: 'Unauthorized' });
+      return res.status(401).json({ message: 'Unauthorized', code: 'UNAUTHORIZED' });
     }
     const payload = jwt.verify(token, config.jwtSecret);
     const user = await User.findById(payload.sub);
     if (!user) {
       return res.status(401).json({ message: 'Unauthorized' });
+    }
+    await liftExpired(user, 'accountStatus');
+    const status = effectiveStatus(user, 'accountStatus');
+    if (status !== 'active') {
+      return res.status(403).json({
+        message: denyMessage(status),
+        code: 'ACCOUNT_' + status.toUpperCase(),
+        suspendedUntil: user.suspendedUntil,
+      });
     }
     req.user = user;
     next();

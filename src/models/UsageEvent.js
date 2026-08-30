@@ -23,7 +23,9 @@ const usageEventSchema = new mongoose.Schema(
     unit: { type: String, default: 'tokens' },
     quantity: { type: Number, default: 0, min: 0 },
     rawUsage: { type: mongoose.Schema.Types.Mixed, default: null },
-    source: { type: String, enum: ['deployment', 'playground', 'api'], default: 'deployment' },
+    source: { type: String, enum: ['deployment', 'playground', 'api', 'gateway', 'training', 'gpu'], default: 'deployment' },
+    usageType: { type: String, default: 'API_REQUEST', index: true },
+    idempotencyKey: { type: String, default: null, sparse: true, unique: true },
   },
   { timestamps: { createdAt: true, updatedAt: false } }
 );

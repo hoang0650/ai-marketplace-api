@@ -72,6 +72,16 @@ router.post('/login', async (req, res, next) => {
     if (!ok) {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
+    const { liftExpired, effectiveStatus, denyMessage } = require('../utils/moderation');
+    await liftExpired(user, 'accountStatus');
+    const status = effectiveStatus(user, 'accountStatus');
+    if (status !== 'active') {
+      return res.status(403).json({
+        message: denyMessage(status),
+        code: 'ACCOUNT_' + status.toUpperCase(),
+        suspendedUntil: user.suspendedUntil,
+      });
+    }
     return res.json({ token: signToken(user), user: publicUser(user) });
   } catch (err) {
     next(err);

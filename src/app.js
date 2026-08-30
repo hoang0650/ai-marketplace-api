@@ -9,6 +9,7 @@ const config = require('./config/env');
 const { isDbReady } = require('./config/db');
 const { isReady: isRedisReady } = require('./config/redis');
 const { notFound, errorHandler } = require('./middleware/error');
+const { proxvnIngress, originAllowed } = require('./utils/proxvn');
 
 const authRoutes = require('./routes/auth');
 const productRoutes = require('./routes/products');
@@ -29,6 +30,15 @@ const deploymentRoutes = require('./routes/deployments');
 const runpodRoutes = require('./routes/runpod');
 const playgroundRoutes = require('./routes/playground');
 const agentsRoutes = require('./routes/agents');
+const { router: serverRoutes } = require('./routes/servers');
+const terminalRoutes = require('./routes/terminal');
+const gameSessionRoutes = require('./routes/game-sessions');
+const providerCatalogRoutes = require('./routes/providers');
+const edgeRoutes = require('./routes/edge');
+const v1GatewayRoutes = require('./routes/v1-gateway');
+const apiKeyRoutes = require('./routes/api-keys');
+const agentTemplateRoutes = require('./routes/agent-templates');
+const trainingJobRoutes = require('./routes/training-jobs');
 
 function createApp() {
   const app = express();
@@ -36,11 +46,13 @@ function createApp() {
   // Behind Render/NGINX/Cloudflare so req.ip and rate limiting work correctly.
   if (config.trustProxy) app.set('trust proxy', 1);
   app.disable('x-powered-by');
+  app.use(proxvnIngress);
 
   // Security headers — API only, no cross-origin embedding needed.
   app.use(
     helmet({
       contentSecurityPolicy: false, // JSON API, no HTML served
+      frameguard: false, // game player iframe is served by this API for the marketplace origin
       crossOriginResourcePolicy: { policy: 'cross-origin' },
     })
   );
@@ -51,6 +63,7 @@ function createApp() {
         if (!origin || config.corsOrigins.includes(origin) || config.corsOrigins.includes('*')) {
           return cb(null, true);
         }
+        if (originAllowed(origin)) return cb(null, true);
         return cb(null, false);
       },
       credentials: true,
@@ -98,38 +111,47 @@ function createApp() {
     message: { message: 'Too many auth attempts, please try again later.' },
   });
 
-  app.use('/api', apiLimiter);
-  app.use('/api/auth/login', authLimiter);
-  app.use('/api/auth/register', authLimiter);
+  app.use('/v1', apiLimiter);
+  app.use('/v1/auth/login', authLimiter);
+  app.use('/v1/auth/register', authLimiter);
 
   // Static RunPod Public Endpoints catalog (docs) — no DB required.
-  app.use('/api/runpod', runpodRoutes);
+  app.use('/v1/runpod', runpodRoutes);
 
-  app.use('/api', (req, res, next) => {
+  app.use('/v1', (req, res, next) => {
     if (isDbReady()) return next();
     return res.status(503).json({
       message: 'Database is not connected yet. Please try again in a moment.',
     });
   });
 
-  app.use('/api/auth', authRoutes);
-  app.use('/api/products', productRoutes);
-  app.use('/api/creators', creatorRoutes);
-  app.use('/api/categories', categoryRoutes);
-  app.use('/api/reviews', reviewRoutes);
-  app.use('/api/wishlist', wishlistRoutes);
-  app.use('/api/orders', orderRoutes);
-  app.use('/api/wallet', walletRoutes);
-  app.use('/api/usage', usageRoutes);
-  app.use('/api/dashboard', dashboardRoutes);
-  app.use('/api/notifications', notificationRoutes);
-  app.use('/api/affiliate', affiliateRoutes);
-  app.use('/api/billing', billingRoutes);
-  app.use('/api/admin', adminRoutes);
-  app.use('/api/openclaw', openclawRoutes);
-  app.use('/api/deployments', deploymentRoutes);
-  app.use('/api/playground', playgroundRoutes);
-  app.use('/api/agents', agentsRoutes);
+  app.use('/v1/auth', authRoutes);
+  app.use('/v1/products', productRoutes);
+  app.use('/v1/creators', creatorRoutes);
+  app.use('/v1/categories', categoryRoutes);
+  app.use('/v1/reviews', reviewRoutes);
+  app.use('/v1/wishlist', wishlistRoutes);
+  app.use('/v1/orders', orderRoutes);
+  app.use('/v1/wallet', walletRoutes);
+  app.use('/v1/usage', usageRoutes);
+  app.use('/v1/dashboard', dashboardRoutes);
+  app.use('/v1/notifications', notificationRoutes);
+  app.use('/v1/affiliate', affiliateRoutes);
+  app.use('/v1/billing', billingRoutes);
+  app.use('/v1/admin', adminRoutes);
+  app.use('/v1/openclaw', openclawRoutes);
+  app.use('/v1/deployments', deploymentRoutes);
+  app.use('/v1/playground', playgroundRoutes);
+  app.use('/v1/agents', agentsRoutes);
+  app.use('/v1/servers', serverRoutes);
+  app.use('/v1/terminal', terminalRoutes);
+  app.use('/v1/game-sessions', gameSessionRoutes);
+  app.use('/v1/providers', providerCatalogRoutes);
+  app.use('/v1/edge', edgeRoutes);
+  app.use('/v1', v1GatewayRoutes);
+  app.use('/v1/api-keys', apiKeyRoutes);
+  app.use('/v1/agent-templates', agentTemplateRoutes);
+  app.use('/v1/training-jobs', trainingJobRoutes);
 
   app.use(notFound);
   app.use(errorHandler);

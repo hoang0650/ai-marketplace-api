@@ -16,6 +16,15 @@ const userSchema = new mongoose.Schema(
     affiliateClicks: { type: Number, default: 0 },
     affiliateConversions: { type: Number, default: 0 },
     affiliateEarnings: { type: Number, default: 0 },
+    accountStatus: {
+      type: String,
+      enum: ['active', 'suspended', 'blocked', 'inactive'],
+      default: 'active',
+      index: true,
+    },
+    suspendedUntil: { type: Date, default: null },
+    statusReason: { type: String, default: '', maxlength: 500 },
+    statusChangedAt: { type: Date, default: null },
   },
   { timestamps: { createdAt: true, updatedAt: true } }
 );

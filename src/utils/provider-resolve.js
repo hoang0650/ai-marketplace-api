@@ -51,7 +51,10 @@ function resolveProviderForProduct(product) {
     };
   }
 
-  if (tags.includes('featherless') || slug.includes('featherless')) {
+  if (tags.includes('openrouter') || slug.includes('openrouter') || product.category === 'openrouter') {
+    return { provider: 'openrouter', endpointId: '', model: runtime.baseModel || slug };
+  }
+  if (tags.includes('featherless') || slug.includes('featherless') || product.category === 'featherless') {
     return { provider: 'featherless', endpointId: '', model: runtime.baseModel || slug };
   }
   if (tags.includes('vercel') || tags.includes('vercel-gateway') || slug.includes('vercel')) {
@@ -86,9 +89,11 @@ function resolveProviderForProduct(product) {
     };
   }
 
-  if (upstream.gateway || (runtime.gatewayUrl && /featherless|vercel|openai/i.test(runtime.gatewayUrl))) {
+  if (upstream.gateway || (runtime.gatewayUrl && /featherless|vercel|openai|openrouter/i.test(runtime.gatewayUrl))) {
     const g = upstream.gateway || runtime.gatewayUrl;
-    const provider = /featherless/i.test(g) ? 'featherless' : 'vercel_gateway';
+    let provider = 'vercel_gateway';
+    if (/featherless/i.test(g)) provider = 'featherless';
+    else if (/openrouter/i.test(g)) provider = 'openrouter';
     return { provider, endpointId: '', model: runtime.baseModel || slug };
   }
 

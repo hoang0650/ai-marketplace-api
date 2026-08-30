@@ -31,19 +31,20 @@ function resolveError(err) {
   const status = err.status || err.statusCode || 500;
   return {
     status,
-    // Never leak internal error internals on unexpected 5xx in production.
+    code: err.code,
     message:
       status >= 500 && config.isProduction ? 'Internal server error' : err.message || 'Internal server error',
   };
 }
 
 function errorHandler(err, req, res, _next) {
-  const { status, message, details } = resolveError(err);
+  const { status, message, details, code } = resolveError(err);
   if (status >= 500) {
     console.error(`[api] ${req.method} ${req.originalUrl}`, err);
   }
   res.status(status).json({
     message,
+    ...(code ? { code } : {}),
     ...(details ? { details } : {}),
     ...(config.nodeEnv === 'development' ? { stack: err.stack } : {}),
   });

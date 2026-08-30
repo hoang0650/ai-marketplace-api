@@ -6,25 +6,43 @@ const Notification = require('../models/Notification');
 const { authenticate } = require('../middleware/auth');
 const { splitRevenue } = require('../utils/platform');
 const { deleteCachePattern } = require('../utils/cache');
+const { clampQty } = require('../utils/sales');
+const { getBalance } = require('../utils/wallet');
+const { HOLD_MS } = require('../utils/payout-hold');
 
 const router = express.Router();
 
 router.post('/checkout', authenticate, async (req, res, next) => {
   try {
     const productId = req.body?.productId;
-    const provider = req.body?.provider || 'stripe';
+    const quantity = clampQty(req.body?.quantity);
     if (!productId) return res.status(400).json({ message: 'productId required' });
-    if (!['stripe', 'paypal', 'paddle', 'payos'].includes(provider)) {
-      return res.status(400).json({ message: 'Invalid provider' });
-    }
 
     const product = await Product.findById(productId);
     if (!product) return res.status(404).json({ message: 'Product not found' });
 
-    const amount =
+    const unit =
       product.pricing?.model === 'usage'
         ? Number(product.pricing.usageRate) || 0
         : Number(product.pricing.price) || 0;
+    const amount = Math.round(unit * quantity * 100) / 100;
+    const currency = product.pricing?.currency || 'USD';
+
+    if (amount > 0) {
+      const balance = await getBalance(req.user._id);
+      if (balance < amount) {
+        return res.status(402).json({
+          message: `Insufficient aimarkets.vn wallet balance (need ${amount.toFixed(2)} ${currency}, have ${balance.toFixed(2)}). Please top up.`,
+          code: 'INSUFFICIENT_WALLET',
+          amount,
+          balance,
+          currency,
+        });
+      }
+    }
+
+    const now = new Date();
+    const split = amount > 0 ? splitRevenue(amount) : { sellerNet: 0, platformFee: 0 };
 
     const order = await Order.create({
       product: product._id,
@@ -32,39 +50,57 @@ router.post('/checkout', authenticate, async (req, res, next) => {
       buyer: req.user._id,
       buyerName: req.user.name,
       seller: product.creator,
+      quantity,
       amount,
-      currency: product.pricing?.currency || 'USD',
+      currency,
+      sellerNet: split.sellerNet,
+      platformFee: split.platformFee,
+      completedAt: now,
+      payoutHoldUntil: new Date(now.getTime() + HOLD_MS),
+      disputeStatus: 'none',
       status: 'paid',
-      provider,
+      provider: 'wallet',
     });
 
-    product.installCount = (product.installCount || 0) + 1;
-    await product.save();
-    // installCount is shown on listings — drop cached product views.
-    deleteCachePattern('products:*').catch(() => {});
-
     if (amount > 0) {
-      const { sellerNet } = splitRevenue(amount);
       await WalletTx.create({
-        user: product.creator,
-        type: 'credit',
-        amount: sellerNet,
-        currency: order.currency,
-        note: `Sale: ${product.name} (net after 20% platform fee)`,
+        user: req.user._id,
+        type: 'debit',
+        amount,
+        currency,
+        note: `Pay ${product.name} ×${quantity} (aimarkets.vn wallet)`,
       });
+      if (split.sellerNet > 0) {
+        await WalletTx.create({
+          user: product.creator,
+          type: 'credit',
+          amount: split.sellerNet,
+          currency,
+          note: `Sale: ${product.name} (held 48h / until dispute closes)`,
+        });
+      }
     }
+
+    await Product.updateOne({ _id: product._id }, { $inc: { salesCount: quantity } });
+    deleteCachePattern('products:*').catch(() => {});
+    deleteCachePattern('creators:*').catch(() => {});
 
     await Notification.create({
       user: product.creator,
       title: 'New order',
-      body: `${req.user.name} purchased ${product.name}`,
+      body: `${req.user.name} purchased ${product.name} via aimarkets.vn wallet`,
       href: '/dashboard/orders',
     });
 
+    const balance = await getBalance(req.user._id);
     res.status(201).json({
       checkoutId: `chk_${order._id.toString()}`,
-      provider,
-      status: 'created',
+      provider: 'wallet',
+      status: 'paid',
+      quantity,
+      amount,
+      currency,
+      balance,
     });
   } catch (err) {
     next(err);

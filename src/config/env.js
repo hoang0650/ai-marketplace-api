@@ -50,6 +50,12 @@ const config = {
     process.env.DENGLISH_SANDBOX === '1' ||
     process.env.DENGLISH_SANDBOX === 'true' ||
     (!isProduction && process.env.DENGLISH_SANDBOX !== '0'),
+  proxvnEnabled:
+    process.env.PROXVN_ENABLED === '1' ||
+    process.env.PROXVN_ENABLED === 'true' ||
+    !!String(process.env.PROXVN_BASE_DOMAIN || '').trim(),
+  proxvnBaseDomain: (process.env.PROXVN_BASE_DOMAIN || '').trim(),
+  proxvnServer: (process.env.PROXVN_SERVER || '').trim(),
 };
 
 module.exports = config;

@@ -4,7 +4,10 @@ const { authenticate, requireRoles } = require('../middleware/auth');
 const { mapProduct } = require('../utils/mappers');
 const { slugify } = require('../utils/serialize');
 const { cached, deleteCachePattern } = require('../utils/cache');
+const { PRODUCT_CATEGORIES } = require('../data/categories');
 const { normalizeRuntime } = require('../utils/runtime');
+const { inferProductType } = require('../data/marketplace-types');
+const { catalogVisibleFilter, isCatalogVisible } = require('../utils/moderation');
 
 const router = express.Router();
 
@@ -28,7 +31,14 @@ const MAX_LIMIT = 500;
 router.get('/', async (req, res, next) => {
   try {
     const filter = {};
-    if (req.query.category) filter.category = String(req.query.category);
+    if (req.query.category) {
+      const cat = String(req.query.category);
+      if (!PRODUCT_CATEGORIES.includes(cat)) return res.json([]);
+      filter.category = cat;
+    } else {
+      filter.category = { $in: PRODUCT_CATEGORIES };
+    }
+    Object.assign(filter, catalogVisibleFilter());
     if (req.query.creatorSlug) filter.creatorSlug = String(req.query.creatorSlug);
     if (req.query.featured === 'true') filter.featured = true;
 
@@ -66,7 +76,8 @@ router.get('/:slug', async (req, res, next) => {
     const slug = String(req.params.slug).toLowerCase();
     const result = await cached(`products:slug:${slug}`, DETAIL_TTL, async () => {
       const product = await Product.findOne({ slug }).lean();
-      return product ? mapProduct(product) : null;
+      if (!product || !isCatalogVisible(product)) return null;
+      return mapProduct(product);
     });
     if (!result) return res.status(404).json({ message: 'Not found' });
     res.json(result);
@@ -81,6 +92,9 @@ router.post('/', authenticate, requireRoles('creator', 'admin'), async (req, res
     const name = String(body.name || '').trim();
     if (!name || !body.category || !body.pricing) {
       return res.status(400).json({ message: 'name, category, pricing are required' });
+    }
+    if (!PRODUCT_CATEGORIES.includes(String(body.category))) {
+      return res.status(400).json({ message: 'AI marketplace category required' });
     }
     let slug = slugify(body.slug || name);
     if (!slug) slug = `product-${Date.now()}`;
@@ -112,6 +126,9 @@ router.post('/', authenticate, requireRoles('creator', 'admin'), async (req, res
       changelog: Array.isArray(body.changelog) ? body.changelog : [],
       featured: !!body.featured,
       publishedAt: body.publishedAt ? new Date(body.publishedAt) : new Date(),
+      productType: body.productType || inferProductType(body.category, body.tags),
+      provider: String(body.provider || ''),
+      published: body.published !== false,
     });
 
     invalidateProductCaches();

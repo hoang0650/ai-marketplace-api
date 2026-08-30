@@ -80,7 +80,7 @@ async function ensureRunpodMarketplaceProducts() {
           slug: p.slug,
           rating: p.rating,
           reviewCount: p.reviewCount,
-          installCount: p.installCount,
+          salesCount: 0,
         },
       },
       { upsert: true, new: true }
