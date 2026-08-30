@@ -1,0 +1,41 @@
+# Paste → Dokploy → Traefik File System → dynamic/aimarkets.yml
+#
+# DNS (Mắt Bão): api + ai → A → 72.62.72.165
+# App domains (api.aimarkets.vn port 4100) vẫn cấu hình trong Dokploy UI → Domains.
+# File này chỉ bổ sung middleware (CORS, security headers) — không tạo router trùng UI.
+
+http:
+  middlewares:
+    aimarkets-cors:
+      headers:
+        accessControlAllowOriginList:
+          - "https://aimarkets.vn"
+          - "https://www.aimarkets.vn"
+          - "http://localhost:4200"
+          - "http://127.0.0.1:4200"
+        accessControlAllowMethods:
+          - GET
+          - POST
+          - PUT
+          - PATCH
+          - DELETE
+          - OPTIONS
+        accessControlAllowHeaders:
+          - Authorization
+          - Content-Type
+          - Idempotency-Key
+        accessControlAllowCredentials: true
+        accessControlMaxAge: 86400
+        addVaryHeader: true
+
+    aimarkets-security:
+      headers:
+        frameDeny: true
+        contentTypeNosniff: true
+        browserXssFilter: true
+        referrerPolicy: "strict-origin-when-cross-origin"
+
+  # Tuỳ chọn: gắn middleware vào router do Dokploy tạo (tên router có thể khác — xem Traefik dashboard).
+  # Nếu Dokploy không cho phép sửa router name, bỏ qua block routers bên dưới;
+  # CORS đã xử lý trong API (express cors) qua env CORS_ORIGINS.
+  routers: {}
