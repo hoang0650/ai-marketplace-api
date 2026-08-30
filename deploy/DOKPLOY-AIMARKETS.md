@@ -31,6 +31,8 @@ MDB_CONNECT=mongodb+srv://...
 JWT_SECRET=<>=24 ký tự>
 # Bắt buộc có www — Vercel redirect aimarkets.vn → www.aimarkets.vn
 CORS_ORIGINS=https://aimarkets.vn,https://www.aimarkets.vn,http://localhost:4200,http://127.0.0.1:4200
+GOOGLE_CLIENT_ID=<web-client-id>.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=GOCSPX-...
 AIMARKETS_API_HOST=https://api.aimarkets.vn
 AIMARKETS_AI_HOST=https://ai.aimarkets.vn
 ```
