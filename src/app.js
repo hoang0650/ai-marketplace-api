@@ -39,6 +39,7 @@ const v1GatewayRoutes = require('./routes/v1-gateway');
 const apiKeyRoutes = require('./routes/api-keys');
 const agentTemplateRoutes = require('./routes/agent-templates');
 const trainingJobRoutes = require('./routes/training-jobs');
+const workRoutes = require('./routes/work');
 
 function createApp() {
   const app = express();
@@ -152,6 +153,7 @@ function createApp() {
   app.use('/v1/api-keys', apiKeyRoutes);
   app.use('/v1/agent-templates', agentTemplateRoutes);
   app.use('/v1/training-jobs', trainingJobRoutes);
+  app.use('/v1/work', workRoutes);
 
   app.use(notFound);
   app.use(errorHandler);
