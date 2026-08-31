@@ -10,7 +10,7 @@ const {
 } = require('../terminal/permission.service');
 const {
   resolveProduct,
-  findExternalNode,
+  findComputeNode,
   assertBuyerAccess,
   resolveStreamForSession,
   finalizeSessionBilling,
@@ -29,6 +29,7 @@ function publicGame(doc, req, extra = {}) {
     projectId: doc.projectId,
     serverId: String(doc.server),
     productSlug: extra.productSlug,
+    hosting: extra.hosting,
     provider: doc.provider,
     status: doc.status,
     streamKind: doc.streamKind,
@@ -86,17 +87,21 @@ router.post('/', authenticate, requireRoles('creator', 'admin', 'buyer'), async 
     const serverId = String(req.body?.serverId || '');
     let server;
     let product = null;
+    let hosting = '';
 
     if (productSlug) {
       product = await resolveProduct(productSlug);
       await assertBuyerAccess(req.user, product);
-      server = await findExternalNode(product);
-      if (!server) {
+      const resolved = await findComputeNode(product);
+      if (!resolved) {
         return res.status(503).json({
-          message: 'Seller has not registered a compute node for this product yet',
+          message:
+            'No compute node for this product. Seller must register external node or AI Markets hosted RunPod pod.',
           code: 'NO_COMPUTE_NODE',
         });
       }
+      server = resolved.node;
+      hosting = resolved.hosting;
       const liveOnNode = await GameSession.countDocuments({
         server: server._id,
         status: { $in: ['starting', 'live'] },
@@ -150,7 +155,7 @@ router.post('/', authenticate, requireRoles('creator', 'admin', 'buyer'), async 
       serverId: String(server._id),
       event: 'game_stream_start',
     });
-    res.status(201).json(publicGame(doc, req, { productSlug: product?.slug }));
+    res.status(201).json(publicGame(doc, req, { productSlug: product?.slug, hosting: hosting || undefined }));
   } catch (e) {
     if (e.status === 402) return res.status(402).json({ message: e.message, ...e.body, code: e.code });
     next(e);

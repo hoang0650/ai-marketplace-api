@@ -4,19 +4,26 @@ const Product = require('../models/Product');
 const { authenticate, requireRoles } = require('../middleware/auth');
 const {
   resolveProduct,
+  findComputeNode,
+  registerComputeNode,
   registerExternalNode,
+  registerHostedNode,
   publicNode,
+  ensureHostedNodeReady,
   isComputeCategory,
 } = require('../utils/compute-session');
+const provider = require('../utils/denglish-providers');
 
 const router = express.Router();
 
 router.use(authenticate, requireRoles('creator', 'admin'));
 
-/** List external compute nodes registered by this seller. */
+/** List compute nodes (external + AI Markets hosted) linked to products. */
 router.get('/nodes', async (req, res, next) => {
   try {
-    const rows = await GpuServer.find({ owner: req.user._id, external: true }).sort({ updatedAt: -1 }).lean();
+    const rows = await GpuServer.find({ owner: req.user._id, product: { $ne: null } })
+      .sort({ updatedAt: -1 })
+      .lean();
     const productIds = [...new Set(rows.map((r) => String(r.product)).filter(Boolean))];
     const products = await Product.find({ _id: { $in: productIds } }).lean();
     const byId = Object.fromEntries(products.map((p) => [String(p._id), p]));
@@ -26,10 +33,10 @@ router.get('/nodes', async (req, res, next) => {
   }
 });
 
-/** Register an external GPU/game node for a marketplace product. */
+/** Register external webhook node or AI Markets–hosted RunPod pod. */
 router.post('/nodes', async (req, res, next) => {
   try {
-    const { product, node } = await registerExternalNode(req.user, req.body || {});
+    const { product, node } = await registerComputeNode(req.user, req.body || {});
     res.status(201).json(publicNode(node, product));
   } catch (e) {
     if (e.status === 402) return res.status(402).json({ message: e.message, ...e.body });
@@ -37,24 +44,49 @@ router.post('/nodes', async (req, res, next) => {
   }
 });
 
+/** Provision RunPod pod via denglish-api for a product (shortcut). */
+router.post('/nodes/hosted', async (req, res, next) => {
+  try {
+    const { product, node } = await registerHostedNode(req.user, req.body || {});
+    res.status(201).json(publicNode(node, product));
+  } catch (e) {
+    next(e);
+  }
+});
+
 router.patch('/nodes/:id', async (req, res, next) => {
   try {
-    const node = await GpuServer.findOne({ _id: req.params.id, owner: req.user._id, external: true });
+    const node = await GpuServer.findOne({
+      _id: req.params.id,
+      owner: req.user._id,
+      product: { $ne: null },
+    });
     if (!node) return res.status(404).json({ message: 'Not found' });
-    const body = req.body || {};
-    if (body.name) node.name = String(body.name).slice(0, 120);
-    if (body.status) node.status = body.status === 'offline' ? 'offline' : 'online';
-    if (body.webhookUrl !== undefined) node.webhookUrl = String(body.webhookUrl).slice(0, 500);
-    if (body.webhookSecret !== undefined) node.webhookSecret = String(body.webhookSecret).slice(0, 256);
-    if (body.streamHost !== undefined) node.streamHost = String(body.streamHost).slice(0, 200);
-    if (body.streamPort !== undefined) node.streamPort = Number(body.streamPort) || 0;
-    if (body.streamPath !== undefined) node.streamPath = String(body.streamPath).slice(0, 200);
-    if (body.streamKind !== undefined) node.streamKind = String(body.streamKind).slice(0, 40);
-    if (body.streamTls !== undefined) node.streamTls = !!body.streamTls;
-    if (body.iframeUrl !== undefined) node.iframeUrl = String(body.iframeUrl).slice(0, 500);
-    if (body.healthUrl !== undefined) node.healthUrl = String(body.healthUrl).slice(0, 500);
-    if (body.region !== undefined) node.region = String(body.region).slice(0, 80);
-    if (body.maxConcurrent !== undefined) node.maxConcurrent = Math.min(100, Math.max(1, Number(body.maxConcurrent) || 10));
+    if (node.external) {
+      const body = req.body || {};
+      if (body.name) node.name = String(body.name).slice(0, 120);
+      if (body.status) node.status = body.status === 'offline' ? 'offline' : 'online';
+      if (body.webhookUrl !== undefined) node.webhookUrl = String(body.webhookUrl).slice(0, 500);
+      if (body.webhookSecret !== undefined) node.webhookSecret = String(body.webhookSecret).slice(0, 256);
+      if (body.streamHost !== undefined) node.streamHost = String(body.streamHost).slice(0, 200);
+      if (body.streamPort !== undefined) node.streamPort = Number(body.streamPort) || 0;
+      if (body.streamPath !== undefined) node.streamPath = String(body.streamPath).slice(0, 200);
+      if (body.streamKind !== undefined) node.streamKind = String(body.streamKind).slice(0, 40);
+      if (body.streamTls !== undefined) node.streamTls = !!body.streamTls;
+      if (body.iframeUrl !== undefined) node.iframeUrl = String(body.iframeUrl).slice(0, 500);
+      if (body.healthUrl !== undefined) node.healthUrl = String(body.healthUrl).slice(0, 500);
+      if (body.region !== undefined) node.region = String(body.region).slice(0, 80);
+      if (body.maxConcurrent !== undefined) {
+        node.maxConcurrent = Math.min(100, Math.max(1, Number(body.maxConcurrent) || 10));
+      }
+    } else {
+      const body = req.body || {};
+      if (body.name) node.name = String(body.name).slice(0, 120);
+      if (body.maxConcurrent !== undefined) {
+        node.maxConcurrent = Math.min(100, Math.max(1, Number(body.maxConcurrent) || 5));
+      }
+      if (body.status === 'offline') node.status = 'offline';
+    }
     await node.save();
     const product = node.product ? await Product.findById(node.product).lean() : null;
     res.json(publicNode(node, product));
@@ -65,8 +97,19 @@ router.patch('/nodes/:id', async (req, res, next) => {
 
 router.delete('/nodes/:id', async (req, res, next) => {
   try {
-    const node = await GpuServer.findOne({ _id: req.params.id, owner: req.user._id, external: true });
+    const node = await GpuServer.findOne({
+      _id: req.params.id,
+      owner: req.user._id,
+      product: { $ne: null },
+    });
     if (!node) return res.status(404).json({ message: 'Not found' });
+    if (!node.external && node.provider !== 'external') {
+      try {
+        await provider.terminateProviderServer(node.provider, node.providerServerId);
+      } catch (_) {
+        /* still mark offline locally */
+      }
+    }
     node.status = 'offline';
     await node.save();
     res.json({ ok: true });
@@ -75,11 +118,28 @@ router.delete('/nodes/:id', async (req, res, next) => {
   }
 });
 
-/** Ping seller health URL or webhook with session.ping */
+/** Ping external health/webhook or hosted RunPod connection via denglish-api */
 router.post('/nodes/:id/ping', async (req, res, next) => {
   try {
-    const node = await GpuServer.findOne({ _id: req.params.id, owner: req.user._id, external: true });
+    const node = await GpuServer.findOne({
+      _id: req.params.id,
+      owner: req.user._id,
+      product: { $ne: null },
+    });
     if (!node) return res.status(404).json({ message: 'Not found' });
+
+    if (!node.external) {
+      await ensureHostedNodeReady(node);
+      const conn = await provider.getConnection(node.provider, node.providerServerId);
+      const stream = conn?.connection?.stream;
+      return res.json({
+        ok: true,
+        via: 'runpod',
+        status: conn?.connection?.status || node.status,
+        hasStream: !!(stream?.host && stream?.port),
+      });
+    }
+
     const healthUrl = String(node.healthUrl || '').trim();
     if (healthUrl) {
       const resHealth = await fetch(healthUrl, { signal: AbortSignal.timeout(8000) });
@@ -99,20 +159,26 @@ router.post('/nodes/:id/ping', async (req, res, next) => {
 /** Docs payload for integrators */
 router.get('/schema', (_req, res) => {
   res.json({
-    registerNode: {
+    registerExternalNode: {
+      hosting: 'external',
       productSlug: 'your-product-slug',
       name: 'EU Game Box',
       kind: 'game',
-      nodeId: 'optional-external-id',
       webhookUrl: 'https://seller.example.com/aimarkets/webhook',
       webhookSecret: 'whsec_...',
       streamHost: '10.0.0.5',
       streamPort: 6080,
-      streamPath: '/',
-      streamKind: 'novnc',
-      healthUrl: 'https://seller.example.com/health',
-      region: 'eu-west',
     },
+    registerHostedNode: {
+      hosting: 'aimarkets',
+      productSlug: 'your-product-slug',
+      name: 'RunPod Game Box',
+      kind: 'game',
+      gpuType: 'NVIDIA GeForce RTX 4090',
+      provider: 'runpod',
+      note: 'Provisions RunPod Pod via denglish-api (ai.aimarkets.vn)',
+    },
+    buyerResolveOrder: ['external seller node', 'AI Markets hosted RunPod pod'],
     webhookEvents: ['session.start', 'session.stop', 'session.ping'],
     webhookResponse: {
       streamHost: '10.0.0.5',

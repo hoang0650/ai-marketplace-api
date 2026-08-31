@@ -1,6 +1,6 @@
 # Seller GPU / Game streaming integration
 
-Connect **external** GPU or game-server infrastructure to AI Markets so buyers can **stream or play directly on aimarkets.vn** — without exposing your internal IPs.
+Connect **external** GPU/game infrastructure **or** **AI Markets–hosted RunPod Pods** (via denglish-api / ai.aimarkets.vn) so buyers can **stream or play on aimarkets.vn** — without exposing internal IPs.
 
 ## Overview
 
@@ -8,7 +8,9 @@ Connect **external** GPU or game-server infrastructure to AI Markets so buyers c
 |------|--------|
 | Seller | Publish product (`gpu-compute` or `game-server`), register compute node |
 | Buyer | `POST /v1/game-sessions { "productSlug": "..." }` → embedded player |
-| Platform | Webhook to seller, proxy stream, bill wallet on session stop |
+| Platform | Resolve node → proxy stream → bill wallet on session stop |
+
+**Node resolution order:** external seller node first → fallback to hosted RunPod Pod.
 
 Categories: `gpu-compute`, `game-server`  
 Recommended pricing: `usage` (per hour/minute)
@@ -17,12 +19,15 @@ Recommended pricing: `usage` (per hour/minute)
 
 **Auth:** Seller JWT (`creator` or `admin`)
 
+### External (your infrastructure)
+
 ```http
 POST /v1/seller/compute/nodes
 Authorization: Bearer <seller_jwt>
 Content-Type: application/json
 
 {
+  "hosting": "external",
   "productSlug": "my-game-box",
   "name": "EU Game Box",
   "kind": "game",
@@ -41,15 +46,39 @@ Content-Type: application/json
 **Static stream only (no webhook):** omit `webhookUrl` and set `streamHost` + `streamPort`.  
 **iframe embed:** set `iframeUrl` instead of host/port.
 
+### AI Markets hosted (RunPod Pod)
+
+No webhook required — stream is resolved via denglish-api `getConnection` (noVNC port 6080).
+
+```http
+POST /v1/seller/compute/nodes
+Authorization: Bearer <seller_jwt>
+Content-Type: application/json
+
+{
+  "hosting": "aimarkets",
+  "productSlug": "my-game-box",
+  "name": "RunPod Game Box",
+  "kind": "game",
+  "gpuType": "NVIDIA GeForce RTX 4090",
+  "provider": "runpod",
+  "maxConcurrent": 5
+}
+```
+
+Shortcut: `POST /v1/seller/compute/nodes/hosted` with the same body.
+
+When a buyer starts a session, the platform **starts the pod if stopped**, polls until running, then proxies the stream.
+
 List / update / offline:
 
 - `GET /v1/seller/compute/nodes`
 - `PATCH /v1/seller/compute/nodes/:id`
-- `DELETE /v1/seller/compute/nodes/:id` (marks offline)
-- `POST /v1/seller/compute/nodes/:id/ping`
+- `DELETE /v1/seller/compute/nodes/:id` — external: marks offline; hosted: terminates RunPod pod
+- `POST /v1/seller/compute/nodes/:id/ping` — external: health/webhook; hosted: RunPod connection
 - `GET /v1/seller/compute/schema` — JSON integrator schema
 
-## 2. Webhook contract
+## 2. Webhook contract (external only)
 
 AI Markets POSTs JSON to `webhookUrl` with header:
 
@@ -116,6 +145,7 @@ Content-Type: application/json
 {
   "sessionId": "gs_...",
   "productSlug": "my-game-box",
+  "hosting": "external",
   "status": "live",
   "streamKind": "novnc",
   "playerUrl": "https://api.aimarkets.vn/v1/game-sessions/gs_.../player",
@@ -150,6 +180,7 @@ Response: `{ "ok": true, "billedCost": 0.42 }`
 - Verify `X-AIM-Signature` on your webhook handler
 - Do not expose RunPod or private IPs in product pages
 - Set `maxConcurrent` to cap simultaneous buyers per node
+- Hosted pods require `DENGLISH_API_URL` and `RUNPOD_API_KEY` on denglish-api (ai.aimarkets.vn)
 
 ## 6. Frontend (AI Markets)
 

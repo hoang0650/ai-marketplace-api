@@ -98,6 +98,78 @@ async function findExternalNode(product) {
   return GpuServer.findOne({ product: product._id, external: true, status: { $ne: 'offline' } }).sort({ updatedAt: -1 });
 }
 
+async function findHostedNode(product) {
+  return GpuServer.findOne({
+    product: product._id,
+    external: false,
+    provider: { $nin: ['external', ''] },
+    status: { $nin: ['offline', 'terminated'] },
+  }).sort({ updatedAt: -1 });
+}
+
+const HOSTED_RUNNING = new Set(['running', 'online']);
+const HOSTED_STOPPED = new Set(['stopped', 'exited']);
+
+/** Prefer seller external node; fallback to AI Markets–hosted RunPod pod (denglish-api). */
+async function findComputeNode(product) {
+  const external = await findExternalNode(product);
+  if (external) return { node: external, hosting: 'external' };
+
+  const hosted = await findHostedNode(product);
+  if (!hosted) return null;
+
+  await ensureHostedNodeReady(hosted);
+  return { node: hosted, hosting: 'aimarkets' };
+}
+
+async function ensureHostedNodeReady(server) {
+  if (server.external || server.provider === 'external') return server;
+
+  let live = {};
+  try {
+    const remote = await provider.getProviderServer(server.provider, server.providerServerId);
+    live = remote.server || {};
+  } catch (_) {
+    /* keep local status */
+  }
+
+  let status = String(live.status || server.status || '').toLowerCase();
+
+  if (HOSTED_STOPPED.has(status)) {
+    const started = await provider.startProviderServer(server.provider, server.providerServerId);
+    live = started?.server || live;
+    status = String(live.status || 'starting').toLowerCase();
+    server.status = status;
+    await server.save();
+  }
+
+  if (!HOSTED_RUNNING.has(status)) {
+    for (let i = 0; i < 4; i += 1) {
+      await new Promise((r) => setTimeout(r, 1500));
+      try {
+        const remote = await provider.getProviderServer(server.provider, server.providerServerId);
+        live = remote.server || {};
+        status = String(live.status || status).toLowerCase();
+        if (HOSTED_RUNNING.has(status)) break;
+      } catch (_) {
+        /* retry */
+      }
+    }
+    server.status = status;
+    if (live.gpu) server.gpu = String(live.gpu).slice(0, 120);
+    await server.save();
+  }
+
+  if (!HOSTED_RUNNING.has(status)) {
+    const err = new Error('AI Markets hosted GPU pod is not ready yet — try again in a minute');
+    err.status = 503;
+    err.code = 'HOSTED_POD_NOT_READY';
+    throw err;
+  }
+
+  return server;
+}
+
 async function assertBuyerAccess(user, product) {
   const pricing = product.pricing || {};
   if (pricing.model === 'free') return;
@@ -214,14 +286,18 @@ async function finalizeSessionBilling(session, product) {
   return cost;
 }
 
-async function registerExternalNode(user, body) {
-  const slug = String(body?.productSlug || '').toLowerCase();
-  const product = await resolveProduct(slug);
+async function assertProductOwner(user, product) {
   if (String(product.creator) !== String(user._id) && user.role !== 'admin') {
     const err = new Error('FORBIDDEN');
     err.status = 403;
     throw err;
   }
+}
+
+async function registerExternalNode(user, body) {
+  const slug = String(body?.productSlug || '').toLowerCase();
+  const product = await resolveProduct(slug);
+  await assertProductOwner(user, product);
   const kind = body?.kind === 'compute' ? 'compute' : 'game';
   const providerServerId = String(body?.nodeId || `ext_${crypto.randomBytes(6).toString('hex')}`).slice(0, 120);
   const doc = await GpuServer.create({
@@ -250,7 +326,48 @@ async function registerExternalNode(user, body) {
   return { product, node: doc };
 }
 
+/** Provision RunPod Pod via denglish-api (ai.aimarkets.vn) and link to marketplace product. */
+async function registerHostedNode(user, body) {
+  const slug = String(body?.productSlug || '').toLowerCase();
+  const product = await resolveProduct(slug);
+  await assertProductOwner(user, product);
+  const kind = body?.kind === 'compute' ? 'compute' : 'game';
+  const providerName = String(body?.provider || 'runpod').toLowerCase();
+  const created = await provider.createProviderServer(providerName, {
+    name: String(body?.name || product.name).slice(0, 120),
+    kind,
+    gpuType: body?.gpuType || body?.gpu,
+    image: body?.image,
+    ports: kind === 'game' ? '22/tcp,8080/http,6080/http' : '22/tcp',
+  });
+  const remote = created.server || {};
+  const doc = await GpuServer.create({
+    owner: user._id,
+    projectId: String(body?.projectId || 'marketplace'),
+    name: remote.name || String(body?.name || product.name).slice(0, 120),
+    provider: providerName,
+    providerServerId: String(remote.id || `pod_${crypto.randomBytes(6).toString('hex')}`).slice(0, 120),
+    kind,
+    status: remote.status || 'creating',
+    gpu: String(remote.gpu || body?.gpuType || '').slice(0, 120),
+    product: product._id,
+    external: false,
+    region: String(body?.region || 'runpod').slice(0, 80),
+    maxConcurrent: Math.min(100, Math.max(1, Number(body?.maxConcurrent) || 5)),
+  });
+  return { product, node: doc };
+}
+
+async function registerComputeNode(user, body) {
+  const hosting = String(body?.hosting || body?.mode || 'external').toLowerCase();
+  if (hosting === 'aimarkets' || hosting === 'hosted' || hosting === 'internal') {
+    return registerHostedNode(user, body);
+  }
+  return registerExternalNode(user, body);
+}
+
 function publicNode(doc, product) {
+  const hosting = doc.external ? 'external' : doc.product ? 'aimarkets' : 'lab';
   return {
     id: doc.id || String(doc._id),
     productSlug: product?.slug,
@@ -260,9 +377,15 @@ function publicNode(doc, product) {
     provider: doc.provider,
     status: doc.status,
     external: !!doc.external,
+    hosting,
     region: doc.region || '',
     webhookUrl: doc.webhookUrl ? true : false,
-    hasStream: !!(doc.streamHost && doc.streamPort) || !!doc.webhookUrl || !!doc.iframeUrl,
+    hasStream:
+      !!(doc.streamHost && doc.streamPort) ||
+      !!doc.webhookUrl ||
+      !!doc.iframeUrl ||
+      (!doc.external && doc.provider === 'runpod'),
+    providerServerId: doc.providerServerId,
     maxConcurrent: doc.maxConcurrent,
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,
@@ -273,10 +396,15 @@ module.exports = {
   isComputeCategory,
   resolveProduct,
   findExternalNode,
+  findHostedNode,
+  findComputeNode,
+  ensureHostedNodeReady,
   assertBuyerAccess,
   resolveStreamForSession,
   finalizeSessionBilling,
   registerExternalNode,
+  registerHostedNode,
+  registerComputeNode,
   publicNode,
   callSellerWebhook,
   streamFromServer,
