@@ -33,6 +33,7 @@ const agentsRoutes = require('./routes/agents');
 const { router: serverRoutes } = require('./routes/servers');
 const terminalRoutes = require('./routes/terminal');
 const gameSessionRoutes = require('./routes/game-sessions');
+const sellerComputeRoutes = require('./routes/seller-compute');
 const providerCatalogRoutes = require('./routes/providers');
 const edgeRoutes = require('./routes/edge');
 const v1GatewayRoutes = require('./routes/v1-gateway');
@@ -147,6 +148,7 @@ function createApp() {
   app.use('/v1/servers', serverRoutes);
   app.use('/v1/terminal', terminalRoutes);
   app.use('/v1/game-sessions', gameSessionRoutes);
+  app.use('/v1/seller/compute', sellerComputeRoutes);
   app.use('/v1/providers', providerCatalogRoutes);
   app.use('/v1/edge', edgeRoutes);
   app.use('/v1', v1GatewayRoutes);

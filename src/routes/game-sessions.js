@@ -8,18 +8,27 @@ const {
   MAX_GAMES_PER_USER,
   audit,
 } = require('../terminal/permission.service');
+const {
+  resolveProduct,
+  findExternalNode,
+  assertBuyerAccess,
+  resolveStreamForSession,
+  finalizeSessionBilling,
+  callSellerWebhook,
+} = require('../utils/compute-session');
 const { proxyToStream, setGameCookie } = require('../terminal/stream-proxy');
 const { publicHttps } = require('../utils/proxvn');
 
 const router = express.Router();
 
-function publicGame(doc, req) {
+function publicGame(doc, req, extra = {}) {
   const base = `${req.protocol}://${req.get('host')}/v1/game-sessions/${doc.sessionId}`;
   const proxied = publicHttps('gs', doc.sessionId);
   return {
     sessionId: doc.sessionId,
     projectId: doc.projectId,
     serverId: String(doc.server),
+    productSlug: extra.productSlug,
     provider: doc.provider,
     status: doc.status,
     streamKind: doc.streamKind,
@@ -73,9 +82,33 @@ loop();
 router.post('/', authenticate, requireRoles('creator', 'admin', 'buyer'), async (req, res, next) => {
   try {
     const projectId = String(req.body?.projectId || 'default');
+    const productSlug = String(req.body?.productSlug || '').toLowerCase();
     const serverId = String(req.body?.serverId || '');
-    if (!serverId) return res.status(400).json({ message: 'serverId required', code: 'SERVER_NOT_FOUND' });
-    const server = await assertServerOwner(req.user, serverId);
+    let server;
+    let product = null;
+
+    if (productSlug) {
+      product = await resolveProduct(productSlug);
+      await assertBuyerAccess(req.user, product);
+      server = await findExternalNode(product);
+      if (!server) {
+        return res.status(503).json({
+          message: 'Seller has not registered a compute node for this product yet',
+          code: 'NO_COMPUTE_NODE',
+        });
+      }
+      const liveOnNode = await GameSession.countDocuments({
+        server: server._id,
+        status: { $in: ['starting', 'live'] },
+      });
+      if (liveOnNode >= (server.maxConcurrent || 10)) {
+        return res.status(429).json({ message: 'Compute node at capacity', code: 'CAPACITY' });
+      }
+    } else {
+      if (!serverId) return res.status(400).json({ message: 'serverId or productSlug required', code: 'BAD_REQUEST' });
+      server = await assertServerOwner(req.user, serverId);
+    }
+
     const open = await GameSession.countDocuments({
       user: req.user._id,
       status: { $in: ['starting', 'live'] },
@@ -83,14 +116,23 @@ router.post('/', authenticate, requireRoles('creator', 'admin', 'buyer'), async 
     if (open >= MAX_GAMES_PER_USER) {
       return res.status(429).json({ message: 'Too many live streams', code: 'FORBIDDEN' });
     }
-    const conn = await provider.getConnection(server.provider, server.providerServerId);
-    const stream = conn?.connection?.stream || {};
+
     const sessionId = newSessionId('gs');
+    const stream = await resolveStreamForSession(server, {
+      sessionId,
+      productSlug: product?.slug,
+      buyerId: String(req.user._id),
+      buyerEmail: req.user.email || '',
+      nodeId: server.providerServerId,
+    });
+
     const doc = await GameSession.create({
       sessionId,
       user: req.user._id,
       projectId,
       server: server._id,
+      product: product?._id || server.product || null,
+      seller: product?.creator || server.owner,
       provider: server.provider,
       providerServerId: server.providerServerId,
       status: 'live',
@@ -99,6 +141,7 @@ router.post('/', authenticate, requireRoles('creator', 'admin', 'buyer'), async 
       streamPort: Number(stream.port || 0),
       streamPath: stream.path || '/',
       streamTls: !!stream.tls,
+      billingStartedAt: new Date(),
     });
     await audit({
       sessionId,
@@ -107,8 +150,9 @@ router.post('/', authenticate, requireRoles('creator', 'admin', 'buyer'), async 
       serverId: String(server._id),
       event: 'game_stream_start',
     });
-    res.status(201).json(publicGame(doc, req));
+    res.status(201).json(publicGame(doc, req, { productSlug: product?.slug }));
   } catch (e) {
+    if (e.status === 402) return res.status(402).json({ message: e.message, ...e.body, code: e.code });
     next(e);
   }
 });
@@ -130,7 +174,17 @@ router.delete('/:sessionId', authenticate, async (req, res, next) => {
     doc.status = 'stopped';
     doc.stoppedAt = new Date();
     await doc.save();
-    res.json({ ok: true });
+    const product = doc.product ? await require('../models/Product').findById(doc.product) : null;
+    const server = await require('../models/GpuServer').findById(doc.server);
+    if (server?.webhookUrl) {
+      callSellerWebhook(server, 'session.stop', {
+        sessionId: doc.sessionId,
+        buyerId: String(doc.user),
+        minutes: doc.billedMinutes,
+      }).catch(() => {});
+    }
+    if (product) await finalizeSessionBilling(doc, product);
+    res.json({ ok: true, billedCost: doc.billedCost || 0 });
   } catch (e) {
     next(e);
   }
@@ -139,6 +193,14 @@ router.delete('/:sessionId', authenticate, async (req, res, next) => {
 function livePlayerHtml(doc) {
   const kind = doc.streamKind || 'novnc';
   const path = String(doc.streamPath || '/').replace(/^\/+/, '/');
+  if (kind === 'iframe' && doc.streamPath) {
+    const src = doc.streamPath.startsWith('http') ? `./proxy/` : `./proxy${path}`;
+    return `<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>GPU Stream</title><style>html,body{margin:0;height:100%;background:#000}iframe{border:0;width:100%;height:100%}</style></head>
+<body><iframe id="f" title="Stream" allow="fullscreen; autoplay"></iframe>
+<script>document.getElementById('f').src=${JSON.stringify(doc.streamPath.startsWith('http') ? doc.streamPath : src + (location.search||''))};</script></body></html>`;
+  }
   return `<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="utf-8"/>
@@ -178,6 +240,9 @@ router.get('/:sessionId/player', authenticate, async (req, res, next) => {
     if (token) setGameCookie(res, doc.sessionId, token);
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Cache-Control', 'no-store');
+    if (doc.streamKind === 'iframe' && doc.streamPath) {
+      return res.send(livePlayerHtml(doc));
+    }
     if (doc.streamKind === 'sandbox' || !doc.streamHost || !doc.streamPort) {
       return res.send(sandboxPlayerHtml('GPU Game Stream'));
     }

@@ -17,6 +17,11 @@ const gameSessionSchema = new mongoose.Schema(
     streamTls: { type: Boolean, default: false },
     lastActivityAt: { type: Date, default: Date.now },
     stoppedAt: { type: Date, default: null },
+    product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', default: null, index: true },
+    seller: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null, index: true },
+    billingStartedAt: { type: Date, default: null },
+    billedCost: { type: Number, default: 0, min: 0 },
+    billedMinutes: { type: Number, default: 0, min: 0 },
   },
   { timestamps: true }
 );

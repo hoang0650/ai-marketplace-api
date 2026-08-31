@@ -103,6 +103,9 @@ useMockApi: false,
 | GET/POST | `/training-jobs` | JWT — training jobs via provider adapter |
 | POST | `/edge/infer/:slug` | JWT — inference qua cạnh ProxVN / API bán, trừ ví |
 
+**Seller docs:** [docs/SELLER-API-USAGE.md](./docs/SELLER-API-USAGE.md) — API Gateway, đếm token cho buyer, checklist seller.  
+**GPU/Game streaming:** [docs/SELLER-COMPUTE-STREAMING.md](./docs/SELLER-COMPUTE-STREAMING.md) — webhook, proxy stream, billing theo phiên.
+
 ### Product / Deployment `runtime`
 
 | Field | Ý nghĩa |
