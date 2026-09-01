@@ -7,9 +7,81 @@ const { authenticate } = require('../middleware/auth');
 const { PLATFORM_FEE_RATE } = require('../utils/platform');
 const { getBalance } = require('../utils/wallet');
 const { resolveProviderForProduct, computeUsageCost } = require('../utils/provider-resolve');
-const { inferWithFallback } = require('../utils/denglish-client');
+const { inferWithFallback, quoteInference } = require('../utils/denglish-client');
 
 const router = express.Router();
+
+const MEDIA_FIELDS = ['image_url', 'video_url', 'audio_url'];
+
+/**
+ * Ask denglish-api for the exact RunPod payload and the price.
+ *
+ * `providerCost` is the sell price (RunPod's documented cost plus the configured
+ * markup); `upstreamCost` is what RunPod itself charges, kept for reporting.
+ * Falls back to a coarse local guess when denglish-api or the catalog can't help.
+ */
+async function preflight({ provider, endpointId, model, input }) {
+  if (provider === 'runpod_public') {
+    try {
+      const q = await quoteInference({ model: endpointId || model, input });
+      return {
+        usage: { unit: q.unit, quantity: q.quantity, total_tokens: 0 },
+        providerCost: Number(q.estimatedCost) || 0,
+        upstreamCost: Number(q.upstreamCost) || 0,
+        markup: Number(q.markup) || 0,
+        warnings: q.warnings || [],
+      };
+    } catch {
+      /* denglish-api unavailable — fall through to the local guess */
+    }
+  }
+  const roughTokens = Math.max(1, Math.ceil(JSON.stringify(input).length / 4));
+  const unit = input.duration ? 'seconds' : input.image && !input.prompt ? 'images' : 'tokens';
+  return {
+    usage: {
+      unit,
+      quantity: input.duration || (input.image ? 1 : roughTokens),
+      total_tokens: roughTokens,
+    },
+    providerCost: 0,
+    upstreamCost: 0,
+    markup: 0,
+    warnings: [],
+  };
+}
+
+/**
+ * Flatten the provider payload into the shape the playground UI renders:
+ * one media URL (or text) plus the metering the buyer was charged for.
+ */
+function buildOutput(data, { kind, charged, providerCost, upstreamCost, usage }) {
+  if (!data || typeof data !== 'object') {
+    return { kind: kind || 'text', text: String(data ?? ''), cost: charged };
+  }
+
+  const output = {
+    kind: data.kind || kind || (MEDIA_FIELDS.find((f) => data[f]) || 'text').replace('_url', ''),
+  };
+  for (const field of MEDIA_FIELDS) {
+    if (data[field]) output[field] = data[field];
+  }
+  if (Array.isArray(data.images) && data.images.length) output.images = data.images;
+  if (data.text) output.text = data.text;
+  if (data.seed !== undefined) output.seed = data.seed;
+  if (data.job_id) output.jobId = data.job_id;
+  if (data.raw_output !== undefined) output.rawOutput = data.raw_output;
+
+  output.cost = charged;
+  output.providerCost = providerCost;
+  output.upstreamCost = upstreamCost;
+  output.usage = {
+    input: Number(usage.input_tokens) || 0,
+    output: Number(usage.output_tokens) || 0,
+    unit: usage.unit,
+    quantity: usage.quantity,
+  };
+  return output;
+}
 
 /**
  * POST /api/playground/run
@@ -42,14 +114,8 @@ router.post('/run', authenticate, async (req, res, next) => {
     const endpointId = endpointOverride || resolved.endpointId;
     const model = modelOverride || resolved.model;
 
-    // Preflight cost estimate (tokens unknown → use rough prompt length for text)
-    const roughTokens = Math.max(1, Math.ceil(JSON.stringify(input).length / 4));
-    const estimateUsage = {
-      unit: input.duration ? 'seconds' : input.image && !input.prompt ? 'images' : 'tokens',
-      quantity: input.duration || (input.image ? 1 : roughTokens),
-      total_tokens: roughTokens,
-    };
-    const estimatedCost = computeUsageCost(product, estimateUsage, input);
+    const quote = await preflight({ provider, endpointId, model, input });
+    const estimatedCost = computeUsageCost(product, quote.usage, input, quote.providerCost);
     if (estimatedCost > 0) {
       const balance = await getBalance(req.user._id);
       // Allow run if balance covers estimate; final charge may differ slightly
@@ -58,6 +124,7 @@ router.post('/run', authenticate, async (req, res, next) => {
           message: `Insufficient wallet balance (est. $${estimatedCost.toFixed(4)}). Please top up.`,
           estimatedCost,
           balance,
+          warnings: quote.warnings.length ? quote.warnings : undefined,
         });
       }
     }
@@ -81,7 +148,13 @@ router.post('/run', authenticate, async (req, res, next) => {
     };
     const inputTokens = Number(usage.input_tokens) || 0;
     const outputTokens = Number(usage.output_tokens) || 0;
-    const cost = computeUsageCost(product, usage, input);
+    const data = ai.data && typeof ai.data === 'object' ? ai.data : {};
+    // denglish-api reports RunPod's own price as upstream_cost and the sell price
+    // (upstream + markup) as cost, computed from output.cost when RunPod returns
+    // one, otherwise from the formula on the model's docs page.
+    const providerCost = Number(data.cost) || quote.providerCost || 0;
+    const upstreamCost = Number(data.upstream_cost) || quote.upstreamCost || 0;
+    const cost = computeUsageCost(product, usage, input, providerCost);
 
     const buyerId = req.user._id;
     const sellerId = product.creator;
@@ -151,36 +224,33 @@ router.post('/run', authenticate, async (req, res, next) => {
       { upsert: true }
     ).catch(() => {});
 
-    const data = ai.data || {};
-    const output =
-      typeof data === 'object'
-        ? {
-            ...data,
-            cost: charged,
-            usage: {
-              input: inputTokens,
-              output: outputTokens,
-              unit: usage.unit,
-              quantity: usage.quantity,
-            },
-          }
-        : { text: String(data), cost: charged };
+    const output = buildOutput(data, {
+      kind: ai.raw?.kind,
+      charged,
+      providerCost,
+      upstreamCost,
+      usage,
+    });
 
     res.json({
       ok: true,
       id: event._id.toString(),
-      status: 'COMPLETED',
+      status: data.status || 'COMPLETED',
       provider,
-      model,
-      endpointId,
-      delayTime: 0,
-      executionTime: ai.latency_ms || latencyMs,
+      model: ai.model || model,
+      endpointId: ai.raw?.endpointId || endpointId,
+      delayTime: Number(ai.raw?.delayTime) || 0,
+      executionTime: Number(ai.raw?.executionTime) || ai.latency_ms || latencyMs,
       output,
       usage,
       cost: charged,
+      providerCost,
+      upstreamCost,
+      markup: Number(data.markup) || quote.markup || 0,
       platformFee,
       sellerNet,
       currency: 'USD',
+      warnings: ai.raw?.warnings?.length ? ai.raw.warnings : undefined,
       sandbox: Boolean(ai.raw?.sandbox),
     });
   } catch (err) {

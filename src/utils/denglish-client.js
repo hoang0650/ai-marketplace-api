@@ -47,6 +47,78 @@ async function callDenglishInfer(body) {
   }
 }
 
+async function denglishGet(path) {
+  const base = (config.denglishApiUrl || '').replace(/\/$/, '');
+  if (!base) {
+    const err = new Error('DENGLISH_API_URL is not configured');
+    err.code = 'DENGLISH_NOT_CONFIGURED';
+    throw err;
+  }
+  const headers = {};
+  if (config.denglishServiceKey) headers['X-Service-Key'] = config.denglishServiceKey;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), config.denglishTimeoutMs);
+  try {
+    const res = await fetch(`${base}${path}`, { headers, signal: controller.signal });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err = new Error(json.detail || json.message || `denglish-api HTTP ${res.status}`);
+      err.status = res.status;
+      err.body = json;
+      throw err;
+    }
+    return json;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** RunPod Public Endpoints catalog with per-model input schema and pricing. */
+function fetchModelCatalog(kind) {
+  return denglishGet(`/v1/models${kind ? `?kind=${encodeURIComponent(kind)}` : ''}`);
+}
+
+function fetchModelSchema(identifier) {
+  return denglishGet(`/v1/models/${encodeURIComponent(identifier)}`);
+}
+
+/**
+ * Ask denglish-api what it would send to RunPod and what the docs pricing says.
+ * @returns {Promise<{ endpointId: string, kind: string, input: object, warnings: string[], unit: string, quantity: number, estimatedCost: number|null }>}
+ */
+async function quoteInference({ model, input }) {
+  const base = (config.denglishApiUrl || '').replace(/\/$/, '');
+  if (!base) {
+    const err = new Error('DENGLISH_API_URL is not configured');
+    err.code = 'DENGLISH_NOT_CONFIGURED';
+    throw err;
+  }
+  const headers = { 'Content-Type': 'application/json' };
+  if (config.denglishServiceKey) headers['X-Service-Key'] = config.denglishServiceKey;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), config.denglishTimeoutMs);
+  try {
+    const res = await fetch(`${base}/v1/quote`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ model, input: input || {} }),
+      signal: controller.signal,
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err = new Error(json.detail || json.message || `denglish-api HTTP ${res.status}`);
+      err.status = res.status;
+      err.body = json;
+      throw err;
+    }
+    return json;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Local sandbox when denglish-api is unreachable (dev only). */
 function localSandboxInfer({ provider, model, endpointId, input }) {
   const prompt = String(input?.prompt || input?.text || '');
@@ -58,6 +130,7 @@ function localSandboxInfer({ provider, model, endpointId, input }) {
       provider: provider || 'runpod_public',
       model: ep,
       data: {
+        kind: 'video',
         video_url: 'https://image.runpod.ai/asset/bytedance/seedance-v1-5-pro-i2.png',
         status: 'COMPLETED',
       },
@@ -77,7 +150,7 @@ function localSandboxInfer({ provider, model, endpointId, input }) {
       ok: true,
       provider: provider || 'runpod_public',
       model: ep,
-      data: { image_url: input?.image || 'https://picsum.photos/seed/phai/1024/1024' },
+      data: { kind: 'image', image_url: input?.image || 'https://picsum.photos/seed/phai/1024/1024' },
       usage: {
         input_tokens: 0,
         output_tokens: 0,
@@ -97,6 +170,7 @@ function localSandboxInfer({ provider, model, endpointId, input }) {
     provider: provider || 'runpod_serverless',
     model: model || ep,
     data: {
+      kind: 'text',
       text,
       choices: [{ tokens: [text] }],
       ai_response_text: text,
@@ -211,6 +285,9 @@ module.exports = {
   callDenglishInfer,
   localSandboxInfer,
   inferWithFallback,
+  fetchModelCatalog,
+  fetchModelSchema,
+  quoteInference,
   callDenglishAgentTurn,
   localSandboxAgentTurn,
   agentTurnWithFallback,

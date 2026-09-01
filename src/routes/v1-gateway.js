@@ -51,7 +51,7 @@ async function meterAndInfer(req, product, input) {
     action: 'runsync',
   });
   const usage = ai.usage || { input_tokens: 0, output_tokens: 0, total_tokens: 0, unit: 'tokens' };
-  const cost = computeUsageCost(product, usage, input);
+  const cost = computeUsageCost(product, usage, input, Number(ai.data?.cost) || 0);
   const buyerId = req.user._id;
   const sellerId = product.creator;
   const selfUse = String(buyerId) === String(sellerId);

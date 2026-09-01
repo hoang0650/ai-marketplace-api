@@ -495,6 +495,21 @@
         "docsUrl":  "https://docs.runpod.io/public-endpoints/models/vidu-q3-t2v"
     },
     {
+        "slug":  "hailuo-02-std",
+        "name":  "Hailuo 02 Standard",
+        "description":  "MiniMax Hailuo 02 Standard: 6 or 10 second videos from text or reference images.",
+        "kind":  "video",
+        "modality":  "text-to-video",
+        "endpointId":  "minimax-hailuo-02-std",
+        "runsyncUrl":  "https://api.runpod.ai/v2/minimax-hailuo-02-std/runsync",
+        "runUrl":  "https://api.runpod.ai/v2/minimax-hailuo-02-std/run",
+        "statusUrlTemplate":  "https://api.runpod.ai/v2/minimax-hailuo-02-std/status/{JOB_ID}",
+        "openaiBaseUrl":  null,
+        "openaiModel":  null,
+        "pricing":  "$0.0383/second",
+        "docsUrl":  "https://console.runpod.io/hub/playground/video/minimax-hailuo-02-std"
+    },
+    {
         "slug":  "granite-4",
         "name":  "IBM Granite 4.0",
         "description":  "32B parameter long-context instruct model.",
@@ -568,5 +583,35 @@
         "openaiModel":  null,
         "pricing":  "$0.05/1K chars",
         "docsUrl":  "https://docs.runpod.io/public-endpoints/models/minimax-speech"
+    },
+    {
+        "slug":  "gpt-oss-120b",
+        "name":  "GPT-OSS 120B",
+        "description":  "OpenAI\u0027s open-weight 120B parameter model for text generation.",
+        "kind":  "text",
+        "modality":  "text-to-text",
+        "endpointId":  "gpt-oss-120b",
+        "runsyncUrl":  "https://api.runpod.ai/v2/gpt-oss-120b/runsync",
+        "runUrl":  "https://api.runpod.ai/v2/gpt-oss-120b/run",
+        "statusUrlTemplate":  "https://api.runpod.ai/v2/gpt-oss-120b/status/{JOB_ID}",
+        "openaiBaseUrl":  "https://api.runpod.ai/v2/gpt-oss-120b/openai/v1",
+        "openaiModel":  "gpt-oss-120b",
+        "pricing":  "$10.00/1M tokens",
+        "docsUrl":  "https://docs.runpod.io/public-endpoints/models/gpt-oss-120b"
+    },
+    {
+        "slug":  "cogito-671b",
+        "name":  "Cogito 671B v2.1",
+        "description":  "671B Mixture-of-Experts model with FP8 dynamic quantization.",
+        "kind":  "text",
+        "modality":  "text-to-text",
+        "endpointId":  "cogito-671b-v2-1-fp8-dynamic",
+        "runsyncUrl":  "https://api.runpod.ai/v2/cogito-671b-v2-1-fp8-dynamic/runsync",
+        "runUrl":  "https://api.runpod.ai/v2/cogito-671b-v2-1-fp8-dynamic/run",
+        "statusUrlTemplate":  "https://api.runpod.ai/v2/cogito-671b-v2-1-fp8-dynamic/status/{JOB_ID}",
+        "openaiBaseUrl":  "https://api.runpod.ai/v2/cogito-671b-v2-1-fp8-dynamic/openai/v1",
+        "openaiModel":  "cogito-671b-v2-1-fp8-dynamic",
+        "pricing":  "$0.50/1M tokens",
+        "docsUrl":  "https://docs.runpod.io/public-endpoints/models/cogito-671b"
     }
 ]

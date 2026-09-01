@@ -115,10 +115,17 @@ function extractEndpointId(url) {
   return extractProviderEndpointId(url) || extractAimarketsModelId(url);
 }
 
+const round6 = (value) => Math.round(Number(value) * 1e6) / 1e6;
+
 /**
- * Compute USD charge from product pricing + normalized usage.
+ * Compute the USD charge from product pricing + normalized usage.
+ *
+ * When the seller has set `pricing.usageRate` we bill against it. Otherwise we
+ * fall back to `providerCost` — the figure RunPod reports in `output.cost`
+ * (or denglish-api's estimate from the model's documented pricing formula) —
+ * so pay-per-use products stay in sync with the upstream price list.
  */
-function computeUsageCost(product, usage, input = {}) {
+function computeUsageCost(product, usage, input = {}, providerCost = 0) {
   const pricing = product.pricing || {};
   if (pricing.model !== 'usage') return 0;
 
@@ -127,20 +134,17 @@ function computeUsageCost(product, usage, input = {}) {
   const quantity = Number(usage?.quantity);
   const totalTokens = Number(usage?.total_tokens) || 0;
 
-  const slug = String(product.slug || '');
-  if (slug.includes('seedance') && unit === 'seconds') {
-    const secs = Number.isFinite(quantity) && quantity > 0 ? quantity : Number(input.duration) || 5;
-    const res = String(input.resolution || '720p');
-    const perSec = res === '480p' ? 0.024 : 0.052;
-    return Math.round(secs * perSec * 1e6) / 1e6;
+  if (rate > 0) {
+    if (unit === 'seconds' || unit === 'images' || unit === 'requests') {
+      let qty = Number.isFinite(quantity) && quantity > 0 ? quantity : 0;
+      if (!qty) qty = unit === 'seconds' ? Number(input?.duration) || 0 : 1;
+      return round6(qty * rate);
+    }
+    return round6((totalTokens / 1000) * rate);
   }
 
-  if (unit === 'seconds' || unit === 'images' || unit === 'requests') {
-    const qty = Number.isFinite(quantity) && quantity > 0 ? quantity : unit === 'images' ? 1 : 0;
-    return Math.round(qty * rate * 1e6) / 1e6;
-  }
-
-  return Math.round((totalTokens / 1000) * rate * 1e6) / 1e6;
+  const upstream = Number(providerCost);
+  return Number.isFinite(upstream) && upstream > 0 ? round6(upstream) : 0;
 }
 
 module.exports = { resolveProviderForProduct, extractEndpointId, computeUsageCost };
