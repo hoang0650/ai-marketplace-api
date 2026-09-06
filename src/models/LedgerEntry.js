@@ -14,11 +14,18 @@ const ledgerEntrySchema = new mongoose.Schema(
     type: {
       type: String,
       enum: [
+        'CUSTOMER_PAYMENT',
         'ORDER_GROSS',
+        'PLATFORM_REVENUE',
         'PLATFORM_FEE',
+        'SELLER_PAYABLE',
         'SELLER_ENTITLEMENT',
+        'TAX_PAYABLE',
+        'PAYMENT_PROCESSING_FEE',
         'PROVIDER_COST',
         'REFUND',
+        'REFUND_PAYABLE',
+        'CHARGEBACK',
         'TAX',
         'ADJUSTMENT',
       ],

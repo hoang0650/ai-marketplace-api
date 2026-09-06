@@ -65,6 +65,12 @@ Pháp luật Việt Nam; Nghị định về thương mại điện tử và b�
 - Không bán hàng cấm, nội dung bất hợp pháp, hoặc giả mạo Platform Direct.
 - Chịu trách nhiệm về chất lượng dịch vụ bên thứ ba cung cấp.
 
+## Hoa hồng sàn (platform commission)
+Phí sàn mặc định **20%** trên giá trị giao dịch third-party, **không phải thuế seller**.
+Khách hàng thanh toán giá niêm yết; Seller chịu phí sàn trừ khi có rule khác.
+Sản phẩm **Platform Direct** không chia 80/20 — toàn bộ doanh thu thuộc nền tảng.
+Mọi order lưu **snapshot** commissionRate / commissionAmount tại thời điểm giao dịch.
+
 ## Hoa hồng / entitlement
 Doanh thu Seller là **entitlement đối soát** trên ledger nội bộ, không phải số dư ví điện tử được cấp phép trừ khi có giấy phép phù hợp.`,
   },
@@ -105,7 +111,11 @@ Sàn **không** tự vận hành ví điện tử / nhận tiền gửi không k
 Buyer → Cổng thanh toán được cấp phép / phương thức được phép → Xác nhận Order → Ledger nội bộ (entitlement, phí sàn, chi phí provider).
 
 ## Ledger
-Số dư hiển thị (nếu có) là **quyền lợi đối soát nội bộ**, không phải tiền gửi ngân hàng.`,
+Số dư hiển thị (nếu có) là **quyền lợi đối soát nội bộ**, không phải tiền gửi ngân hàng.
+
+## Phí sàn 20%
+Platform commission được ghi **PLATFORM_REVENUE**, tách khỏi thuế khấu trừ (**TAX_PAYABLE**) và seller payable.
+Không đồng nhất “còn 80%” với nghĩa vụ thuế.`,
   },
   {
     documentType: 'refund-policy',
@@ -156,11 +166,48 @@ Cấm: malware, tấn công hạ tầng, nội dung bất hợp pháp theo pháp
 
 Tuân thủ pháp luật bảo vệ dữ liệu cá nhân Việt Nam. Dữ liệu đơn hàng, xác minh Seller, audit được lưu theo thời hạn phục vụ đối soát và yêu cầu cơ quan có thẩm quyền.`,
   },
+  {
+    documentType: 'tax-policy',
+    title: 'Chính sách thuế AI Markets',
+    summary: 'Phí sàn 20% không phải thuế; khấu trừ và kê khai theo hồ sơ Seller và Tax Engine.',
+    content: `# Chính sách thuế
+
+## Phí sàn không phải thuế
+Marketplace thu **platform commission** (mặc định 20% đối với seller bên thứ ba). Đây **không** phải thuế thu nhập / VAT của seller.
+
+## Nghĩa vụ thuế của Seller
+Seller chịu trách nhiệm kê khai, nộp thuế theo loại hình (cá nhân, hộ kinh doanh, doanh nghiệp, seller nước ngoài) và pháp luật áp dụng.
+
+## Khấu trừ
+Khi pháp luật / Tax Rule yêu cầu, sàn có thể **khấu trừ** tại nguồn. Tỷ lệ **không** hard-code trong điều khoản vì có thể thay đổi theo pháp luật và hồ sơ thuế đã xác minh.
+
+## Hóa đơn
+Hóa đơn sàn (phí dịch vụ marketplace) khác hóa đơn hàng hóa/dịch vụ của Seller tới Buyer khi giao dịch third-party.
+
+## Seller nước ngoài
+Không mặc định áp dụng cùng cách tính với seller Việt Nam. Hồ sơ thuế / residency được version hóa.
+
+## Thay đổi
+Thay đổi luật hoặc Tax Rule chỉ áp dụng cho giao dịch mới. Order đã snapshot không bị tính lại.`,
+  },
+  {
+    documentType: 'invoice-policy',
+    title: 'Chính sách hóa đơn AI Markets',
+    summary: 'Phân biệt hóa đơn nền tảng (commission) và hóa đơn seller.',
+    content: `# Chính sách hóa đơn
+
+Sàn không giả định mình là bên bán đối với mọi giao dịch.
+
+- **PLATFORM_INVOICE**: phí dịch vụ sàn / commission / hàng Platform Direct.
+- **SELLER_INVOICE**: hàng hóa/dịch vụ do seller thứ ba cung cấp cho buyer (khi mô hình pháp lý/accounting yêu cầu).
+
+Chi tiết xuất hóa đơn theo hồ sơ thuế đã xác minh và quy định hóa đơn điện tử đang hiệu lực.`,
+  },
 ];
 
 async function ensureLegalDocuments() {
-  const version = '2026.09.06';
-  const effectiveAt = new Date('2026-09-06T00:00:00.000Z');
+  const version = '2026.09.07';
+  const effectiveAt = new Date('2026-09-07T00:00:00.000Z');
   let created = 0;
   let skipped = 0;
 

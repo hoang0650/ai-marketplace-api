@@ -1,11 +1,10 @@
 const express = require('express');
 const Product = require('../models/Product');
 const UsageEvent = require('../models/UsageEvent');
-const WalletTx = require('../models/WalletTx');
 const UsageStat = require('../models/UsageStat');
 const { authenticate } = require('../middleware/auth');
-const { PLATFORM_FEE_RATE } = require('../utils/platform');
 const { getBalance } = require('../utils/wallet');
+const { chargeUsage } = require('../finance/charge-usage');
 const { resolveProviderForProduct, computeUsageCost } = require('../utils/provider-resolve');
 const { inferWithFallback } = require('../utils/denglish-client');
 
@@ -55,23 +54,16 @@ router.post('/infer/:slug', authenticate, async (req, res, next) => {
       if (balance < cost) {
         return res.status(402).json({ message: 'Insufficient wallet balance', cost, balance });
       }
-      platformFee = Math.round(cost * PLATFORM_FEE_RATE * 1e6) / 1e6;
-      sellerNet = Math.round((cost - platformFee) * 1e6) / 1e6;
-      charged = cost;
-      await WalletTx.create({
-        user: buyerId,
-        type: 'debit',
-        amount: cost,
-        currency: 'USD',
+      const billed = await chargeUsage({
+        buyerId,
+        sellerId,
+        product,
+        cost,
         note: `API: ${product.name}`,
       });
-      await WalletTx.create({
-        user: sellerId,
-        type: 'credit',
-        amount: sellerNet,
-        currency: 'USD',
-        note: `API revenue: ${product.name}`,
-      });
+      platformFee = billed.platformFee;
+      sellerNet = billed.sellerNet;
+      charged = billed.charged;
     }
 
     await UsageEvent.create({

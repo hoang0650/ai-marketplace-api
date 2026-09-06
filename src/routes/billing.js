@@ -6,12 +6,15 @@ const Notification = require('../models/Notification');
 const SellerProfile = require('../models/SellerProfile');
 const LegalDocument = require('../models/LegalDocument');
 const { authenticate } = require('../middleware/auth');
-const { splitRevenue } = require('../utils/platform');
 const { deleteCachePattern } = require('../utils/cache');
 const { clampQty } = require('../utils/sales');
 const { getBalance } = require('../utils/wallet');
 const { HOLD_MS } = require('../utils/payout-hold');
-const { recordOrderLedger } = require('../utils/ledger');
+const { recordOrderLedger } = require('../finance/ledger-service');
+const { settleSaleFromDb } = require('../finance/settlement-service');
+const { recordTaxPostings } = require('../finance/tax-posting');
+const { issueOrderInvoices } = require('../finance/invoice-service');
+const { taxCategoryFromProduct } = require('../finance/tax-category');
 const { writeAuditLog } = require('../utils/audit');
 
 const router = express.Router();
@@ -30,8 +33,22 @@ router.post('/checkout', authenticate, async (req, res, next) => {
       product.pricing?.model === 'usage'
         ? Number(product.pricing.usageRate) || 0
         : Number(product.pricing.price) || 0;
-    const amount = Math.round(unit * quantity * 100) / 100;
     const currency = product.pricing?.currency || 'USD';
+
+    const settlement = await settleSaleFromDb({
+      unitPrice: unit,
+      quantity,
+      ownershipType,
+      seller: { _id: product.creator, sellerType: undefined },
+      sellerId: product.creator,
+      buyer: { country: '' },
+      product: product.toObject ? product.toObject() : product,
+      paymentMethod: 'internal_ledger',
+      currency,
+      digits: 2,
+    });
+
+    const amount = settlement.grossAmount;
 
     if (amount > 0) {
       const balance = await getBalance(req.user._id);
@@ -47,9 +64,6 @@ router.post('/checkout', authenticate, async (req, res, next) => {
     }
 
     const now = new Date();
-    const split =
-      amount > 0 ? splitRevenue(amount, { ownershipType }) : { sellerNet: 0, platformFee: 0 };
-
     const sellerProfile = await SellerProfile.findOne({ user: product.creator }).lean();
     const termsDoc = await LegalDocument.findOne({
       documentType: 'terms',
@@ -76,8 +90,23 @@ router.post('/checkout', authenticate, async (req, res, next) => {
       quantity,
       amount,
       currency,
-      sellerNet: split.sellerNet,
-      platformFee: split.platformFee,
+      unitPrice: settlement.unitPrice,
+      grossAmount: settlement.grossAmount,
+      commissionRate: settlement.commissionRate,
+      commissionAmount: settlement.commissionAmount,
+      commissionRuleId: settlement.commissionRuleId,
+      taxAmount: settlement.taxAmount,
+      taxBreakdown: settlement.taxBreakdown,
+      taxCategory: settlement.taxCategory || taxCategoryFromProduct(product),
+      paymentFeeAmount: settlement.paymentFeeAmount,
+      refundAmount: 0,
+      chargebackAmount: 0,
+      sellerGrossAmount: settlement.sellerGrossAmount,
+      sellerNetAmount: settlement.sellerNetAmount,
+      platformRevenueAmount: settlement.platformRevenueAmount,
+      sellerNet: settlement.sellerNetAmount,
+      platformFee: settlement.platformRevenueAmount,
+      financialSnapshot: settlement,
       completedAt: now,
       payoutHoldUntil:
         ownershipType === 'THIRD_PARTY_SELLER' ? new Date(now.getTime() + HOLD_MS) : now,
@@ -99,6 +128,7 @@ router.post('/checkout', authenticate, async (req, res, next) => {
         refundPolicyVersion: refundDoc?.version || '',
         termsVersion: termsDoc?.version || '',
         infraProvider: product.infraProvider || product.provider || '',
+        commissionRate: settlement.commissionRate,
       },
     });
 
@@ -110,23 +140,23 @@ router.post('/checkout', authenticate, async (req, res, next) => {
         currency,
         note: `Order ${order._id} · ${product.name} ×${quantity} (internal ledger entitlement)`,
       });
-      if (ownershipType === 'THIRD_PARTY_SELLER' && split.sellerNet > 0) {
+      if (ownershipType === 'THIRD_PARTY_SELLER' && settlement.sellerNetAmount > 0) {
         await WalletTx.create({
           user: product.creator,
           type: 'credit',
-          amount: split.sellerNet,
+          amount: settlement.sellerNetAmount,
           currency,
-          note: `Seller entitlement: ${product.name} (held 48h / until dispute closes)`,
+          note: `Seller payable: ${product.name} (commission ${settlement.commissionAmount} snapshot, tax ${settlement.taxAmount})`,
         });
       }
       await recordOrderLedger({
         order,
+        settlement,
         ownershipType,
-        sellerNet: split.sellerNet,
-        platformFee: split.platformFee,
-        amount,
         currency,
       }).catch((err) => console.error('[ledger]', err.message));
+      await recordTaxPostings({ order, settlement }).catch((err) => console.error('[tax]', err.message));
+      await issueOrderInvoices(order, settlement).catch((err) => console.error('[invoice]', err.message));
     }
 
     await Product.updateOne({ _id: product._id }, { $inc: { salesCount: quantity } });
@@ -146,7 +176,15 @@ router.post('/checkout', authenticate, async (req, res, next) => {
       action: 'ORDER_PAID',
       resourceType: 'Order',
       resourceId: order._id,
-      newValue: { ownershipType, amount, currency },
+      newValue: {
+        ownershipType,
+        amount,
+        currency,
+        commissionRate: settlement.commissionRate,
+        commissionAmount: settlement.commissionAmount,
+        taxAmount: settlement.taxAmount,
+        sellerNetAmount: settlement.sellerNetAmount,
+      },
       ip: req.ip,
       userAgent: req.get('user-agent') || '',
     });
@@ -161,6 +199,11 @@ router.post('/checkout', authenticate, async (req, res, next) => {
       quantity,
       amount,
       currency,
+      commissionRate: settlement.commissionRate,
+      commissionAmount: settlement.commissionAmount,
+      taxAmount: settlement.taxAmount,
+      platformFee: settlement.platformRevenueAmount,
+      sellerNet: settlement.sellerNetAmount,
       balance,
       orderId: order._id.toString(),
     });

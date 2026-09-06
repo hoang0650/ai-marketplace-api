@@ -7,6 +7,7 @@ const { createApp } = require('./app');
 const { ensureRunpodMarketplaceProducts } = require('./utils/ensure-runpod-products');
 const { ensureAiProviderProducts } = require('./utils/ensure-ai-provider-products');
 const { ensureLegalDocuments } = require('./utils/ensure-legal-documents');
+const { ensureCommissionRules } = require('./utils/ensure-commission-rules');
 const { syncSalesCountsFromOrders } = require('./utils/sales');
 const { attachTerminalGateway } = require('./terminal/gateway');
 const { attachGameStreamProxy } = require('./terminal/stream-proxy');
@@ -18,6 +19,12 @@ connectDb()
       console.log(
         `[legal] ensured documents version=${legal.version} created=${legal.created} skipped=${legal.skipped}`,
       );
+    }
+  })
+  .then(() => ensureCommissionRules())
+  .then((commission) => {
+    if (commission) {
+      console.log(`[finance] commission rule ensured rate=${commission.rate} created=${commission.created}`);
     }
   })
   .then(() => ensureRunpodMarketplaceProducts())

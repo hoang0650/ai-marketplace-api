@@ -89,6 +89,7 @@ const productSchema = new mongoose.Schema(
     featured: { type: Boolean, default: false },
     publishedAt: { type: Date, default: Date.now },
     productType: { type: String, default: 'MODEL', index: true },
+    taxCategory: { type: String, default: '', trim: true, uppercase: true, index: true },
     /** @deprecated Prefer infraProvider — kept for backward compatibility with catalog seeds. */
     provider: { type: String, default: '', trim: true, index: true },
     published: { type: Boolean, default: true, index: true },

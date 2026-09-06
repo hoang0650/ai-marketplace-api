@@ -14,6 +14,8 @@ const LEGAL_DOCUMENT_TYPES = [
   'acceptable-use',
   'data-policy',
   'seller-agreement',
+  'tax-policy',
+  'invoice-policy',
 ];
 
 const legalDocumentSchema = new mongoose.Schema(

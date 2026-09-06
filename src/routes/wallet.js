@@ -65,14 +65,43 @@ router.post('/withdraw', authenticate, requireRoles('creator', 'admin'), async (
         available,
       });
     }
+    const SellerProfile = require('../models/SellerProfile');
+    const { createPayout } = require('../finance/payout-engine');
+    const profile = await SellerProfile.findOne({ user: req.user._id }).lean();
+    if (req.user.role !== 'admin') {
+      const { canPayoutSeller } = require('../finance/payout-engine');
+      const gate = canPayoutSeller(profile);
+      if (!gate.ok) {
+        return res.status(403).json({
+          message: 'Payout on hold until seller verification/compliance is complete.',
+          code: gate.holdReason || 'PAYOUT_ON_HOLD',
+        });
+      }
+    }
+    const { payout } = await createPayout({
+      sellerId: req.user._id,
+      payableAmount: amount,
+      currency: 'USD',
+      actorId: req.user._id,
+      idempotencyKey: `wd_${req.user._id}_${amount}_${Date.now()}`,
+    });
+    if (payout.status === 'ON_HOLD' && req.user.role !== 'admin') {
+      return res.status(403).json({
+        message: payout.holdReason || 'Payout on hold',
+        code: payout.holdReason,
+        payoutId: payout.payoutId,
+      });
+    }
     const tx = await WalletTx.create({
       user: req.user._id,
       type: 'withdraw',
       amount,
       currency: 'USD',
-      note: 'Withdrawal request',
+      note: `Payout ${payout.payoutId}`,
     });
-    res.status(201).json(mapWallet(tx));
+    const { setPayoutStatus } = require('../finance/payout-engine');
+    await setPayoutStatus(payout.payoutId, 'PAID', { actorId: req.user._id });
+    res.status(201).json({ ...mapWallet(tx), payoutId: payout.payoutId });
   } catch (err) {
     next(err);
   }

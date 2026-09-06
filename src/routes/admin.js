@@ -6,11 +6,12 @@ const Review = require('../models/Review');
 const WalletTx = require('../models/WalletTx');
 const Notification = require('../models/Notification');
 const { authenticate, requireRoles } = require('../middleware/auth');
-const { PLATFORM_FEE_RATE, splitRevenue } = require('../utils/platform');
+const { PLATFORM_COMMISSION_RATE } = require('../utils/platform');
 const { applyStatus, STATUSES, effectiveStatus } = require('../utils/moderation');
 const { deleteCachePattern } = require('../utils/cache');
 const { mapProduct, mapOrder } = require('../utils/mappers');
 const { effectiveSellerNet } = require('../utils/payout-hold');
+const { createRefund } = require('../finance/refund-service');
 
 const router = express.Router();
 
@@ -40,6 +41,36 @@ router.get('/overview', authenticate, requireRoles('admin'), async (_req, res, n
             _id: null,
             total: { $sum: '$amount' },
             paidOrders: { $sum: 1 },
+            taxAmount: { $sum: { $ifNull: ['$taxAmount', 0] } },
+            commissionAmount: {
+              $sum: {
+                $ifNull: [
+                  '$commissionAmount',
+                  {
+                    $cond: [
+                      { $eq: ['$ownershipType', 'PLATFORM_DIRECT'] },
+                      0,
+                      { $ifNull: ['$platformFee', 0] },
+                    ],
+                  },
+                ],
+              },
+            },
+            platformRevenueAmount: {
+              $sum: {
+                $ifNull: [
+                  '$platformRevenueAmount',
+                  { $ifNull: ['$platformFee', 0] },
+                ],
+              },
+            },
+            sellerNet: {
+              $sum: {
+                $ifNull: ['$sellerNetAmount', { $ifNull: ['$sellerNet', 0] }],
+              },
+            },
+            refundAmount: { $sum: { $ifNull: ['$refundAmount', 0] } },
+            chargebackAmount: { $sum: { $ifNull: ['$chargebackAmount', 0] } },
           },
         },
       ]),
@@ -50,6 +81,31 @@ router.get('/overview', authenticate, requireRoles('admin'), async (_req, res, n
             _id: '$seller',
             grossRevenue: { $sum: '$amount' },
             orders: { $sum: 1 },
+            platformFee: {
+              $sum: {
+                $ifNull: ['$platformRevenueAmount', { $ifNull: ['$platformFee', 0] }],
+              },
+            },
+            sellerNet: {
+              $sum: {
+                $ifNull: ['$sellerNetAmount', { $ifNull: ['$sellerNet', 0] }],
+              },
+            },
+            taxAmount: { $sum: { $ifNull: ['$taxAmount', 0] } },
+            commissionAmount: {
+              $sum: {
+                $ifNull: [
+                  '$commissionAmount',
+                  {
+                    $cond: [
+                      { $eq: ['$ownershipType', 'PLATFORM_DIRECT'] },
+                      0,
+                      { $ifNull: ['$platformFee', 0] },
+                    ],
+                  },
+                ],
+              },
+            },
           },
         },
         { $sort: { grossRevenue: -1 } },
@@ -76,6 +132,10 @@ router.get('/overview', authenticate, requireRoles('admin'), async (_req, res, n
             },
             grossRevenue: 1,
             orders: 1,
+            platformFee: 1,
+            sellerNet: 1,
+            taxAmount: 1,
+            commissionAmount: 1,
           },
         },
       ]),
@@ -89,23 +149,27 @@ router.get('/overview', authenticate, requireRoles('admin'), async (_req, res, n
 
     const totalGrossRevenue = revenueAgg[0]?.total || 0;
     const paidOrders = revenueAgg[0]?.paidOrders || 0;
-    const { platformFee, sellerNet } = splitRevenue(totalGrossRevenue);
+    const platformFee = revenueAgg[0]?.platformRevenueAmount || 0;
+    const sellerNet = revenueAgg[0]?.sellerNet || 0;
+    const commissionAmount = revenueAgg[0]?.commissionAmount || 0;
+    const taxAmount = revenueAgg[0]?.taxAmount || 0;
+    const refundAmount = revenueAgg[0]?.refundAmount || 0;
+    const chargebackAmount = revenueAgg[0]?.chargebackAmount || 0;
     const buyerDeposits = depositAgg[0]?.total || 0;
     const buyerDepositCount = depositAgg[0]?.count || 0;
 
-    const shops = shopAgg.map((row) => {
-      const split = splitRevenue(row.grossRevenue);
-      return {
-        sellerId: row.sellerId,
-        shopName: row.shopName,
-        creatorSlug: row.creatorSlug || '',
-        avatarUrl: row.avatarUrl || '',
-        orders: row.orders,
-        grossRevenue: split.gross,
-        platformFee: split.platformFee,
-        sellerNet: split.sellerNet,
-      };
-    });
+    const shops = shopAgg.map((row) => ({
+      sellerId: row.sellerId,
+      shopName: row.shopName,
+      creatorSlug: row.creatorSlug || '',
+      avatarUrl: row.avatarUrl || '',
+      orders: row.orders,
+      grossRevenue: row.grossRevenue,
+      platformFee: row.platformFee,
+      sellerNet: row.sellerNet,
+      taxAmount: row.taxAmount || 0,
+      commissionAmount: row.commissionAmount || 0,
+    }));
 
     res.json({
       users,
@@ -115,15 +179,17 @@ router.get('/overview', authenticate, requireRoles('admin'), async (_req, res, n
       reviews,
       paidOrders,
       currency: 'USD',
-      platformFeeRate: PLATFORM_FEE_RATE,
-      /** GMV / tổng doanh thu toàn sàn (paid orders) */
+      platformFeeRate: PLATFORM_COMMISSION_RATE,
+      commissionRate: PLATFORM_COMMISSION_RATE,
       totalGrossRevenue,
       gmv: totalGrossRevenue,
-      /** Phí nền tảng 20% */
       platformFee,
-      /** Phần seller nhận (80%) */
+      platformRevenue: platformFee,
+      platformCommission: commissionAmount,
+      taxWithheld: taxAmount,
+      refundAmount,
+      chargebackAmount,
       sellerNet,
-      /** Tổng tiền buyer nạp vào ví */
       buyerDeposits,
       buyerDepositCount,
       shops,
@@ -334,28 +400,25 @@ router.patch('/disputes/:id', authenticate, requireRoles('admin'), async (req, r
       });
     } else {
       order.disputeStatus = 'buyer_win';
-      order.status = 'refunded';
+      order.disputeResolutionNote = note;
       await order.save();
-      const gross = Number(order.amount) || 0;
-      const net = effectiveSellerNet(order);
       const currency = order.currency || 'USD';
+      let gross = Number(order.amount) || 0;
+      let net = effectiveSellerNet(order);
       if (gross > 0) {
-        await WalletTx.create({
-          user: order.buyer,
-          type: 'credit',
+        const { reversed } = await createRefund({
+          order,
           amount: gross,
-          currency,
-          note: `Refund: ${order.productName} (dispute)`,
+          reason: note || 'dispute buyer_win',
+          actorId: req.user._id,
+          eventId: `dispute_refund_${order._id}`,
         });
-      }
-      if (net > 0) {
-        await WalletTx.create({
-          user: order.seller,
-          type: 'debit',
-          amount: net,
-          currency,
-          note: `Dispute refund: ${order.productName} (this order only)`,
-        });
+        gross = reversed.grossAmount;
+        net = reversed.sellerNetAmount;
+      } else {
+        order.status = 'refunded';
+        order.paymentStatus = 'refunded';
+        await order.save();
       }
       await Notification.create({
         user: order.buyer,
@@ -366,7 +429,7 @@ router.patch('/disputes/:id', authenticate, requireRoles('admin'), async (req, r
       await Notification.create({
         user: order.seller,
         title: 'Khiếu nại: hoàn tiền người mua',
-        body: `Seller net ${net.toFixed(2)} ${currency} for ${order.productName} was reversed. Other wallet funds were not frozen.`,
+        body: `Seller payable ${net.toFixed(2)} ${currency} for ${order.productName} was reversed (commission/tax adjusted on ledger).`,
         href: '/dashboard/orders',
       });
     }

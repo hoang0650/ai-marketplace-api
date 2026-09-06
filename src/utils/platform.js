@@ -1,14 +1,28 @@
-/** Platform take-rate on third-party marketplace GMV (paid orders). */
-const PLATFORM_FEE_RATE = 0.2;
+const { PLATFORM_COMMISSION_RATE, PLATFORM_FEE_RATE, roundMoney } = require('../finance/constants');
+const { settleSale } = require('../finance/settlement-engine');
 
-function splitRevenue(gross, { ownershipType = 'THIRD_PARTY_SELLER' } = {}) {
-  const g = Number(gross) || 0;
-  if (ownershipType === 'PLATFORM_DIRECT') {
-    return { gross: g, platformFee: Math.round(g * 100) / 100, sellerNet: 0 };
-  }
-  const platformFee = Math.round(g * PLATFORM_FEE_RATE * 100) / 100;
-  const sellerNet = Math.round((g - platformFee) * 100) / 100;
-  return { gross: g, platformFee, sellerNet };
+/**
+ * Backward-compatible split using SettlementEngine (commission ≠ tax).
+ * Prefer settleSale / settleSaleFromDb for new code.
+ */
+function splitRevenue(gross, { ownershipType = 'THIRD_PARTY_SELLER', taxRules = [], sellerTaxProfile = null } = {}) {
+  const settled = settleSale({
+    unitPrice: gross,
+    quantity: 1,
+    ownershipType,
+    taxRules,
+    sellerTaxProfile,
+    digits: 2,
+  });
+  return {
+    gross: settled.grossAmount,
+    platformFee: settled.platformFee,
+    sellerNet: settled.sellerNet,
+    commissionRate: settled.commissionRate,
+    commissionAmount: settled.commissionAmount,
+    taxAmount: settled.taxAmount,
+    platformRevenueAmount: settled.platformRevenueAmount,
+  };
 }
 
-module.exports = { PLATFORM_FEE_RATE, splitRevenue };
+module.exports = { PLATFORM_FEE_RATE, PLATFORM_COMMISSION_RATE, splitRevenue, roundMoney };

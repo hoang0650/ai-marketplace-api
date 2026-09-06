@@ -44,6 +44,8 @@ const workRoutes = require('./routes/work');
 const uploadRoutes = require('./routes/uploads');
 const sellerRoutes = require('./routes/sellers');
 const legalRoutes = require('./routes/legal');
+const adminFinanceRoutes = require('./routes/admin-finance');
+const paymentRoutes = require('./routes/payments');
 
 function createApp() {
   const app = express();
@@ -144,6 +146,8 @@ function createApp() {
   app.use('/v1/affiliate', affiliateRoutes);
   app.use('/v1/billing', billingRoutes);
   app.use('/v1/admin', adminRoutes);
+  app.use('/v1/admin', adminFinanceRoutes);
+  app.use('/v1/payments', paymentRoutes);
   app.use('/v1/openclaw', openclawRoutes);
   app.use('/v1/deployments', deploymentRoutes);
   app.use('/v1/playground', playgroundRoutes);

@@ -1,5 +1,4 @@
 const Order = require('../models/Order');
-const { splitRevenue } = require('./platform');
 
 const HOLD_HOURS = Math.max(1, Number(process.env.PAYOUT_HOLD_HOURS || 48));
 const HOLD_MS = HOLD_HOURS * 60 * 60 * 1000;
@@ -8,11 +7,17 @@ function roundMoney(n) {
   return Math.round((Number(n) || 0) * 100) / 100;
 }
 
-/** Seller proceeds for this order only (never the rest of the wallet). */
+/** Snapshot only — never recompute historical commission from the current rate. */
 function effectiveSellerNet(order) {
-  const n = Number(order.sellerNet);
-  if (Number.isFinite(n) && n > 0) return roundMoney(n);
-  return splitRevenue(order.amount).sellerNet;
+  const snap = Number(order.sellerNetAmount);
+  if (Number.isFinite(snap) && snap > 0) return roundMoney(snap);
+  const stored = Number(order.sellerNet);
+  if (Number.isFinite(stored) && stored > 0) return roundMoney(stored);
+  const fee = Number(order.platformFee);
+  const amount = Number(order.amount) || 0;
+  if ((order.ownershipType || 'THIRD_PARTY_SELLER') === 'PLATFORM_DIRECT') return 0;
+  if (Number.isFinite(fee) && fee >= 0 && amount >= fee) return roundMoney(amount - fee);
+  return 0;
 }
 
 function holdUntil(order) {

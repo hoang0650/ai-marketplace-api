@@ -3,11 +3,10 @@ const crypto = require('crypto');
 const Deployment = require('../models/Deployment');
 const UsageEvent = require('../models/UsageEvent');
 const Product = require('../models/Product');
-const WalletTx = require('../models/WalletTx');
 const UsageStat = require('../models/UsageStat');
 const { authenticate, requireRoles } = require('../middleware/auth');
-const { PLATFORM_FEE_RATE } = require('../utils/platform');
 const { getBalance } = require('../utils/wallet');
+const { chargeUsage } = require('../finance/charge-usage');
 const { slugify } = require('../utils/serialize');
 const { normalizeRuntime, normalizeRuntimeForStorage, publicRuntime, mergeRuntime } = require('../utils/runtime');
 const { deleteCachePattern } = require('../utils/cache');
@@ -305,24 +304,16 @@ router.post('/:id/invoke', authenticate, async (req, res, next) => {
           message: `Insufficient wallet balance (need ${cost.toFixed(4)}, have ${balance.toFixed(4)}). Please top up.`,
         });
       }
-      platformFee = Math.round(cost * PLATFORM_FEE_RATE * 1e6) / 1e6;
-      sellerNet = Math.round((cost - platformFee) * 1e6) / 1e6;
-      charged = cost;
-
-      await WalletTx.create({
-        user: buyerId,
-        type: 'debit',
-        amount: cost,
-        currency: 'USD',
+      const billed = await chargeUsage({
+        buyerId,
+        sellerId,
+        product,
+        cost,
         note: `Usage: ${dep.name} (${totalTokens} tokens)`,
       });
-      await WalletTx.create({
-        user: sellerId,
-        type: 'credit',
-        amount: sellerNet,
-        currency: 'USD',
-        note: `Usage revenue: ${dep.name} (${totalTokens} tokens, net after 20% fee)`,
-      });
+      platformFee = billed.platformFee;
+      sellerNet = billed.sellerNet;
+      charged = billed.charged;
     }
 
     const event = await UsageEvent.create({

@@ -4,9 +4,8 @@ const Product = require('../models/Product');
 const GpuServer = require('../models/GpuServer');
 const UsageEvent = require('../models/UsageEvent');
 const UsageStat = require('../models/UsageStat');
-const WalletTx = require('../models/WalletTx');
-const { PLATFORM_FEE_RATE } = require('../utils/platform');
 const { getBalance } = require('../utils/wallet');
+const { chargeUsage } = require('../finance/charge-usage');
 const provider = require('../utils/denglish-providers');
 
 const COMPUTE_CATEGORIES = new Set(['gpu-compute', 'game-server']);
@@ -244,22 +243,15 @@ async function finalizeSessionBilling(session, product) {
     await session.save();
     return cost;
   }
-  const platformFee = Math.round(cost * PLATFORM_FEE_RATE * 1e6) / 1e6;
-  const sellerNet = Math.round((cost - platformFee) * 1e6) / 1e6;
-  await WalletTx.create({
-    user: buyerId,
-    type: 'debit',
-    amount: cost,
-    currency: 'USD',
+  const billed = await chargeUsage({
+    buyerId,
+    sellerId,
+    product,
+    cost,
     note: `Compute: ${product.name} (${minutes}m)`,
   });
-  await WalletTx.create({
-    user: sellerId,
-    type: 'credit',
-    amount: sellerNet,
-    currency: 'USD',
-    note: `Compute revenue: ${product.name}`,
-  });
+  const platformFee = billed.platformFee;
+  const sellerNet = billed.sellerNet;
   await UsageEvent.create({
     product: product._id,
     buyer: buyerId,

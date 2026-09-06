@@ -222,4 +222,99 @@ router.patch('/:id/status', authenticate, requireRoles('admin'), async (req, res
   }
 });
 
+router.get('/me/earnings', authenticate, async (req, res, next) => {
+  try {
+    const paid = await Order.find({ seller: req.user._id, status: { $in: ['paid', 'refunded'] } }).lean();
+    const grossSales = paid.reduce((s, o) => s + (Number(o.amount) || 0), 0);
+    const platformFee = paid.reduce(
+      (s, o) => s + (Number(o.commissionAmount ?? (o.ownershipType === 'PLATFORM_DIRECT' ? 0 : o.platformFee)) || 0),
+      0,
+    );
+    const taxWithholding = paid.reduce((s, o) => s + (Number(o.taxAmount) || 0), 0);
+    const paymentFees = paid.reduce((s, o) => s + (Number(o.paymentFeeAmount) || 0), 0);
+    const refunds = paid.reduce((s, o) => s + (Number(o.refundAmount) || 0), 0);
+    const chargebacks = paid.reduce((s, o) => s + (Number(o.chargebackAmount) || 0), 0);
+    const netPayable = paid.reduce((s, o) => s + (Number(o.sellerNetAmount ?? o.sellerNet) || 0), 0);
+    res.json({
+      grossSales,
+      platformFee,
+      platformCommissionRate: 0.2,
+      taxWithholding,
+      paymentFees,
+      refunds,
+      chargebacks,
+      netPayable,
+      currency: paid[0]?.currency || 'USD',
+      orderCount: paid.length,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/me/payouts', authenticate, async (req, res, next) => {
+  try {
+    const SellerPayout = require('../models/SellerPayout');
+    const rows = await SellerPayout.find({ sellerId: req.user._id }).sort({ createdAt: -1 }).limit(100).lean();
+    res.json(rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/me/tax-profile', authenticate, async (req, res, next) => {
+  try {
+    const { currentSellerTaxProfile } = require('../finance/settlement-service');
+    const profile = await currentSellerTaxProfile(req.user._id);
+    res.json(profile);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/me/tax-profile', authenticate, async (req, res, next) => {
+  try {
+    const SellerTaxProfile = require('../models/SellerTaxProfile');
+    const { normalizeSellerType } = require('../finance/seller-types');
+    const { writeAuditLog } = require('../utils/audit');
+    const current = await SellerTaxProfile.findOne({ sellerId: req.user._id, effectiveTo: null }).sort({ version: -1 });
+    const nextVersion = (current?.version || 0) + 1;
+    if (current) {
+      current.effectiveTo = new Date();
+      await current.save();
+    }
+    const created = await SellerTaxProfile.create({
+      sellerId: req.user._id,
+      sellerType: normalizeSellerType(req.body?.sellerType || current?.sellerType),
+      country: String(req.body?.country || current?.country || 'VN').toUpperCase().slice(0, 8),
+      taxResidency: String(req.body?.taxResidency || req.body?.country || current?.taxResidency || 'VN')
+        .toUpperCase()
+        .slice(0, 8),
+      taxIdentificationNumber: String(req.body?.taxIdentificationNumber || req.body?.taxCode || '').slice(0, 50),
+      businessRegistrationNumber: String(req.body?.businessRegistrationNumber || '').slice(0, 100),
+      vatStatus: String(req.body?.vatStatus || '').slice(0, 80),
+      taxMethod: String(req.body?.taxMethod || '').slice(0, 80),
+      invoiceMethod: String(req.body?.invoiceMethod || '').slice(0, 80),
+      withholdingRequired: !!req.body?.withholdingRequired,
+      taxClassification: String(req.body?.taxClassification || '').slice(0, 80),
+      effectiveFrom: new Date(),
+      effectiveTo: null,
+      verificationStatus: 'PENDING',
+      version: nextVersion,
+    });
+    await writeAuditLog({
+      actorId: req.user._id,
+      action: 'SELLER_TAX_PROFILE_CHANGED',
+      resourceType: 'SellerTaxProfile',
+      resourceId: created._id,
+      oldValue: current ? { version: current.version } : null,
+      newValue: { version: created.version, sellerType: created.sellerType },
+      ip: req.ip,
+    });
+    res.status(201).json(created);
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;

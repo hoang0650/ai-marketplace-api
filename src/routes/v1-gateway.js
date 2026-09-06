@@ -2,12 +2,11 @@ const crypto = require('crypto');
 const express = require('express');
 const Product = require('../models/Product');
 const UsageEvent = require('../models/UsageEvent');
-const WalletTx = require('../models/WalletTx');
 const UsageStat = require('../models/UsageStat');
 const { authenticate } = require('../middleware/auth');
 const { authenticateMarketplaceKey } = require('../middleware/marketplace-key');
-const { PLATFORM_FEE_RATE } = require('../utils/platform');
 const { getBalance } = require('../utils/wallet');
+const { chargeUsage } = require('../finance/charge-usage');
 const { resolveProviderForProduct, computeUsageCost } = require('../utils/provider-resolve');
 const { inferWithFallback } = require('../utils/denglish-client');
 
@@ -67,23 +66,16 @@ async function meterAndInfer(req, product, input) {
       err.body = { cost, balance };
       throw err;
     }
-    platformFee = Math.round(cost * PLATFORM_FEE_RATE * 1e6) / 1e6;
-    sellerNet = Math.round((cost - platformFee) * 1e6) / 1e6;
-    charged = cost;
-    await WalletTx.create({
-      user: buyerId,
-      type: 'debit',
-      amount: cost,
-      currency: 'USD',
+    const billed = await chargeUsage({
+      buyerId,
+      sellerId,
+      product,
+      cost,
       note: `Gateway: ${product.name}`,
     });
-    await WalletTx.create({
-      user: sellerId,
-      type: 'credit',
-      amount: sellerNet,
-      currency: 'USD',
-      note: `Gateway revenue: ${product.name}`,
-    });
+    platformFee = billed.platformFee;
+    sellerNet = billed.sellerNet;
+    charged = billed.charged;
   }
 
   const event = await UsageEvent.create({
