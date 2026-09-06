@@ -3,12 +3,16 @@ const Product = require('../models/Product');
 const Order = require('../models/Order');
 const WalletTx = require('../models/WalletTx');
 const Notification = require('../models/Notification');
+const SellerProfile = require('../models/SellerProfile');
+const LegalDocument = require('../models/LegalDocument');
 const { authenticate } = require('../middleware/auth');
 const { splitRevenue } = require('../utils/platform');
 const { deleteCachePattern } = require('../utils/cache');
 const { clampQty } = require('../utils/sales');
 const { getBalance } = require('../utils/wallet');
 const { HOLD_MS } = require('../utils/payout-hold');
+const { recordOrderLedger } = require('../utils/ledger');
+const { writeAuditLog } = require('../utils/audit');
 
 const router = express.Router();
 
@@ -21,6 +25,7 @@ router.post('/checkout', authenticate, async (req, res, next) => {
     const product = await Product.findById(productId);
     if (!product) return res.status(404).json({ message: 'Product not found' });
 
+    const ownershipType = product.ownershipType || 'THIRD_PARTY_SELLER';
     const unit =
       product.pricing?.model === 'usage'
         ? Number(product.pricing.usageRate) || 0
@@ -32,7 +37,7 @@ router.post('/checkout', authenticate, async (req, res, next) => {
       const balance = await getBalance(req.user._id);
       if (balance < amount) {
         return res.status(402).json({
-          message: `Insufficient aimarkets.vn wallet balance (need ${amount.toFixed(2)} ${currency}, have ${balance.toFixed(2)}). Please top up.`,
+          message: `Insufficient internal ledger entitlement (need ${amount.toFixed(2)} ${currency}, have ${balance.toFixed(2)}). Top up via licensed payment rails when available.`,
           code: 'INSUFFICIENT_WALLET',
           amount,
           balance,
@@ -42,7 +47,24 @@ router.post('/checkout', authenticate, async (req, res, next) => {
     }
 
     const now = new Date();
-    const split = amount > 0 ? splitRevenue(amount) : { sellerNet: 0, platformFee: 0 };
+    const split =
+      amount > 0 ? splitRevenue(amount, { ownershipType }) : { sellerNet: 0, platformFee: 0 };
+
+    const sellerProfile = await SellerProfile.findOne({ user: product.creator }).lean();
+    const termsDoc = await LegalDocument.findOne({
+      documentType: 'terms',
+      status: 'published',
+      locale: 'vi',
+    })
+      .sort({ effectiveAt: -1 })
+      .lean();
+    const refundDoc = await LegalDocument.findOne({
+      documentType: 'refund-policy',
+      status: 'published',
+      locale: 'vi',
+    })
+      .sort({ effectiveAt: -1 })
+      .lean();
 
     const order = await Order.create({
       product: product._id,
@@ -50,16 +72,34 @@ router.post('/checkout', authenticate, async (req, res, next) => {
       buyer: req.user._id,
       buyerName: req.user.name,
       seller: product.creator,
+      ownershipType,
       quantity,
       amount,
       currency,
       sellerNet: split.sellerNet,
       platformFee: split.platformFee,
       completedAt: now,
-      payoutHoldUntil: new Date(now.getTime() + HOLD_MS),
+      payoutHoldUntil:
+        ownershipType === 'THIRD_PARTY_SELLER' ? new Date(now.getTime() + HOLD_MS) : now,
       disputeStatus: 'none',
       status: 'paid',
+      paymentStatus: 'paid',
+      fulfillmentStatus: 'fulfilled',
+      paymentProvider: 'internal_ledger',
       provider: 'wallet',
+      contractSnapshot: {
+        productName: product.name,
+        productDescription: product.description || product.tagline || '',
+        sellerDisplayName: product.creatorName,
+        sellerLegalName: sellerProfile?.legalName || product.creatorName,
+        ownershipType,
+        pricing: product.pricing,
+        license: product.license || '',
+        termsSummary: product.termsSummary || '',
+        refundPolicyVersion: refundDoc?.version || '',
+        termsVersion: termsDoc?.version || '',
+        infraProvider: product.infraProvider || product.provider || '',
+      },
     });
 
     if (amount > 0) {
@@ -68,17 +108,25 @@ router.post('/checkout', authenticate, async (req, res, next) => {
         type: 'debit',
         amount,
         currency,
-        note: `Pay ${product.name} ×${quantity} (aimarkets.vn wallet)`,
+        note: `Order ${order._id} · ${product.name} ×${quantity} (internal ledger entitlement)`,
       });
-      if (split.sellerNet > 0) {
+      if (ownershipType === 'THIRD_PARTY_SELLER' && split.sellerNet > 0) {
         await WalletTx.create({
           user: product.creator,
           type: 'credit',
           amount: split.sellerNet,
           currency,
-          note: `Sale: ${product.name} (held 48h / until dispute closes)`,
+          note: `Seller entitlement: ${product.name} (held 48h / until dispute closes)`,
         });
       }
+      await recordOrderLedger({
+        order,
+        ownershipType,
+        sellerNet: split.sellerNet,
+        platformFee: split.platformFee,
+        amount,
+        currency,
+      }).catch((err) => console.error('[ledger]', err.message));
     }
 
     await Product.updateOne({ _id: product._id }, { $inc: { salesCount: quantity } });
@@ -88,19 +136,33 @@ router.post('/checkout', authenticate, async (req, res, next) => {
     await Notification.create({
       user: product.creator,
       title: 'New order',
-      body: `${req.user.name} purchased ${product.name} via aimarkets.vn wallet`,
+      body: `${req.user.name} purchased ${product.name} (${ownershipType})`,
       href: '/dashboard/orders',
+    });
+
+    await writeAuditLog({
+      actorId: req.user._id,
+      actorRole: req.user.role,
+      action: 'ORDER_PAID',
+      resourceType: 'Order',
+      resourceId: order._id,
+      newValue: { ownershipType, amount, currency },
+      ip: req.ip,
+      userAgent: req.get('user-agent') || '',
     });
 
     const balance = await getBalance(req.user._id);
     res.status(201).json({
       checkoutId: `chk_${order._id.toString()}`,
       provider: 'wallet',
+      paymentProvider: 'internal_ledger',
+      ownershipType,
       status: 'paid',
       quantity,
       amount,
       currency,
       balance,
+      orderId: order._id.toString(),
     });
   } catch (err) {
     next(err);

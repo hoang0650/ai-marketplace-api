@@ -1,6 +1,7 @@
 const bcrypt = require('bcryptjs');
 const User = require('../models/User');
 const Product = require('../models/Product');
+const SellerProfile = require('../models/SellerProfile');
 const { publicGatewayUrls, withUpstreamEnv } = require('./gateway-urls');
 const { deleteCachePattern } = require('./cache');
 
@@ -8,7 +9,7 @@ const CREATOR = {
   email: 'providers@aimarkets.vn',
   name: 'PH AI Gateways',
   creatorSlug: 'phai-gateways',
-  bio: 'OpenRouter, Featherless, and metered inference APIs on PH AI Market.',
+  bio: 'Platform Direct storefront for PH AI Markets. OpenRouter/Featherless/RunPod are infra providers — not third-party sellers.',
   avatarUrl: '/assets/brand/ph-mark.svg',
   coverUrl: '/assets/brand/cover-ai.svg',
 };
@@ -105,7 +106,31 @@ async function ensureAiProviderProducts() {
       verified: true,
       affiliateCode: 'PHAI-GATEWAYS',
     });
+  } else {
+    creator.bio = CREATOR.bio;
+    creator.verified = true;
+    await creator.save().catch(() => {});
   }
+
+  await SellerProfile.findOneAndUpdate(
+    { user: creator._id },
+    {
+      $set: {
+        sellerType: 'platform',
+        legalName: 'PHGROUP / AI Markets Platform',
+        displayName: CREATOR.name,
+        contactEmail: CREATOR.email,
+        verificationStatus: 'VERIFIED',
+        complianceStatus: 'compliant',
+        identityVerificationStatus: 'verified',
+        sellerAgreementVersion: '2026.09.06',
+        sellerAgreementAcceptedAt: new Date(),
+        verifiedAt: new Date(),
+      },
+      $setOnInsert: { user: creator._id },
+    },
+    { upsert: true },
+  );
 
   let upserted = 0;
   for (const row of CATALOG) {
@@ -121,11 +146,19 @@ async function ensureAiProviderProducts() {
         $set: {
           name: row.name,
           tagline: row.tagline,
-          description: `${row.tagline}\n\nCalls go Frontend → Node → denglish-api → ${row.provider}. Provider keys never reach the browser.`,
+          description: `${row.tagline}\n\nCalls go Frontend → Node → denglish-api → ${row.provider}. Provider keys never reach the browser. Sold as PLATFORM_DIRECT — ${row.provider} is infrastructure provider, not the marketplace seller.`,
           category: row.category,
           creator: creator._id,
           creatorSlug: CREATOR.creatorSlug,
           creatorName: CREATOR.name,
+          ownershipType: 'PLATFORM_DIRECT',
+          infraProvider: row.provider,
+          provider: row.provider,
+          license: 'Platform managed API access',
+          termsSummary: 'Platform Direct product. Infra provider is not a third-party seller.',
+          complianceStatus: 'approved',
+          moderationStatus: 'active',
+          published: true,
           coverUrl: '/assets/brand/cover-ai.svg',
           gallery: [],
           pricing: {
@@ -148,6 +181,7 @@ async function ensureAiProviderProducts() {
           apiDocsMarkdown: `POST /api/playground/run with productSlug \`${row.slug}\`.`,
           featured: row.featured,
           publishedAt: new Date(),
+          productType: 'API_ENDPOINT',
         },
         $setOnInsert: { slug: row.slug, rating: 4.8, reviewCount: 12, salesCount: 0 },
       },

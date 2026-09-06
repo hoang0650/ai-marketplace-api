@@ -42,6 +42,8 @@ const agentTemplateRoutes = require('./routes/agent-templates');
 const trainingJobRoutes = require('./routes/training-jobs');
 const workRoutes = require('./routes/work');
 const uploadRoutes = require('./routes/uploads');
+const sellerRoutes = require('./routes/sellers');
+const legalRoutes = require('./routes/legal');
 
 function createApp() {
   const app = express();
@@ -158,6 +160,8 @@ function createApp() {
   app.use('/v1/training-jobs', trainingJobRoutes);
   app.use('/v1/work', workRoutes);
   app.use('/v1/uploads', uploadRoutes);
+  app.use('/v1/sellers', sellerRoutes);
+  app.use('/v1/legal', legalRoutes);
 
   app.use(notFound);
   app.use(errorHandler);

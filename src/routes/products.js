@@ -8,6 +8,8 @@ const { PRODUCT_CATEGORIES } = require('../data/categories');
 const { normalizeRuntime } = require('../utils/runtime');
 const { inferProductType } = require('../data/marketplace-types');
 const { catalogVisibleFilter, isCatalogVisible } = require('../utils/moderation');
+const { assertCanPublishProduct } = require('../utils/seller-compliance');
+const { writeAuditLog } = require('../utils/audit');
 
 const router = express.Router();
 
@@ -106,6 +108,44 @@ router.post('/', authenticate, requireRoles('creator', 'admin'), async (req, res
       return res.status(400).json({ message: 'Creator profile missing slug' });
     }
 
+    const requestedOwnership =
+      body.ownershipType === 'PLATFORM_DIRECT' ? 'PLATFORM_DIRECT' : 'THIRD_PARTY_SELLER';
+    const wantsPublish = body.published !== false;
+
+    let ownershipType = requestedOwnership;
+    if (wantsPublish || requestedOwnership === 'PLATFORM_DIRECT') {
+      try {
+        const publishGate = await assertCanPublishProduct(user, {
+          ownershipType: requestedOwnership,
+        });
+        ownershipType = publishGate.ownershipType;
+      } catch (err) {
+        if (requestedOwnership === 'PLATFORM_DIRECT' || wantsPublish) {
+          return res.status(err.status || 403).json({
+            message: err.message,
+            code: err.code || undefined,
+            verificationStatus: err.verificationStatus,
+          });
+        }
+      }
+    }
+
+    const moderationStatus =
+      ownershipType === 'PLATFORM_DIRECT' || user.role === 'admin'
+        ? wantsPublish
+          ? 'active'
+          : 'inactive'
+        : wantsPublish
+          ? 'pending_review'
+          : 'inactive';
+
+    const published =
+      ownershipType === 'PLATFORM_DIRECT' || user.role === 'admin'
+        ? wantsPublish
+        : false;
+
+    const infraProvider = String(body.infraProvider || body.provider || '');
+
     const product = await Product.create({
       slug,
       name,
@@ -115,6 +155,12 @@ router.post('/', authenticate, requireRoles('creator', 'admin'), async (req, res
       creator: user._id,
       creatorSlug: user.creatorSlug || 'admin',
       creatorName: user.name,
+      ownershipType,
+      infraProvider,
+      provider: infraProvider,
+      license: body.license || '',
+      termsSummary: body.termsSummary || '',
+      complianceStatus: ownershipType === 'PLATFORM_DIRECT' ? 'approved' : 'pending',
       coverUrl: body.coverUrl || '',
       gallery: Array.isArray(body.gallery) ? body.gallery : [],
       pricing: body.pricing,
@@ -127,8 +173,19 @@ router.post('/', authenticate, requireRoles('creator', 'admin'), async (req, res
       featured: !!body.featured,
       publishedAt: body.publishedAt ? new Date(body.publishedAt) : new Date(),
       productType: body.productType || inferProductType(body.category, body.tags),
-      provider: String(body.provider || ''),
-      published: body.published !== false,
+      published,
+      moderationStatus,
+    });
+
+    await writeAuditLog({
+      actorId: user._id,
+      actorRole: user.role,
+      action: 'PRODUCT_CREATE',
+      resourceType: 'Product',
+      resourceId: product._id,
+      newValue: { ownershipType, moderationStatus, slug, published },
+      ip: req.ip,
+      userAgent: req.get('user-agent') || '',
     });
 
     invalidateProductCaches();

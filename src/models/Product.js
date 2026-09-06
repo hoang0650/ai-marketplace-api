@@ -57,6 +57,23 @@ const productSchema = new mongoose.Schema(
     creator: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     creatorSlug: { type: String, required: true, index: true },
     creatorName: { type: String, required: true },
+    /** PLATFORM_DIRECT = sold by marketplace operator; THIRD_PARTY_SELLER = third-party seller. */
+    ownershipType: {
+      type: String,
+      enum: ['PLATFORM_DIRECT', 'THIRD_PARTY_SELLER'],
+      default: 'THIRD_PARTY_SELLER',
+      index: true,
+    },
+    /** Infra backend only (runpod, openrouter, …). Never treat as marketplace seller. */
+    infraProvider: { type: String, default: '', trim: true, index: true },
+    license: { type: String, default: '', maxlength: 500 },
+    termsSummary: { type: String, default: '', maxlength: 2000 },
+    complianceStatus: {
+      type: String,
+      enum: ['pending', 'approved', 'rejected', 'restricted'],
+      default: 'pending',
+      index: true,
+    },
     coverUrl: { type: String, default: '' },
     gallery: { type: [String], default: [] },
     pricing: { type: pricingSchema, required: true },
@@ -72,11 +89,12 @@ const productSchema = new mongoose.Schema(
     featured: { type: Boolean, default: false },
     publishedAt: { type: Date, default: Date.now },
     productType: { type: String, default: 'MODEL', index: true },
+    /** @deprecated Prefer infraProvider — kept for backward compatibility with catalog seeds. */
     provider: { type: String, default: '', trim: true, index: true },
     published: { type: Boolean, default: true, index: true },
     moderationStatus: {
       type: String,
-      enum: ['active', 'suspended', 'blocked', 'inactive'],
+      enum: ['active', 'suspended', 'blocked', 'inactive', 'pending_review'],
       default: 'active',
       index: true,
     },

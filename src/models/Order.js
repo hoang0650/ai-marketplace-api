@@ -7,13 +7,34 @@ const orderSchema = new mongoose.Schema(
     buyer: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     buyerName: { type: String, required: true },
     seller: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    ownershipType: {
+      type: String,
+      enum: ['PLATFORM_DIRECT', 'THIRD_PARTY_SELLER'],
+      default: 'THIRD_PARTY_SELLER',
+      index: true,
+    },
     quantity: { type: Number, default: 1, min: 1, max: 99 },
     amount: { type: Number, required: true },
     currency: { type: String, default: 'USD' },
+    taxAmount: { type: Number, default: 0, min: 0 },
     sellerNet: { type: Number, default: 0, min: 0 },
     platformFee: { type: Number, default: 0, min: 0 },
     completedAt: { type: Date, default: null },
     payoutHoldUntil: { type: Date, default: null },
+    /** Immutable snapshot at purchase time for contract/history. */
+    contractSnapshot: {
+      productName: { type: String, default: '' },
+      productDescription: { type: String, default: '' },
+      sellerDisplayName: { type: String, default: '' },
+      sellerLegalName: { type: String, default: '' },
+      ownershipType: { type: String, default: '' },
+      pricing: { type: mongoose.Schema.Types.Mixed, default: null },
+      license: { type: String, default: '' },
+      termsSummary: { type: String, default: '' },
+      refundPolicyVersion: { type: String, default: '' },
+      termsVersion: { type: String, default: '' },
+      infraProvider: { type: String, default: '' },
+    },
     disputeStatus: {
       type: String,
       enum: ['none', 'open', 'seller_win', 'buyer_win'],
@@ -25,9 +46,26 @@ const orderSchema = new mongoose.Schema(
     disputeResolvedAt: { type: Date, default: null },
     disputeResolutionNote: { type: String, default: '', maxlength: 1000 },
     status: { type: String, enum: ['pending', 'paid', 'refunded'], default: 'pending' },
+    fulfillmentStatus: {
+      type: String,
+      enum: ['pending', 'fulfilled', 'failed', 'cancelled'],
+      default: 'pending',
+    },
+    paymentStatus: {
+      type: String,
+      enum: ['pending', 'paid', 'failed', 'refunded'],
+      default: 'pending',
+    },
+    /** Payment rail — NOT infra provider. */
+    paymentProvider: {
+      type: String,
+      enum: ['wallet', 'stripe', 'paypal', 'paddle', 'payos', 'internal_ledger'],
+      default: 'wallet',
+    },
+    /** @deprecated Alias of paymentProvider (historical field name). */
     provider: {
       type: String,
-      enum: ['wallet', 'stripe', 'paypal', 'paddle', 'payos'],
+      enum: ['wallet', 'stripe', 'paypal', 'paddle', 'payos', 'internal_ledger'],
       default: 'wallet',
       required: true,
     },

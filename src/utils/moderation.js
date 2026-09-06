@@ -1,4 +1,4 @@
-const STATUSES = ['active', 'suspended', 'blocked', 'inactive'];
+const STATUSES = ['active', 'suspended', 'blocked', 'inactive', 'pending_review'];
 
 function clampDays(n) {
   const d = Number(n);

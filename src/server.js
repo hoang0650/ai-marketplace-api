@@ -6,11 +6,20 @@ const { closeRedis } = require('./config/redis');
 const { createApp } = require('./app');
 const { ensureRunpodMarketplaceProducts } = require('./utils/ensure-runpod-products');
 const { ensureAiProviderProducts } = require('./utils/ensure-ai-provider-products');
+const { ensureLegalDocuments } = require('./utils/ensure-legal-documents');
 const { syncSalesCountsFromOrders } = require('./utils/sales');
 const { attachTerminalGateway } = require('./terminal/gateway');
 const { attachGameStreamProxy } = require('./terminal/stream-proxy');
 
 connectDb()
+  .then(() => ensureLegalDocuments())
+  .then((legal) => {
+    if (legal) {
+      console.log(
+        `[legal] ensured documents version=${legal.version} created=${legal.created} skipped=${legal.skipped}`,
+      );
+    }
+  })
   .then(() => ensureRunpodMarketplaceProducts())
   .then(() => ensureAiProviderProducts())
   .then(() => syncSalesCountsFromOrders())
