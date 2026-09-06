@@ -9,6 +9,7 @@ const sellerPayoutSchema = new mongoose.Schema(
     taxAmount: { type: Number, default: 0 },
     commissionAmount: { type: Number, default: 0 },
     paymentFee: { type: Number, default: 0 },
+    storeFee: { type: Number, default: 0 },
     currency: { type: String, default: 'USD' },
     status: {
       type: String,

@@ -47,7 +47,10 @@ Sàn cung cấp listing, đặt hàng, ghi nhận hợp đồng/order, tích h�
 ## 5. Cấm giao dịch ngoài sàn
 Các bên không được yêu cầu thanh toán ngoài hệ thống cho giao dịch phát sinh trên sàn.
 
-## 6. Luật áp dụng
+## 6. Phí
+Phí sàn (commission, mặc định 20% third-party) tách khỏi phí cửa hàng Google Play / App Store khi thanh toán IAP. Phí cửa hàng do Google/Apple thu, không phải doanh thu sàn.
+
+## 7. Luật áp dụng
 Pháp luật Việt Nam; Nghị định về thương mại điện tử và bảo vệ dữ liệu cá nhân áp dụng khi có hiệu lực.`,
   },
   {
@@ -68,8 +71,15 @@ Pháp luật Việt Nam; Nghị định về thương mại điện tử và b�
 ## Hoa hồng sàn (platform commission)
 Phí sàn mặc định **20%** trên giá trị giao dịch third-party, **không phải thuế seller**.
 Khách hàng thanh toán giá niêm yết; Seller chịu phí sàn trừ khi có rule khác.
-Sản phẩm **Platform Direct** không chia 80/20 — toàn bộ doanh thu thuộc nền tảng.
+Sản phẩm **Platform Direct** không chia 80/20 — toàn bộ doanh thu thuộc nền tảng (sau phí cửa hàng nếu có IAP).
 Mọi order lưu **snapshot** commissionRate / commissionAmount tại thời điểm giao dịch.
+
+## Phí Google Play (CHPlay) và App Store
+Khi Buyer thanh toán bằng In-App Purchase:
+- **Google Play / CHPlay**: phí dịch vụ cửa hàng mặc định **15%** (Google có thể áp 15% hoặc 30% theo điều khoản Google tại thời điểm giao dịch).
+- **App Store**: hoa hồng Apple mặc định **30%** (có thể 15% theo Apple Small Business Program hoặc subscription năm 2+).
+Phí cửa hàng do Google/Apple thu, **không phải phí sàn**, **không phải thuế**, **không phải doanh thu AI Markets**. Sàn khấu trừ theo snapshot để tính seller net / payout vì số tiền thực nhận đã bị cửa hàng cắt.
+Giao dịch web / ví aimarkets.vn: phí CHPlay/App Store = 0.
 
 ## Hoa hồng / entitlement
 Doanh thu Seller là **entitlement đối soát** trên ledger nội bộ, không phải số dư ví điện tử được cấp phép trừ khi có giấy phép phù hợp.`,
@@ -86,7 +96,8 @@ Bằng việc chấp thuận, Seller đồng ý:
 3. Không dùng Provider hạ tầng làm danh tính Seller.
 4. Chấp nhận kiểm duyệt sản phẩm, tạm ngưng, gỡ listing khi vi phạm.
 5. Thanh toán/đối soát qua kênh được sàn chỉ định; không thu tiền ngoài sàn cho đơn trên sàn.
-6. Chịu trách nhiệm pháp lý đối với sản phẩm THIRD_PARTY_SELLER của mình.`,
+6. Chịu phí sàn (mặc định 20%) và phí cửa hàng Google Play / App Store khi giao dịch IAP, theo snapshot đơn.
+7. Chịu trách nhiệm pháp lý đối với sản phẩm THIRD_PARTY_SELLER của mình.`,
   },
   {
     documentType: 'buyer-policy',
@@ -115,7 +126,10 @@ Số dư hiển thị (nếu có) là **quyền lợi đối soát nội bộ**,
 
 ## Phí sàn 20%
 Platform commission được ghi **PLATFORM_REVENUE**, tách khỏi thuế khấu trừ (**TAX_PAYABLE**) và seller payable.
-Không đồng nhất “còn 80%” với nghĩa vụ thuế.`,
+Không đồng nhất “còn 80%” với nghĩa vụ thuế.
+
+## Phí CHPlay / App Store (IAP)
+Thanh toán In-App Purchase qua Google Play hoặc App Store chịu phí cửa hàng do Google/Apple thu (mặc định snapshot **15% CHPlay**, **30% App Store**). Ghi **STORE_FEE**, không ghi vào doanh thu sàn. Seller net = gộp − phí sàn − phí cửa hàng − thuế − phí thanh toán − hoàn/chargeback.`,
   },
   {
     documentType: 'refund-policy',
@@ -175,6 +189,9 @@ Tuân thủ pháp luật bảo vệ dữ liệu cá nhân Việt Nam. Dữ liệ
 ## Phí sàn không phải thuế
 Marketplace thu **platform commission** (mặc định 20% đối với seller bên thứ ba). Đây **không** phải thuế thu nhập / VAT của seller.
 
+## Phí CHPlay / App Store không phải thuế
+Phí Google Play (mặc định 15%) và App Store (mặc định 30%) trên IAP là hoa hồng/phí dịch vụ của cửa hàng ứng dụng, **không phải thuế**, không phải phí sàn. Sàn khấu trừ snapshot khi tính payout.
+
 ## Nghĩa vụ thuế của Seller
 Seller chịu trách nhiệm kê khai, nộp thuế theo loại hình (cá nhân, hộ kinh doanh, doanh nghiệp, seller nước ngoài) và pháp luật áp dụng.
 
@@ -206,8 +223,8 @@ Chi tiết xuất hóa đơn theo hồ sơ thuế đã xác minh và quy định
 ];
 
 async function ensureLegalDocuments() {
-  const version = '2026.09.07';
-  const effectiveAt = new Date('2026-09-07T00:00:00.000Z');
+  const version = '2026.09.08';
+  const effectiveAt = new Date('2026-09-08T00:00:00.000Z');
   let created = 0;
   let skipped = 0;
 

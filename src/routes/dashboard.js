@@ -17,6 +17,7 @@ router.get('/summary', authenticate, requireRoles('creator', 'admin'), async (re
       0,
     );
     const taxWithheld = paidOrders.reduce((s, o) => s + (Number(o.taxAmount) || 0), 0);
+    const storeFees = paidOrders.reduce((s, o) => s + (Number(o.storeFeeAmount) || 0), 0);
     const netPayable = paidOrders.reduce(
       (s, o) => s + (Number(o.sellerNetAmount ?? o.sellerNet) || 0),
       0,
@@ -31,6 +32,7 @@ router.get('/summary', authenticate, requireRoles('creator', 'admin'), async (re
       revenue,
       grossSales: revenue,
       platformCommission,
+      storeFees,
       taxWithholding: taxWithheld,
       refunds,
       netPayable,

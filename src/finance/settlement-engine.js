@@ -2,6 +2,7 @@ const { roundMoney } = require('./constants');
 const { calculateCommission } = require('./commission-engine');
 const { calculateTax } = require('./tax-engine');
 const { calculatePaymentFee } = require('./payment-fee-engine');
+const { calculateStoreFee, normalizeSalesChannel } = require('./store-fee-engine');
 const { taxCategoryFromProduct } = require('./tax-category');
 const { normalizeSellerType } = require('./seller-types');
 
@@ -20,9 +21,11 @@ function settleSale({
   jurisdiction,
   transactionDate = new Date(),
   paymentMethod,
+  salesChannel,
   commissionRules = [],
   taxRules = [],
   paymentFeeRules = [],
+  storeFeeRules = [],
   refundAmount = 0,
   chargebackAmount = 0,
   currency = 'USD',
@@ -70,9 +73,18 @@ function settleSale({
     digits,
   });
 
+  const storeFee = calculateStoreFee({
+    grossAmount,
+    salesChannel: salesChannel || paymentMethod,
+    transactionDate,
+    rules: storeFeeRules,
+    digits,
+  });
+
   const feeIfSeller = paymentFee.borneBy === 'SELLER' ? paymentFee.amount : 0;
   const refund = roundMoney(refundAmount, digits);
   const chargeback = roundMoney(chargebackAmount, digits);
+  const channel = normalizeSalesChannel(salesChannel || paymentMethod);
 
   let platformRevenueAmount;
   let sellerGrossAmount;
@@ -83,14 +95,21 @@ function settleSale({
   if (ownershipType === 'PLATFORM_DIRECT' || sellerType === 'PLATFORM') {
     commissionRate = 0;
     commissionAmount = 0;
-    platformRevenueAmount = grossAmount;
     sellerGrossAmount = 0;
     sellerNetAmount = 0;
+    // Google/Apple still take IAP cut; remainder is platform proceeds.
+    platformRevenueAmount = roundMoney(grossAmount - storeFee.amount, digits);
   } else {
     platformRevenueAmount = commissionAmount;
     sellerGrossAmount = grossAmount;
     sellerNetAmount = roundMoney(
-      grossAmount - commissionAmount - tax.totalTaxAmount - feeIfSeller - refund - chargeback,
+      grossAmount -
+        commissionAmount -
+        tax.totalTaxAmount -
+        storeFee.amount -
+        feeIfSeller -
+        refund -
+        chargeback,
       digits,
     );
   }
@@ -110,6 +129,11 @@ function settleSale({
     paymentFeeRate: paymentFee.rate,
     paymentFeeAmount: feeIfSeller,
     paymentFeeBorneBy: paymentFee.borneBy,
+    salesChannel: channel,
+    storeFeeRate: storeFee.rate,
+    storeFeeAmount: storeFee.amount,
+    storeFeeCollector: storeFee.collector,
+    storeFeeRuleName: storeFee.ruleName,
     refundAmount: refund,
     chargebackAmount: chargeback,
     sellerGrossAmount,

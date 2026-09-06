@@ -16,6 +16,7 @@ const { recordTaxPostings } = require('../finance/tax-posting');
 const { issueOrderInvoices } = require('../finance/invoice-service');
 const { taxCategoryFromProduct } = require('../finance/tax-category');
 const { writeAuditLog } = require('../utils/audit');
+const { normalizeSalesChannel } = require('../finance/store-fee-engine');
 
 const router = express.Router();
 
@@ -35,6 +36,7 @@ router.post('/checkout', authenticate, async (req, res, next) => {
         : Number(product.pricing.price) || 0;
     const currency = product.pricing?.currency || 'USD';
 
+    const salesChannel = normalizeSalesChannel(req.body?.salesChannel);
     const settlement = await settleSaleFromDb({
       unitPrice: unit,
       quantity,
@@ -43,7 +45,8 @@ router.post('/checkout', authenticate, async (req, res, next) => {
       sellerId: product.creator,
       buyer: { country: '' },
       product: product.toObject ? product.toObject() : product,
-      paymentMethod: 'internal_ledger',
+      paymentMethod: salesChannel === 'WEB' ? 'internal_ledger' : salesChannel,
+      salesChannel,
       currency,
       digits: 2,
     });
@@ -99,6 +102,10 @@ router.post('/checkout', authenticate, async (req, res, next) => {
       taxBreakdown: settlement.taxBreakdown,
       taxCategory: settlement.taxCategory || taxCategoryFromProduct(product),
       paymentFeeAmount: settlement.paymentFeeAmount,
+      salesChannel: settlement.salesChannel,
+      storeFeeRate: settlement.storeFeeRate,
+      storeFeeAmount: settlement.storeFeeAmount,
+      storeFeeCollector: settlement.storeFeeCollector || '',
       refundAmount: 0,
       chargebackAmount: 0,
       sellerGrossAmount: settlement.sellerGrossAmount,
@@ -129,6 +136,8 @@ router.post('/checkout', authenticate, async (req, res, next) => {
         termsVersion: termsDoc?.version || '',
         infraProvider: product.infraProvider || product.provider || '',
         commissionRate: settlement.commissionRate,
+        salesChannel: settlement.salesChannel,
+        storeFeeRate: settlement.storeFeeRate,
       },
     });
 
@@ -146,7 +155,7 @@ router.post('/checkout', authenticate, async (req, res, next) => {
           type: 'credit',
           amount: settlement.sellerNetAmount,
           currency,
-          note: `Seller payable: ${product.name} (commission ${settlement.commissionAmount} snapshot, tax ${settlement.taxAmount})`,
+          note: `Seller payable: ${product.name} (commission ${settlement.commissionAmount} snapshot, store ${settlement.storeFeeAmount}, tax ${settlement.taxAmount})`,
         });
       }
       await recordOrderLedger({

@@ -27,6 +27,7 @@ router.get('/revenue', ...admin, async (_req, res, next) => {
           refund: { $sum: { $ifNull: ['$refundAmount', 0] } },
           chargeback: { $sum: { $ifNull: ['$chargebackAmount', 0] } },
           paymentFee: { $sum: { $ifNull: ['$paymentFeeAmount', 0] } },
+          storeFee: { $sum: { $ifNull: ['$storeFeeAmount', 0] } },
         },
       },
     ]);
@@ -36,6 +37,7 @@ router.get('/revenue', ...admin, async (_req, res, next) => {
       platformCommission: row.commission || 0,
       platformRevenue: row.platformRevenue || 0,
       paymentFees: row.paymentFee || 0,
+      storeFees: row.storeFee || 0,
       refund: row.refund || 0,
       chargeback: row.chargeback || 0,
       taxWithheld: row.tax || 0,
@@ -104,6 +106,16 @@ router.put('/commission-rules/:id', ...admin, async (req, res, next) => {
       ip: req.ip,
     });
     res.json(doc);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/store-fees', ...admin, async (_req, res, next) => {
+  try {
+    const StoreFeeRule = require('../models/StoreFeeRule');
+    const rules = await StoreFeeRule.find().sort({ createdAt: -1 }).lean();
+    res.json(rules);
   } catch (err) {
     next(err);
   }
@@ -231,6 +243,7 @@ router.post('/payouts', ...admin, async (req, res, next) => {
       taxAmount: Number(req.body?.taxAmount) || 0,
       commissionAmount: Number(req.body?.commissionAmount) || 0,
       paymentFee: Number(req.body?.paymentFee) || 0,
+      storeFee: Number(req.body?.storeFee) || 0,
       currency: req.body?.currency || 'USD',
       actorId: req.user._id,
       idempotencyKey: req.body?.idempotencyKey || '',

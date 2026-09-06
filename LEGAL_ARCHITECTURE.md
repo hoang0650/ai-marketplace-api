@@ -15,7 +15,7 @@ See also: `../AI_Marketplace_Frontend_Prompt.md` and `../denglish-api/ARCHITECTU
 
 - `GET/POST /v1/sellers/*` — apply, accept agreement, admin status
 - `GET/POST /v1/legal/*` — versioned legal documents + acceptances
-- Checkout writes `contractSnapshot` + `financial_ledger` entries. **Platform commission default 20%** is stored as an order snapshot (`commissionRate` / `commissionAmount`) and is **not seller tax**. See `FINANCE_ARCHITECTURE.md`.
+- Checkout writes `contractSnapshot` + `financial_ledger` entries. **Platform commission default 20%** is stored as an order snapshot (`commissionRate` / `commissionAmount`) and is **not seller tax**. **Google Play (CHPlay) 15%** and **App Store 30%** IAP store fees are a separate snapshot (`storeFeeRate` / `storeFeeAmount`) paid to Google/Apple, not to the marketplace. See `FINANCE_ARCHITECTURE.md`.
 
 ## Finance framing
 

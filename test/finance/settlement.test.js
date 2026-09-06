@@ -204,4 +204,58 @@ test('no matching tax rule means zero tax (rates not hardcoded)', () => {
   });
   assert.equal(s.taxAmount, 0);
   assert.equal(s.sellerNetAmount, 800_000);
+  assert.equal(s.storeFeeAmount, 0);
+  assert.equal(s.salesChannel, 'WEB');
+});
+
+describe('Case 11 – Google Play / CHPlay store fee on top of 20% commission', () => {
+  test('15% Play fee is not commission and not tax', () => {
+    const s = settleSale({
+      unitPrice: 1_000_000,
+      ownershipType: 'THIRD_PARTY_SELLER',
+      salesChannel: 'CHPLAY',
+      commissionRules: [{ rate: 0.2, status: 'ACTIVE' }],
+    });
+    assert.equal(s.salesChannel, 'GOOGLE_PLAY');
+    assert.equal(s.storeFeeCollector, 'GOOGLE');
+    assert.equal(s.storeFeeRate, 0.15);
+    assert.equal(s.storeFeeAmount, 150_000);
+    assert.equal(s.commissionAmount, 200_000);
+    assert.equal(s.taxAmount, 0);
+    assert.equal(s.sellerNetAmount, 650_000);
+    assert.equal(s.platformRevenueAmount, 200_000);
+  });
+});
+
+describe('Case 12 – App Store fee on top of 20% commission', () => {
+  test('30% Apple fee is deducted from seller payable', () => {
+    const s = settleSale({
+      unitPrice: 1_000_000,
+      ownershipType: 'THIRD_PARTY_SELLER',
+      salesChannel: 'APP_STORE',
+      commissionRules: [{ rate: 0.2, status: 'ACTIVE' }],
+    });
+    assert.equal(s.salesChannel, 'APP_STORE');
+    assert.equal(s.storeFeeCollector, 'APPLE');
+    assert.equal(s.storeFeeRate, 0.3);
+    assert.equal(s.storeFeeAmount, 300_000);
+    assert.equal(s.commissionAmount, 200_000);
+    assert.equal(s.sellerNetAmount, 500_000);
+  });
+});
+
+describe('Case 13 – Platform Direct IAP still pays store, not a seller', () => {
+  test('App Store cut reduces platform proceeds; seller net stays 0', () => {
+    const s = settleSale({
+      unitPrice: 1_000_000,
+      ownershipType: 'PLATFORM_DIRECT',
+      salesChannel: 'APP_STORE',
+      sellerTaxProfile: { sellerType: 'PLATFORM', country: 'VN' },
+      commissionRules: [{ rate: 0.2, status: 'ACTIVE' }],
+    });
+    assert.equal(s.commissionAmount, 0);
+    assert.equal(s.sellerNetAmount, 0);
+    assert.equal(s.storeFeeAmount, 300_000);
+    assert.equal(s.platformRevenueAmount, 700_000);
+  });
 });

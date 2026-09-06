@@ -23,6 +23,10 @@ function reverseSettlement(original, refundGross, digits = 2) {
       amount: scale(t.amount),
     })),
     paymentFeeAmount: scale(original.paymentFeeAmount),
+    salesChannel: original.salesChannel || 'WEB',
+    storeFeeRate: original.storeFeeRate || 0,
+    storeFeeAmount: scale(original.storeFeeAmount),
+    storeFeeCollector: original.storeFeeCollector || '',
     sellerGrossAmount: scale(original.sellerGrossAmount),
     sellerNetAmount: scale(original.sellerNetAmount ?? original.sellerNet),
     platformRevenueAmount: scale(original.platformRevenueAmount ?? original.commissionAmount),
@@ -66,6 +70,8 @@ async function createRefund({
     commissionAmount: order.commissionAmount,
     taxAmount: order.taxAmount,
     taxBreakdown: order.taxBreakdown || [],
+    storeFeeAmount: order.storeFeeAmount || 0,
+    salesChannel: order.salesChannel || 'WEB',
     ownershipType: order.ownershipType,
     currency: order.currency,
     taxCategory: order.taxCategory,
@@ -98,6 +104,15 @@ async function createRefund({
       amount: reversed.taxAmount,
       direction: 'debit',
       reference: `refund:${refundId}:tax`,
+    });
+  }
+  if (reversed.storeFeeAmount > 0) {
+    extra.push({
+      entryId: newEntryId('ref_store'),
+      type: 'STORE_FEE',
+      amount: reversed.storeFeeAmount,
+      direction: 'credit',
+      reference: `refund:${refundId}:store-fee`,
     });
   }
   if (order.ownershipType === 'THIRD_PARTY_SELLER' && reversed.sellerNetAmount > 0) {

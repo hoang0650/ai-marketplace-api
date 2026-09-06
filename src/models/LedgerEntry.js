@@ -22,6 +22,7 @@ const ledgerEntrySchema = new mongoose.Schema(
         'SELLER_ENTITLEMENT',
         'TAX_PAYABLE',
         'PAYMENT_PROCESSING_FEE',
+        'STORE_FEE',
         'PROVIDER_COST',
         'REFUND',
         'REFUND_PAYABLE',

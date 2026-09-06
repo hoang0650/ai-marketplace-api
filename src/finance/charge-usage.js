@@ -16,6 +16,8 @@ async function chargeUsage({
   digits = 6,
   commissionRules = [],
   taxRules = [],
+  storeFeeRules = [],
+  salesChannel = 'WEB',
   sellerTaxProfile = null,
 }) {
   const ownershipType = product?.ownershipType || 'THIRD_PARTY_SELLER';
@@ -33,6 +35,8 @@ async function chargeUsage({
     sellerTaxProfile,
     commissionRules,
     taxRules,
+    storeFeeRules,
+    salesChannel,
     currency,
     digits,
   });

@@ -21,6 +21,8 @@ function splitRevenue(gross, { ownershipType = 'THIRD_PARTY_SELLER', taxRules = 
     commissionRate: settled.commissionRate,
     commissionAmount: settled.commissionAmount,
     taxAmount: settled.taxAmount,
+    storeFeeAmount: settled.storeFeeAmount,
+    salesChannel: settled.salesChannel,
     platformRevenueAmount: settled.platformRevenueAmount,
   };
 }

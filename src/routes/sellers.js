@@ -232,6 +232,7 @@ router.get('/me/earnings', authenticate, async (req, res, next) => {
     );
     const taxWithholding = paid.reduce((s, o) => s + (Number(o.taxAmount) || 0), 0);
     const paymentFees = paid.reduce((s, o) => s + (Number(o.paymentFeeAmount) || 0), 0);
+    const storeFees = paid.reduce((s, o) => s + (Number(o.storeFeeAmount) || 0), 0);
     const refunds = paid.reduce((s, o) => s + (Number(o.refundAmount) || 0), 0);
     const chargebacks = paid.reduce((s, o) => s + (Number(o.chargebackAmount) || 0), 0);
     const netPayable = paid.reduce((s, o) => s + (Number(o.sellerNetAmount ?? o.sellerNet) || 0), 0);
@@ -241,6 +242,7 @@ router.get('/me/earnings', authenticate, async (req, res, next) => {
       platformCommissionRate: 0.2,
       taxWithholding,
       paymentFees,
+      storeFees,
       refunds,
       chargebacks,
       netPayable,

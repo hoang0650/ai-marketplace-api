@@ -11,7 +11,7 @@ function stableId(orderId, kind) {
 
 /**
  * Immutable marketplace ledger (reconciliation), not a licensed payment account.
- * Lines must conceptually balance: gross = platformRevenue + tax + sellerFee + sellerPayable
+ * Lines must conceptually balance: gross = platformRevenue + tax + storeFee + sellerFee + sellerPayable
  * (refunds/chargebacks posted as separate adjustment lines).
  */
 async function recordOrderLedger({ order, settlement, ownershipType, currency }) {
@@ -59,6 +59,22 @@ async function recordOrderLedger({ order, settlement, ownershipType, currency })
       direction: 'credit',
       reference: `order:${order._id}:tax-payable`,
       meta: { taxBreakdown: s.taxBreakdown },
+    });
+  }
+
+  if (s.storeFeeAmount > 0) {
+    lines.push({
+      ...base,
+      entryId: stableId(order._id, 'store_fee'),
+      type: 'STORE_FEE',
+      amount: s.storeFeeAmount,
+      direction: 'debit',
+      reference: `order:${order._id}:store-fee`,
+      meta: {
+        salesChannel: s.salesChannel,
+        storeFeeRate: s.storeFeeRate,
+        collector: s.storeFeeCollector,
+      },
     });
   }
 

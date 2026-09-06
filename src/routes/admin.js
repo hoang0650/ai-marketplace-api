@@ -71,6 +71,7 @@ router.get('/overview', authenticate, requireRoles('admin'), async (_req, res, n
             },
             refundAmount: { $sum: { $ifNull: ['$refundAmount', 0] } },
             chargebackAmount: { $sum: { $ifNull: ['$chargebackAmount', 0] } },
+            storeFeeAmount: { $sum: { $ifNull: ['$storeFeeAmount', 0] } },
           },
         },
       ]),
@@ -92,6 +93,7 @@ router.get('/overview', authenticate, requireRoles('admin'), async (_req, res, n
               },
             },
             taxAmount: { $sum: { $ifNull: ['$taxAmount', 0] } },
+            storeFeeAmount: { $sum: { $ifNull: ['$storeFeeAmount', 0] } },
             commissionAmount: {
               $sum: {
                 $ifNull: [
@@ -135,6 +137,7 @@ router.get('/overview', authenticate, requireRoles('admin'), async (_req, res, n
             platformFee: 1,
             sellerNet: 1,
             taxAmount: 1,
+            storeFeeAmount: 1,
             commissionAmount: 1,
           },
         },
@@ -155,6 +158,7 @@ router.get('/overview', authenticate, requireRoles('admin'), async (_req, res, n
     const taxAmount = revenueAgg[0]?.taxAmount || 0;
     const refundAmount = revenueAgg[0]?.refundAmount || 0;
     const chargebackAmount = revenueAgg[0]?.chargebackAmount || 0;
+    const storeFeeAmount = revenueAgg[0]?.storeFeeAmount || 0;
     const buyerDeposits = depositAgg[0]?.total || 0;
     const buyerDepositCount = depositAgg[0]?.count || 0;
 
@@ -168,6 +172,7 @@ router.get('/overview', authenticate, requireRoles('admin'), async (_req, res, n
       platformFee: row.platformFee,
       sellerNet: row.sellerNet,
       taxAmount: row.taxAmount || 0,
+      storeFeeAmount: row.storeFeeAmount || 0,
       commissionAmount: row.commissionAmount || 0,
     }));
 
@@ -187,6 +192,7 @@ router.get('/overview', authenticate, requireRoles('admin'), async (_req, res, n
       platformRevenue: platformFee,
       platformCommission: commissionAmount,
       taxWithheld: taxAmount,
+      storeFees: storeFeeAmount,
       refundAmount,
       chargebackAmount,
       sellerNet,

@@ -74,8 +74,11 @@ Customer pays listed price (commission is seller-borne by default)
   CUSTOMER_PAYMENT     +gross
   PLATFORM_REVENUE     +commission (default 20%)
   TAX_PAYABLE          +withholding (if TaxEngine rule matches)
+  STORE_FEE            −Play 15% / App Store 30% (IAP only; paid to Google/Apple, not platform)
   PAYMENT_PROCESSING_FEE ±fee (if configured)
-  SELLER_PAYABLE       +gross − commission − tax − seller-borne fee − refund − chargeback
+  SELLER_PAYABLE       +gross − commission − store fee − tax − seller-borne fee − refund − chargeback
 ```
 
-Platform-owned: commission rate snapshot **0**, `sellerNet = 0`, `platformRevenue = gross`.
+Web/wallet checkout: store fee = 0. In-app purchase `salesChannel=GOOGLE_PLAY` (CHPlay) or `APP_STORE` applies the store snapshot. Store fees are **not** platform commission and **not** tax.
+
+Platform-owned: commission rate snapshot **0**, `sellerNet = 0`, `platformRevenue = gross − storeFee`.
