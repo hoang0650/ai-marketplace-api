@@ -17,6 +17,9 @@ const { issueOrderInvoices } = require('../finance/invoice-service');
 const { taxCategoryFromProduct } = require('../finance/tax-category');
 const { writeAuditLog } = require('../utils/audit');
 const { normalizeSalesChannel } = require('../finance/store-fee-engine');
+const { isLicenseCategory, resolveLicensePrice } = require('../utils/license-keys');
+const { issueLicenseForOrder, mapLicense } = require('../utils/issue-license');
+const { sendCheckoutSuccessEmail } = require('../utils/send-checkout-email');
 
 const router = express.Router();
 
@@ -30,16 +33,21 @@ router.post('/checkout', authenticate, async (req, res, next) => {
     if (!product) return res.status(404).json({ message: 'Product not found' });
 
     const ownershipType = product.ownershipType || 'THIRD_PARTY_SELLER';
-    const unit =
-      product.pricing?.model === 'usage'
+    const licensePick = isLicenseCategory(product.category)
+      ? resolveLicensePrice(product.toObject ? product.toObject() : product, req.body?.licenseTerm)
+      : null;
+    const unit = licensePick
+      ? licensePick.unitPrice
+      : product.pricing?.model === 'usage'
         ? Number(product.pricing.usageRate) || 0
         : Number(product.pricing.price) || 0;
     const currency = product.pricing?.currency || 'USD';
 
     const salesChannel = normalizeSalesChannel(req.body?.salesChannel);
+    const checkoutQty = licensePick ? 1 : quantity;
     const settlement = await settleSaleFromDb({
       unitPrice: unit,
-      quantity,
+      quantity: checkoutQty,
       ownershipType,
       seller: { _id: product.creator, sellerType: undefined },
       sellerId: product.creator,
@@ -90,7 +98,7 @@ router.post('/checkout', authenticate, async (req, res, next) => {
       buyerName: req.user.name,
       seller: product.creator,
       ownershipType,
-      quantity,
+      quantity: checkoutQty,
       amount,
       currency,
       unitPrice: settlement.unitPrice,
@@ -138,6 +146,7 @@ router.post('/checkout', authenticate, async (req, res, next) => {
         commissionRate: settlement.commissionRate,
         salesChannel: settlement.salesChannel,
         storeFeeRate: settlement.storeFeeRate,
+        licenseTerm: licensePick?.term || '',
       },
     });
 
@@ -193,9 +202,30 @@ router.post('/checkout', authenticate, async (req, res, next) => {
         commissionAmount: settlement.commissionAmount,
         taxAmount: settlement.taxAmount,
         sellerNetAmount: settlement.sellerNetAmount,
+        licenseTerm: licensePick?.term || '',
       },
       ip: req.ip,
       userAgent: req.get('user-agent') || '',
+    });
+
+    let license = null;
+    if (licensePick) {
+      const issued = await issueLicenseForOrder({
+        order,
+        product,
+        term: licensePick.term,
+      }).catch((err) => {
+        console.error('[license]', err.message);
+        return null;
+      });
+      if (issued) license = mapLicense(issued);
+    }
+
+    void sendCheckoutSuccessEmail({
+      buyer: req.user,
+      order,
+      product,
+      license,
     });
 
     const balance = await getBalance(req.user._id);
@@ -205,7 +235,7 @@ router.post('/checkout', authenticate, async (req, res, next) => {
       paymentProvider: 'internal_ledger',
       ownershipType,
       status: 'paid',
-      quantity,
+      quantity: checkoutQty,
       amount,
       currency,
       commissionRate: settlement.commissionRate,
@@ -215,6 +245,7 @@ router.post('/checkout', authenticate, async (req, res, next) => {
       sellerNet: settlement.sellerNetAmount,
       balance,
       orderId: order._id.toString(),
+      license,
     });
   } catch (err) {
     next(err);

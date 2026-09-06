@@ -165,6 +165,9 @@ async function createRefund({
     },
   );
 
+  const { revokeLicensesForOrder } = require('../utils/issue-license');
+  await revokeLicensesForOrder(order._id).catch(() => {});
+
   await writeAuditLog({
     actorId,
     action: 'REFUND_CREATED',

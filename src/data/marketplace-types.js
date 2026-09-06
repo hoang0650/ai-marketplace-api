@@ -12,6 +12,8 @@ const PRODUCT_TYPES = [
   'GAME_STREAM',
   'CONTAINER',
   'AI_APPLICATION',
+  'VOICE',
+  'MEDIA_LICENSE',
 ];
 
 const USAGE_TYPES = [
@@ -27,6 +29,8 @@ const USAGE_TYPES = [
   'DATASET_DOWNLOAD',
   'AGENT_RUNTIME',
   'GAME_RUNTIME',
+  'CHARACTER',
+  'CREDIT',
 ];
 
 const DEPLOYMENT_RUNTIMES = ['DOCKER', 'SERVERLESS', 'GPU_VM', 'POD', 'CONTAINER', 'GAME_SERVER'];
@@ -40,6 +44,8 @@ function inferProductType(category, tags = []) {
   if (c === 'hire-agent' || c === 'agent-runtime') return 'AGENT';
   if (c === 'gpu-compute') return 'GPU';
   if (c === 'game-server') return 'GAME_SERVER';
+  if (c === 'voice-clone') return 'VOICE';
+  if (c === 'ai-film-series' || c === 'story-book') return 'MEDIA_LICENSE';
   if (c === 'inference') return 'SERVERLESS_ENDPOINT';
   if (c === 'openrouter' || c === 'featherless' || c === 'runpod-public') return 'API_ENDPOINT';
   if (c.startsWith('text-') || c.startsWith('image-')) return 'MODEL';

@@ -29,6 +29,7 @@ function mapProduct(doc, { includeSecrets = false } = {}) {
     coverUrl: o.coverUrl || '',
     gallery: o.gallery || [],
     pricing: o.pricing,
+    contentMeta: o.contentMeta || null,
     runtime: publicRuntime(o.runtime, { includeSecrets, maskProviderUrls: true, modelId: o.slug }),
     rating: o.rating || 0,
     reviewCount: o.reviewCount || 0,

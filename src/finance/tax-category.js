@@ -12,6 +12,8 @@ const TAX_CATEGORIES = [
   'GAME_SERVER',
   'DIGITAL_GOODS',
   'SOFTWARE_LICENSE',
+  'VOICE',
+  'MEDIA_LICENSE',
   'OTHER',
 ];
 
@@ -23,6 +25,8 @@ const PRODUCT_TYPE_MAP = {
   GPU: 'GPU_COMPUTE',
   TRAINING: 'TRAINING',
   SOFTWARE: 'SOFTWARE_LICENSE',
+  VOICE: 'VOICE',
+  MEDIA_LICENSE: 'MEDIA_LICENSE',
 };
 
 const CATEGORY_MAP = {
@@ -35,6 +39,9 @@ const CATEGORY_MAP = {
   dataset: 'DATASET',
   'hire-agent': 'AI_AGENT',
   'skill-pack': 'SOFTWARE_LICENSE',
+  'voice-clone': 'VOICE',
+  'ai-film-series': 'MEDIA_LICENSE',
+  'story-book': 'MEDIA_LICENSE',
 };
 
 function taxCategoryFromProduct(product = {}) {

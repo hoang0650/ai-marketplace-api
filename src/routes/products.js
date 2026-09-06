@@ -10,6 +10,7 @@ const { inferProductType } = require('../data/marketplace-types');
 const { catalogVisibleFilter, isCatalogVisible } = require('../utils/moderation');
 const { assertCanPublishProduct } = require('../utils/seller-compliance');
 const { writeAuditLog } = require('../utils/audit');
+const { normalizeContentMeta } = require('../utils/license-keys');
 
 const router = express.Router();
 
@@ -167,6 +168,7 @@ router.post('/', authenticate, requireRoles('creator', 'admin'), async (req, res
       runtime: normalizeRuntime(body.runtime || {}, {
         defaults: { baseModel: name },
       }),
+      contentMeta: normalizeContentMeta(body.category, body.contentMeta) || undefined,
       tags: Array.isArray(body.tags) ? body.tags : [],
       apiDocsMarkdown: body.apiDocsMarkdown || '',
       changelog: Array.isArray(body.changelog) ? body.changelog : [],
@@ -219,9 +221,13 @@ router.put('/:id', authenticate, requireRoles('creator', 'admin'), async (req, r
       'apiDocsMarkdown',
       'changelog',
       'featured',
+      'contentMeta',
     ];
     for (const key of fields) {
       if (body[key] !== undefined) product[key] = body[key];
+    }
+    if (body.contentMeta !== undefined || body.category) {
+      product.contentMeta = normalizeContentMeta(product.category, body.contentMeta || product.contentMeta) || product.contentMeta;
     }
     if (body.runtime !== undefined) {
       product.runtime = normalizeRuntime(body.runtime, {

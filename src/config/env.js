@@ -56,6 +56,20 @@ const config = {
     !!String(process.env.PROXVN_BASE_DOMAIN || '').trim(),
   proxvnBaseDomain: (process.env.PROXVN_BASE_DOMAIN || '').trim(),
   proxvnServer: (process.env.PROXVN_SERVER || '').trim(),
+  /** Resend transactional mail — From must be a verified domain */
+  resendApiKey: (process.env.RESEND_API_KEY || '').trim(),
+  emailFrom: (process.env.EMAIL_FROM || process.env.RESEND_FROM || 'AI Markets <noreply@aimarkets.vn>').trim(),
+  emailReplyTo: (process.env.EMAIL_REPLY_TO || 'support@aimarkets.vn').trim(),
+  frontendUrl: (process.env.FRONTEND_URL || process.env.APP_URL || 'https://aimarkets.vn').trim(),
+  skipEmail:
+    process.env.SKIP_EMAIL === '1' ||
+    process.env.SKIP_EMAIL === 'true' ||
+    nodeEnv === 'test' ||
+    !!process.env.NODE_TEST_CONTEXT,
 };
+
+if (isProduction && !config.resendApiKey) {
+  console.warn('[config] RESEND_API_KEY is empty — checkout confirmation emails will not be sent.');
+}
 
 module.exports = config;

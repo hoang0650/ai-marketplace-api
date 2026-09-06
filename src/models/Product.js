@@ -6,7 +6,7 @@ const pricingSchema = new mongoose.Schema(
     model: { type: String, enum: ['free', 'one-time', 'subscription', 'usage'], required: true },
     price: { type: Number, default: 0 },
     currency: { type: String, default: 'USD' },
-    interval: { type: String, enum: ['month', 'year', null], default: null },
+    interval: { type: String, enum: ['day', 'month', 'year', null], default: null },
     usageUnit: { type: String },
     usageRate: { type: Number },
   },
@@ -47,6 +47,24 @@ const runtimeSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const contentMetaSchema = new mongoose.Schema(
+  {
+    kind: { type: String, enum: ['voice', 'series', 'story', ''], default: '' },
+    voiceModes: { type: [String], default: [] },
+    voiceSampleUrl: { type: String, default: '', maxlength: 500 },
+    creditUnit: { type: String, enum: ['character', 'word', ''], default: '' },
+    charactersPerCredit: { type: Number, default: 1000, min: 1 },
+    episodeCount: { type: Number, default: 0, min: 0 },
+    licenseTerm: { type: String, enum: ['day', 'month', 'year', ''], default: '' },
+    licensePrices: {
+      day: { type: Number, default: 0, min: 0 },
+      month: { type: Number, default: 0, min: 0 },
+      year: { type: Number, default: 0, min: 0 },
+    },
+  },
+  { _id: false }
+);
+
 const productSchema = new mongoose.Schema(
   {
     slug: { type: String, required: true, unique: true, trim: true, lowercase: true },
@@ -78,6 +96,7 @@ const productSchema = new mongoose.Schema(
     gallery: { type: [String], default: [] },
     pricing: { type: pricingSchema, required: true },
     runtime: { type: runtimeSchema, default: () => ({}) },
+    contentMeta: { type: contentMetaSchema, default: () => ({}) },
     rating: { type: Number, default: 0 },
     reviewCount: { type: Number, default: 0 },
     installCount: { type: Number, default: 0 },

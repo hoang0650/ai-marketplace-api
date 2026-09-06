@@ -46,6 +46,7 @@ const sellerRoutes = require('./routes/sellers');
 const legalRoutes = require('./routes/legal');
 const adminFinanceRoutes = require('./routes/admin-finance');
 const paymentRoutes = require('./routes/payments');
+const licenseRoutes = require('./routes/licenses');
 
 function createApp() {
   const app = express();
@@ -166,6 +167,7 @@ function createApp() {
   app.use('/v1/uploads', uploadRoutes);
   app.use('/v1/sellers', sellerRoutes);
   app.use('/v1/legal', legalRoutes);
+  app.use('/v1/licenses', licenseRoutes);
 
   app.use(notFound);
   app.use(errorHandler);
