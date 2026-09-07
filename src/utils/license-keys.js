@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 
-const LICENSE_CATEGORIES = new Set(['ai-film-series', 'story-book']);
+const LICENSE_CATEGORIES = new Set(['ai-film-series', 'story-book', 'skill-pack', 'dataset']);
 const VOICE_CATEGORIES = new Set(['voice-clone']);
 const LICENSE_TERMS = ['day', 'month', 'year'];
 
@@ -71,8 +71,18 @@ function normalizeContentMeta(category, raw = {}) {
       if (n > 0) licensePrices[t] = n;
     }
     return {
-      kind: category === 'story-book' ? 'story' : 'series',
-      episodeCount: Math.max(0, Number(src.episodeCount) || 0),
+      kind:
+        category === 'story-book'
+          ? 'story'
+          : category === 'skill-pack'
+            ? 'skill'
+            : category === 'dataset'
+              ? 'dataset'
+              : 'series',
+      episodeCount:
+        category === 'ai-film-series' || category === 'story-book'
+          ? Math.max(0, Number(src.episodeCount) || 0)
+          : 0,
       licenseTerm: term,
       licensePrices,
     };

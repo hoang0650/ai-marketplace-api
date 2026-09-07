@@ -49,7 +49,7 @@ const runtimeSchema = new mongoose.Schema(
 
 const contentMetaSchema = new mongoose.Schema(
   {
-    kind: { type: String, enum: ['voice', 'series', 'story', ''], default: '' },
+    kind: { type: String, enum: ['voice', 'series', 'story', 'skill', 'dataset', ''], default: '' },
     voiceModes: { type: [String], default: [] },
     voiceSampleUrl: { type: String, default: '', maxlength: 500 },
     creditUnit: { type: String, enum: ['character', 'word', ''], default: '' },

@@ -60,7 +60,7 @@ function buildCheckoutEmail({
   const licenseText = hasLicense
     ? [
         '',
-        'LICENSE KEY (dùng trong thời hạn đã mua):',
+        'LICENSE KEY (dùng để xem / đọc / tải trong thời hạn đã mua):',
         license.licenseKey,
         `Thời hạn: ${formatTerm(license.term)}`,
         license.expiresAt ? `Hết hạn: ${formatWhen(license.expiresAt)}` : '',
@@ -105,7 +105,7 @@ function buildCheckoutEmail({
       </tr>
       <tr>
         <td style="padding:8px 0 0;font-size:13px;color:#666">
-          Key chỉ cho phép xem / đọc trong thời hạn đã mua. Không chia sẻ. Hết hạn hoặc hoàn tiền thì key vô hiệu.
+          Key chỉ cho phép xem / đọc / tải xuống trong thời hạn đã mua. Không chia sẻ. Hết hạn hoặc hoàn tiền thì key vô hiệu.
           <br /><a href="${escapeHtml(licensesUrl)}" style="color:#8b5a2b">Xem license trong dashboard</a>
         </td>
       </tr>`

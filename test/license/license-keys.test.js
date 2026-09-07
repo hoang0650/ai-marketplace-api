@@ -12,9 +12,11 @@ const {
 } = require('../../src/utils/license-keys');
 
 describe('license categories', () => {
-  test('film series and story-book issue keys; voice clone does not', () => {
+  test('film, story, skill and dataset issue keys; voice clone does not', () => {
     assert.equal(isLicenseCategory('ai-film-series'), true);
     assert.equal(isLicenseCategory('story-book'), true);
+    assert.equal(isLicenseCategory('skill-pack'), true);
+    assert.equal(isLicenseCategory('dataset'), true);
     assert.equal(isLicenseCategory('voice-clone'), false);
     assert.equal(isVoiceCategory('voice-clone'), true);
   });
@@ -58,6 +60,11 @@ describe('status', () => {
 });
 
 describe('content meta', () => {
+  test('skill and dataset meta kind', () => {
+    assert.equal(normalizeContentMeta('skill-pack', { licensePrices: { month: 5 } }).kind, 'skill');
+    assert.equal(normalizeContentMeta('dataset', { licensePrices: { year: 20 } }).kind, 'dataset');
+  });
+
   test('voice defaults to TTS', () => {
     const meta = normalizeContentMeta('voice-clone', { voiceModes: ['stt'] });
     assert.equal(meta.kind, 'voice');
