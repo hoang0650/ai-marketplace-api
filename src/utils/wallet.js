@@ -9,7 +9,7 @@ function normalizeAmount(raw) {
   return amount;
 }
 
-/** Ledger balance: credits + deposits − debits − withdrawals. */
+/** Completed deposits/credits minus completed+pending withdraw/debit (pending withdraw reserves funds). */
 async function getBalance(userId) {
   const [row] = await WalletTx.aggregate([
     { $match: { user: userId } },
@@ -18,7 +18,34 @@ async function getBalance(userId) {
         _id: null,
         balance: {
           $sum: {
-            $cond: [{ $in: ['$type', ['credit', 'deposit']] }, '$amount', { $multiply: ['$amount', -1] }],
+            $let: {
+              vars: { st: { $ifNull: ['$status', 'completed'] } },
+              in: {
+                $switch: {
+                  branches: [
+                    {
+                      case: {
+                        $and: [
+                          { $in: ['$type', ['credit', 'deposit']] },
+                          { $eq: ['$$st', 'completed'] },
+                        ],
+                      },
+                      then: '$amount',
+                    },
+                    {
+                      case: {
+                        $and: [
+                          { $in: ['$type', ['debit', 'withdraw']] },
+                          { $in: ['$$st', ['completed', 'pending']] },
+                        ],
+                      },
+                      then: { $multiply: ['$amount', -1] },
+                    },
+                  ],
+                  default: 0,
+                },
+              },
+            },
           },
         },
       },

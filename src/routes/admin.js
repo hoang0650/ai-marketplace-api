@@ -180,7 +180,7 @@ router.get('/overview', authenticate, requireRoles('admin'), async (_req, res, n
         },
       ]),
       WalletTx.aggregate([
-        { $match: { type: 'deposit' } },
+        { $match: { type: 'deposit', status: { $nin: ['pending', 'failed', 'cancelled'] } } },
         { $group: { _id: null, total: { $sum: '$amount' }, count: { $sum: 1 } } },
       ]),
       User.find().select('name email role creatorSlug avatarUrl createdAt accountStatus suspendedUntil').sort({ createdAt: -1 }).limit(20).lean(),
@@ -299,7 +299,10 @@ router.get('/users/:id', authenticate, requireRoles('admin'), async (req, res, n
     const [productCount, orderCount, wallet] = await Promise.all([
       Product.countDocuments({ creator: u._id }),
       Order.countDocuments({ $or: [{ buyer: u._id }, { seller: u._id }] }),
-      WalletTx.aggregate([{ $match: { user: u._id } }, { $group: { _id: '$type', total: { $sum: '$amount' } } }]),
+      WalletTx.aggregate([
+        { $match: { user: u._id, status: { $nin: ['pending', 'failed', 'cancelled'] } } },
+        { $group: { _id: '$type', total: { $sum: '$amount' } } },
+      ]),
     ]);
     res.json(
       adminUserDto(u, {

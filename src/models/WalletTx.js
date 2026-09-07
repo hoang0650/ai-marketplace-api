@@ -7,9 +7,20 @@ const walletTxSchema = new mongoose.Schema(
     amount: { type: Number, required: true },
     currency: { type: String, default: 'USD' },
     note: { type: String, default: '' },
+    status: {
+      type: String,
+      enum: ['pending', 'completed', 'failed', 'cancelled'],
+      default: 'completed',
+      index: true,
+    },
+    payoutId: { type: String, default: '', index: true },
+    reviewedAt: { type: Date, default: null },
+    reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    reviewNote: { type: String, default: '', maxlength: 500 },
   },
   { timestamps: { createdAt: true, updatedAt: false } }
 );
+walletTxSchema.index({ type: 1, status: 1, createdAt: -1 });
 
 walletTxSchema.virtual('id').get(function idVirtual() {
   return this._id.toString();

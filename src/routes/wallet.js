@@ -41,6 +41,7 @@ router.post('/deposit', authenticate, async (req, res, next) => {
       type: 'deposit',
       amount,
       currency: String(req.body?.currency || 'USD'),
+      status: 'pending',
       note: String(req.body?.note || 'Buyer wallet deposit'),
     });
     res.status(201).json(mapWallet(tx));
@@ -97,10 +98,10 @@ router.post('/withdraw', authenticate, requireRoles('creator', 'admin'), async (
       type: 'withdraw',
       amount,
       currency: 'USD',
+      status: 'pending',
+      payoutId: payout.payoutId,
       note: `Payout ${payout.payoutId}`,
     });
-    const { setPayoutStatus } = require('../finance/payout-engine');
-    await setPayoutStatus(payout.payoutId, 'PAID', { actorId: req.user._id });
     res.status(201).json({ ...mapWallet(tx), payoutId: payout.payoutId });
   } catch (err) {
     next(err);

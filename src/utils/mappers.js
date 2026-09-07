@@ -112,13 +112,26 @@ function mapOrder(doc, { viewerId, viewerRole } = {}) {
 
 function mapWallet(doc) {
   const o = typeof doc.toObject === 'function' ? doc.toObject({ virtuals: true }) : { ...doc };
+  const user = o.user && typeof o.user === 'object' && o.user.email
+    ? {
+        id: String(o.user._id || o.user.id),
+        name: o.user.name || '',
+        email: o.user.email || '',
+        role: o.user.role || '',
+      }
+    : undefined;
   return {
     id: String(o._id || o.id),
     type: o.type,
     amount: o.amount,
     currency: o.currency || 'USD',
     note: o.note || '',
+    status: o.status || 'completed',
+    payoutId: o.payoutId || '',
+    reviewNote: o.reviewNote || '',
+    reviewedAt: o.reviewedAt ? new Date(o.reviewedAt).toISOString() : null,
     createdAt: o.createdAt ? new Date(o.createdAt).toISOString() : new Date().toISOString(),
+    user,
   };
 }
 

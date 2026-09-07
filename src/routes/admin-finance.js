@@ -1,14 +1,19 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const CommissionRule = require('../models/CommissionRule');
 const TaxRule = require('../models/TaxRule');
 const TaxWithholding = require('../models/TaxWithholding');
 const SellerPayout = require('../models/SellerPayout');
 const LedgerEntry = require('../models/LedgerEntry');
 const Order = require('../models/Order');
+const User = require('../models/User');
+const WalletTx = require('../models/WalletTx');
 const { authenticate, requireRoles } = require('../middleware/auth');
 const { writeAuditLog } = require('../utils/audit');
 const { createPayout, setPayoutStatus } = require('../finance/payout-engine');
 const { PLATFORM_COMMISSION_RATE } = require('../finance/constants');
+const { reviewWalletTx } = require('../utils/wallet-review');
+const { mapWallet } = require('../utils/mappers');
 
 const router = express.Router();
 const admin = [authenticate, requireRoles('admin')];
@@ -271,9 +276,74 @@ router.get('/payouts', ...admin, async (req, res, next) => {
     const filter = {};
     if (req.query.sellerId) filter.sellerId = req.query.sellerId;
     if (req.query.status) filter.status = req.query.status;
-    const rows = await SellerPayout.find(filter).sort({ createdAt: -1 }).limit(200).lean();
+    const rows = await SellerPayout.find(filter)
+      .populate('sellerId', 'name email role')
+      .sort({ createdAt: -1 })
+      .limit(200)
+      .lean();
     res.json(rows);
   } catch (err) {
+    next(err);
+  }
+});
+
+function escapeRegex(raw) {
+  return String(raw || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+router.get('/wallet-txs', ...admin, async (req, res, next) => {
+  try {
+    const filter = {};
+    const type = String(req.query.type || '').trim();
+    if (type === 'deposit' || type === 'withdraw') filter.type = type;
+    const status = String(req.query.status || '').trim().toLowerCase();
+    if (['pending', 'failed', 'cancelled'].includes(status)) {
+      filter.status = status;
+    } else if (status === 'completed') {
+      filter.$or = [{ status: 'completed' }, { status: { $exists: false } }, { status: null }];
+    }
+    const q = String(req.query.q || '').trim();
+    if (q) {
+      const rx = new RegExp(escapeRegex(q), 'i');
+      const users = await User.find({ $or: [{ email: rx }, { name: rx }] })
+        .select('_id')
+        .limit(50)
+        .lean();
+      filter.user = { $in: users.map((u) => u._id) };
+    }
+    const rows = await WalletTx.find(filter)
+      .populate('user', 'name email role')
+      .sort({ createdAt: -1 })
+      .limit(200)
+      .lean();
+    const [pendingDeposits, pendingWithdraws] = await Promise.all([
+      WalletTx.countDocuments({ type: 'deposit', status: 'pending' }),
+      WalletTx.countDocuments({ type: 'withdraw', status: 'pending' }),
+    ]);
+    res.json({
+      items: rows.map(mapWallet),
+      pendingDeposits,
+      pendingWithdraws,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put('/wallet-txs/:id', ...admin, async (req, res, next) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({ message: 'Invalid id' });
+    }
+    const row = await reviewWalletTx(req.params.id, req.body?.status, {
+      actorId: req.user._id,
+      note: req.body?.note || req.body?.reason || '',
+    });
+    res.json(row);
+  } catch (err) {
+    if (err.status) {
+      return res.status(err.status).json({ message: err.message, code: err.code });
+    }
     next(err);
   }
 });
