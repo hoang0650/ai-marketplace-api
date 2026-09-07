@@ -47,6 +47,7 @@ const legalRoutes = require('./routes/legal');
 const adminFinanceRoutes = require('./routes/admin-finance');
 const paymentRoutes = require('./routes/payments');
 const licenseRoutes = require('./routes/licenses');
+const complaintRoutes = require('./routes/complaints');
 
 function createApp() {
   const app = express();
@@ -122,6 +123,8 @@ function createApp() {
   app.use('/v1', apiLimiter);
   app.use('/v1/auth/login', authLimiter);
   app.use('/v1/auth/register', authLimiter);
+  app.use('/v1/auth/google/start', authLimiter);
+  app.use('/v1/auth/google/login', authLimiter);
 
   // Static RunPod Public Endpoints catalog (docs) — no DB required.
   app.use('/v1/runpod', runpodRoutes);
@@ -168,6 +171,7 @@ function createApp() {
   app.use('/v1/sellers', sellerRoutes);
   app.use('/v1/legal', legalRoutes);
   app.use('/v1/licenses', licenseRoutes);
+  app.use('/v1/complaints', complaintRoutes);
 
   app.use(notFound);
   app.use(errorHandler);

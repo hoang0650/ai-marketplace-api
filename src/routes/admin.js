@@ -10,8 +10,7 @@ const { PLATFORM_COMMISSION_RATE } = require('../utils/platform');
 const { applyStatus, STATUSES, effectiveStatus } = require('../utils/moderation');
 const { deleteCachePattern } = require('../utils/cache');
 const { mapProduct, mapOrder } = require('../utils/mappers');
-const { effectiveSellerNet } = require('../utils/payout-hold');
-const { createRefund } = require('../finance/refund-service');
+const { resolveOrderDispute } = require('../utils/resolve-order-dispute');
 
 const router = express.Router();
 
@@ -72,6 +71,24 @@ router.get('/overview', authenticate, requireRoles('admin'), async (_req, res, n
             refundAmount: { $sum: { $ifNull: ['$refundAmount', 0] } },
             chargebackAmount: { $sum: { $ifNull: ['$chargebackAmount', 0] } },
             storeFeeAmount: { $sum: { $ifNull: ['$storeFeeAmount', 0] } },
+            playStoreFeeAmount: {
+              $sum: {
+                $cond: [
+                  { $eq: ['$salesChannel', 'GOOGLE_PLAY'] },
+                  { $ifNull: ['$storeFeeAmount', 0] },
+                  0,
+                ],
+              },
+            },
+            appStoreFeeAmount: {
+              $sum: {
+                $cond: [
+                  { $eq: ['$salesChannel', 'APP_STORE'] },
+                  { $ifNull: ['$storeFeeAmount', 0] },
+                  0,
+                ],
+              },
+            },
           },
         },
       ]),
@@ -94,6 +111,24 @@ router.get('/overview', authenticate, requireRoles('admin'), async (_req, res, n
             },
             taxAmount: { $sum: { $ifNull: ['$taxAmount', 0] } },
             storeFeeAmount: { $sum: { $ifNull: ['$storeFeeAmount', 0] } },
+            playStoreFeeAmount: {
+              $sum: {
+                $cond: [
+                  { $eq: ['$salesChannel', 'GOOGLE_PLAY'] },
+                  { $ifNull: ['$storeFeeAmount', 0] },
+                  0,
+                ],
+              },
+            },
+            appStoreFeeAmount: {
+              $sum: {
+                $cond: [
+                  { $eq: ['$salesChannel', 'APP_STORE'] },
+                  { $ifNull: ['$storeFeeAmount', 0] },
+                  0,
+                ],
+              },
+            },
             commissionAmount: {
               $sum: {
                 $ifNull: [
@@ -138,6 +173,8 @@ router.get('/overview', authenticate, requireRoles('admin'), async (_req, res, n
             sellerNet: 1,
             taxAmount: 1,
             storeFeeAmount: 1,
+            playStoreFeeAmount: 1,
+            appStoreFeeAmount: 1,
             commissionAmount: 1,
           },
         },
@@ -159,6 +196,8 @@ router.get('/overview', authenticate, requireRoles('admin'), async (_req, res, n
     const refundAmount = revenueAgg[0]?.refundAmount || 0;
     const chargebackAmount = revenueAgg[0]?.chargebackAmount || 0;
     const storeFeeAmount = revenueAgg[0]?.storeFeeAmount || 0;
+    const playStoreFeeAmount = revenueAgg[0]?.playStoreFeeAmount || 0;
+    const appStoreFeeAmount = revenueAgg[0]?.appStoreFeeAmount || 0;
     const buyerDeposits = depositAgg[0]?.total || 0;
     const buyerDepositCount = depositAgg[0]?.count || 0;
 
@@ -173,6 +212,8 @@ router.get('/overview', authenticate, requireRoles('admin'), async (_req, res, n
       sellerNet: row.sellerNet,
       taxAmount: row.taxAmount || 0,
       storeFeeAmount: row.storeFeeAmount || 0,
+      playStoreFeeAmount: row.playStoreFeeAmount || 0,
+      appStoreFeeAmount: row.appStoreFeeAmount || 0,
       commissionAmount: row.commissionAmount || 0,
     }));
 
@@ -193,6 +234,8 @@ router.get('/overview', authenticate, requireRoles('admin'), async (_req, res, n
       platformCommission: commissionAmount,
       taxWithheld: taxAmount,
       storeFees: storeFeeAmount,
+      playStoreFees: playStoreFeeAmount,
+      appStoreFees: appStoreFeeAmount,
       refundAmount,
       chargebackAmount,
       sellerNet,
@@ -378,68 +421,16 @@ router.patch('/disputes/:id', authenticate, requireRoles('admin'), async (req, r
   try {
     const order = await Order.findById(req.params.id);
     if (!order) return res.status(404).json({ message: 'Order not found' });
-    if (order.disputeStatus !== 'open') {
-      return res.status(400).json({ message: 'This order has no open dispute' });
-    }
     const resolution = String(req.body?.resolution || '');
-    if (!['seller', 'buyer'].includes(resolution)) {
-      return res.status(400).json({ message: 'resolution must be seller or buyer' });
-    }
     const note = String(req.body?.note || '').slice(0, 1000);
-    order.disputeResolvedAt = new Date();
-    order.disputeResolutionNote = note;
-
-    if (resolution === 'seller') {
-      order.disputeStatus = 'seller_win';
-      await order.save();
-      await Notification.create({
-        user: order.seller,
-        title: 'Khiếu nại đã đóng',
-        body: `Dispute on ${order.productName} resolved for the seller. Payout is now withdrawable.`,
-        href: '/dashboard/withdraw',
-      });
-      await Notification.create({
-        user: order.buyer,
-        title: 'Khiếu nại đã đóng',
-        body: `Dispute on ${order.productName} was resolved in the seller's favor.`,
-        href: '/profile',
-      });
-    } else {
-      order.disputeStatus = 'buyer_win';
-      order.disputeResolutionNote = note;
-      await order.save();
-      const currency = order.currency || 'USD';
-      let gross = Number(order.amount) || 0;
-      let net = effectiveSellerNet(order);
-      if (gross > 0) {
-        const { reversed } = await createRefund({
-          order,
-          amount: gross,
-          reason: note || 'dispute buyer_win',
-          actorId: req.user._id,
-          eventId: `dispute_refund_${order._id}`,
-        });
-        gross = reversed.grossAmount;
-        net = reversed.sellerNetAmount;
-      } else {
-        order.status = 'refunded';
-        order.paymentStatus = 'refunded';
-        await order.save();
+    try {
+      await resolveOrderDispute(order, { resolution, note, actorId: req.user._id });
+    } catch (err) {
+      if (err.status) {
+        return res.status(err.status).json({ message: err.message });
       }
-      await Notification.create({
-        user: order.buyer,
-        title: 'Hoàn tiền khiếu nại',
-        body: `Refunded ${gross.toFixed(2)} ${currency} for ${order.productName}.`,
-        href: '/wallet',
-      });
-      await Notification.create({
-        user: order.seller,
-        title: 'Khiếu nại: hoàn tiền người mua',
-        body: `Seller payable ${net.toFixed(2)} ${currency} for ${order.productName} was reversed (commission/tax adjusted on ledger).`,
-        href: '/dashboard/orders',
-      });
+      throw err;
     }
-
     res.json(mapOrder(order, { viewerRole: 'admin' }));
   } catch (err) {
     next(err);

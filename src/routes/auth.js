@@ -1,10 +1,18 @@
 const express = require('express');
+const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const User = require('../models/User');
+const config = require('../config/env');
 const { signToken, publicUser, authenticate } = require('../middleware/auth');
 const { slugify } = require('../utils/serialize');
 const { deleteCachePattern } = require('../utils/cache');
-const { getGoogleClientId, verifyGoogleIdToken, verifyGoogleAuthCode } = require('../config/googleAuth');
+const {
+  getGoogleClientId,
+  verifyGoogleIdToken,
+  verifyGoogleAuthCode,
+  googleCallbackUrl,
+  normalizeReturnTo,
+} = require('../config/googleAuth');
 const { liftExpired, effectiveStatus, denyMessage } = require('../utils/moderation');
 
 const router = express.Router();
@@ -136,7 +144,71 @@ router.get('/google/config', (_req, res) => {
   res.json({
     enabled: !!clientId,
     clientId: clientId || undefined,
+    mode: 'redirect',
   });
+});
+
+router.get('/google/start', (req, res) => {
+  const clientId = getGoogleClientId();
+  if (!clientId) {
+    return res.status(503).json({ message: 'Google Sign-In chưa được cấu hình trên máy chủ' });
+  }
+  const refererOrigin = (() => {
+    try {
+      return req.get('referer') ? new URL(req.get('referer')).origin : '';
+    } catch {
+      return '';
+    }
+  })();
+  const { origin, path } = normalizeReturnTo(String(req.query.returnTo || ''), refererOrigin || config.frontendUrl);
+  const redirectUri = googleCallbackUrl(req);
+  const state = jwt.sign({ o: origin, p: path }, config.jwtSecret, { expiresIn: '10m' });
+  const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+  url.searchParams.set('client_id', clientId);
+  url.searchParams.set('redirect_uri', redirectUri);
+  url.searchParams.set('response_type', 'code');
+  url.searchParams.set('scope', 'openid email profile');
+  url.searchParams.set('state', state);
+  url.searchParams.set('prompt', 'select_account');
+  url.searchParams.set('access_type', 'online');
+  return res.redirect(url.toString());
+});
+
+router.get('/google/callback', async (req, res, next) => {
+  const fallback = String(config.frontendUrl || 'https://aimarkets.vn').replace(/\/$/, '');
+  const fail = (origin, message) => {
+    const o = origin || fallback;
+    const q = new URLSearchParams({ google: 'error', message: String(message || 'Google sign-in failed').slice(0, 180) });
+    return res.redirect(`${o}/auth/login?${q.toString()}`);
+  };
+  try {
+    if (req.query.error) {
+      return fail(fallback, req.query.error_description || req.query.error);
+    }
+    const state = String(req.query.state || '');
+    const code = String(req.query.code || '');
+    if (!state || !code) {
+      return fail(fallback, 'Thiếu mã Google');
+    }
+    let payload;
+    try {
+      payload = jwt.verify(state, config.jwtSecret);
+    } catch {
+      return fail(fallback, 'Phiên Google hết hạn, thử lại');
+    }
+    const origin = String(payload.o || fallback).replace(/\/$/, '');
+    const nextPath = String(payload.p || '/').startsWith('/') ? String(payload.p) : '/';
+    const redirectUri = googleCallbackUrl(req);
+    const profile = await verifyGoogleAuthCode(code, redirectUri);
+    const user = await findOrCreateGoogleUser(profile);
+    await assertAccountActive(user);
+    const token = signToken(user);
+    const q = new URLSearchParams({ token, next: nextPath });
+    return res.redirect(`${origin}/auth/google/callback?${q.toString()}`);
+  } catch (err) {
+    console.error('[google-callback]', err?.message || err);
+    return fail(fallback, err.message || 'Đăng nhập Google thất bại');
+  }
 });
 
 router.post('/google/login', async (req, res, next) => {

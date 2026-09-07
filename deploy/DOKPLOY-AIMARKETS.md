@@ -35,9 +35,25 @@ GOOGLE_CLIENT_ID=<web-client-id>.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=GOCSPX-...
 AIMARKETS_API_HOST=https://api.aimarkets.vn
 AIMARKETS_AI_HOST=https://ai.aimarkets.vn
+FRONTEND_URL=https://aimarkets.vn
 ```
 
 Deploy từ GitHub: `hoang0650/ai-marketplace-api` branch `master`.
+
+### Google OAuth (bắt buộc trên Cloud Console)
+
+Popup GIS trên `aimarkets.vn` bị **Error 400: origin_mismatch** nếu client ID đang gắn origin của PHHotel. AI Markets dùng **redirect server-side** (giống đổi code + `GOOGLE_CLIENT_SECRET` của phhotel-api), nên Google chỉ kiểm tra **Authorized redirect URIs**, không kiểm tra JS origin của frontend.
+
+Trong [Google Cloud Console](https://console.cloud.google.com/apis/credentials) → OAuth 2.0 Client ID (Web):
+
+| Field | Values |
+|-------|--------|
+| Authorized redirect URIs | `https://api.aimarkets.vn/v1/auth/google/callback` |
+| | `http://localhost:4100/v1/auth/google/callback` (dev) |
+
+Nếu tạo **client riêng** cho AI Markets (khuyên dùng, đừng share client PHHotel): Authorized JavaScript origins có thể để trống. `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET` trên Dokploy phải khớp client đó.
+
+Luồng: `aimarkets.vn` → `GET /v1/auth/google/start` → Google → `GET /v1/auth/google/callback` → `/auth/google/callback?token=`.
 
 ### Kiểm tra
 

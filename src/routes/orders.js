@@ -1,9 +1,8 @@
 const express = require('express');
 const Order = require('../models/Order');
-const Notification = require('../models/Notification');
 const { authenticate } = require('../middleware/auth');
 const { mapOrder } = require('../utils/mappers');
-const { canOpenDispute } = require('../utils/payout-hold');
+const { openOrderDispute } = require('../utils/open-order-dispute');
 
 const router = express.Router();
 
@@ -45,28 +44,19 @@ router.post('/:id/dispute', authenticate, async (req, res, next) => {
     if (String(order.buyer) !== String(req.user._id)) {
       return res.status(403).json({ message: 'Only the buyer can open a dispute on this order' });
     }
-    if (!canOpenDispute(order)) {
-      return res.status(400).json({
-        message:
-          'Cannot dispute this order. Disputes are only allowed within 48 hours of completion, and only once.',
-        code: 'DISPUTE_WINDOW_CLOSED',
-      });
-    }
     const reason = String(req.body?.reason || '').trim().slice(0, 1000);
-    if (reason.length < 8) {
-      return res.status(400).json({ message: 'Please describe the issue (at least 8 characters)' });
+    try {
+      await openOrderDispute(order, {
+        reason,
+        actorName: req.user.name,
+        href: '/sell/complaints',
+      });
+    } catch (err) {
+      if (err.status) {
+        return res.status(err.status).json({ message: err.message, code: err.code });
+      }
+      throw err;
     }
-    order.disputeStatus = 'open';
-    order.disputeReason = reason;
-    order.disputeOpenedAt = new Date();
-    await order.save();
-
-    await Notification.create({
-      user: order.seller,
-      title: 'Khiếu nại đơn hàng',
-      body: `${req.user.name} disputed ${order.productName}. Seller net $${Number(order.sellerNet || 0).toFixed(2)} is frozen until resolved.`,
-      href: '/dashboard/orders',
-    });
 
     res.json(mapOrder(order, { viewerId: req.user._id, viewerRole: req.user.role }));
   } catch (err) {

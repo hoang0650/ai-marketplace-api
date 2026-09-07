@@ -1,9 +1,15 @@
+const config = require('./env');
+
 function getGoogleClientId() {
   return String(process.env.GOOGLE_CLIENT_ID || '').trim();
 }
 
 function getGoogleClientIds() {
-  const ids = [process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_IOS_CLIENT_ID, process.env.GOOGLE_ANDROID_CLIENT_ID]
+  const ids = [
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_ANDROID_CLIENT_ID,
+    process.env.GOOGLE_IOS_CLIENT_ID,
+  ]
     .filter(Boolean)
     .map((v) => String(v).trim())
     .filter(Boolean);
@@ -12,6 +18,55 @@ function getGoogleClientIds() {
 
 function getGoogleClientSecret() {
   return String(process.env.GOOGLE_CLIENT_SECRET || '').trim();
+}
+
+function publicApiBase(req) {
+  if (config.isProduction) {
+    const env = String(process.env.AIMARKETS_API_HOST || process.env.PUBLIC_API_URL || '')
+      .trim()
+      .replace(/\/$/, '');
+    if (env) return env;
+  }
+  const proto = req.protocol || (config.isProduction ? 'https' : 'http');
+  const host = req.get('host') || `127.0.0.1:${config.port}`;
+  return `${proto}://${host}`;
+}
+
+function googleCallbackUrl(req) {
+  return `${publicApiBase(req)}/v1/auth/google/callback`;
+}
+
+function allowedFrontendOrigins() {
+  const extra = String(config.frontendUrl || '')
+    .split(',')
+    .map((s) => s.trim().replace(/\/$/, ''))
+    .filter(Boolean);
+  return [...new Set([...config.corsOrigins, ...extra])];
+}
+
+function isAllowedFrontendOrigin(origin) {
+  const o = String(origin || '').replace(/\/$/, '');
+  if (!o) return false;
+  return allowedFrontendOrigins().some((allowed) => allowed.replace(/\/$/, '') === o);
+}
+
+function normalizeReturnTo(raw, fallbackOrigin) {
+  const fallbackPath = '/';
+  const origin = String(fallbackOrigin || config.frontendUrl || 'https://aimarkets.vn').replace(/\/$/, '');
+  if (!raw) return { origin, path: fallbackPath };
+  try {
+    if (raw.startsWith('/')) {
+      return { origin, path: raw.split('?')[0] || fallbackPath };
+    }
+    const u = new URL(raw);
+    const o = u.origin;
+    if (!isAllowedFrontendOrigin(o)) {
+      return { origin, path: fallbackPath };
+    }
+    return { origin: o, path: `${u.pathname}${u.search}` || fallbackPath };
+  } catch {
+    return { origin, path: fallbackPath };
+  }
 }
 
 function normalizeGoogleProfile(payload) {
@@ -55,12 +110,13 @@ async function verifyGoogleAuthCode(code, redirectUri = 'postmessage') {
 
   const authCode = String(code || '').trim();
   if (!authCode) throw new Error('Thiếu Google authorization code');
+  const resolvedRedirectUri = String(redirectUri || 'postmessage');
 
   const body = new URLSearchParams({
     code: authCode,
     client_id: clientId,
     client_secret: clientSecret,
-    redirect_uri: String(redirectUri || 'postmessage'),
+    redirect_uri: resolvedRedirectUri,
     grant_type: 'authorization_code',
   });
 
@@ -72,6 +128,11 @@ async function verifyGoogleAuthCode(code, redirectUri = 'postmessage') {
   const data = await res.json().catch(() => ({}));
   if (!res.ok || !data?.id_token) {
     const detail = data.error_description || data.error || 'token exchange failed';
+    console.error('[google-auth] token exchange failed:', {
+      clientId: `${clientId.slice(0, 20)}...`,
+      redirectUri: resolvedRedirectUri,
+      detail,
+    });
     const err = new Error(`Google token exchange thất bại: ${detail}`);
     err.statusCode = 401;
     throw err;
@@ -82,6 +143,12 @@ async function verifyGoogleAuthCode(code, redirectUri = 'postmessage') {
 module.exports = {
   getGoogleClientId,
   getGoogleClientIds,
+  getGoogleClientSecret,
+  publicApiBase,
+  googleCallbackUrl,
+  allowedFrontendOrigins,
+  isAllowedFrontendOrigin,
+  normalizeReturnTo,
   verifyGoogleIdToken,
   verifyGoogleAuthCode,
 };

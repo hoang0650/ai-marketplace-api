@@ -154,7 +154,9 @@ Buyer mở dispute trong cửa sổ hold; sàn xem xét bằng chứng; kết qu
     summary: 'Tiếp nhận và xử lý khiếu nại trên sàn.',
     content: `# Chính sách khiếu nại
 
-Gửi khiếu nại qua kênh hỗ trợ / form trên sàn. Sàn ghi nhận, phân loại, phản hồi trong thời hạn hợp lý và lưu hồ sơ phục vụ cơ quan nhà nước khi có yêu cầu hợp pháp.`,
+Gửi khiếu nại tại https://aimarkets.vn/complaints hoặc email support@aimarkets.vn.
+Quy trình: tiếp nhận → xác minh → phân loại (buyer_seller / buyer_platform / seller_platform) → seller phản hồi nếu cần → đánh giá bằng chứng → quyết định → đóng hồ sơ.
+Khiếu nại buyer–seller gắn đơn trong cửa sổ 48 giờ có thể đóng băng seller net (tranh chấp đơn). Quyết định upheld/rejected thực hiện hoàn tiền hoặc giải phóng payout. Hồ sơ được audit log.`,
   },
   {
     documentType: 'intellectual-property',
