@@ -40,6 +40,7 @@ function getMinioConfig() {
     bucket: String(process.env.MINIO_BUCKET || 'phhotel').trim() || 'phhotel',
     publicBaseUrl: trimSlash(process.env.MINIO_PUBLIC_URL || 'https://minio.phhotel.vn'),
     playgroundPrefix: cleanPrefix(process.env.MINIO_PLAYGROUND_PREFIX, 'aimarkets/playground'),
+    voicePrefix: cleanPrefix(process.env.MINIO_VOICE_PREFIX, 'aimarkets/voices'),
   };
 }
 
@@ -79,7 +80,10 @@ async function ensurePlaygroundBucket() {
           Effect: 'Allow',
           Principal: { AWS: ['*'] },
           Action: ['s3:GetObject'],
-          Resource: [`arn:aws:s3:::${cfg.bucket}/${cfg.playgroundPrefix}/*`],
+          Resource: [
+            `arn:aws:s3:::${cfg.bucket}/${cfg.playgroundPrefix}/*`,
+            `arn:aws:s3:::${cfg.bucket}/${cfg.voicePrefix}/*`,
+          ],
         },
       ],
     };
@@ -107,20 +111,47 @@ function extForMime(mime) {
     'image/jpg': 'jpg',
     'image/png': 'png',
     'image/webp': 'webp',
+    'audio/mpeg': 'mp3',
+    'audio/mp3': 'mp3',
+    'audio/wav': 'wav',
+    'audio/x-wav': 'wav',
+    'audio/wave': 'wav',
+    'audio/mp4': 'm4a',
+    'audio/m4a': 'm4a',
+    'audio/aac': 'aac',
+    'audio/ogg': 'ogg',
+    'audio/webm': 'webm',
   };
-  return map[String(mime || '').toLowerCase()] || 'jpg';
+  return map[String(mime || '').toLowerCase()] || 'bin';
 }
 
 async function uploadPlaygroundImageBuffer(buffer, { filename, contentType = 'image/jpeg' } = {}) {
+  return uploadPublicBuffer(buffer, {
+    filename,
+    contentType,
+    prefix: (await ensurePlaygroundBucket()).playgroundPrefix,
+  });
+}
+
+async function uploadVoiceSampleBuffer(buffer, { filename, contentType = 'audio/mpeg' } = {}) {
+  const cfg = await ensurePlaygroundBucket();
+  return uploadPublicBuffer(buffer, {
+    filename,
+    contentType,
+    prefix: cfg.voicePrefix,
+  });
+}
+
+async function uploadPublicBuffer(buffer, { filename, contentType, prefix }) {
   const cfg = await ensurePlaygroundBucket();
   const minio = getMinioClient();
   const ext = extForMime(contentType);
   const safeName =
-    String(filename || `playground-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${ext}`).replace(
+    String(filename || `file-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${ext}`).replace(
       /[^\w.\-]+/g,
       '_',
     );
-  const objectName = `${cfg.playgroundPrefix}/${safeName}`;
+  const objectName = `${prefix}/${safeName}`;
 
   await minio.putObject(cfg.bucket, objectName, buffer, buffer.length, {
     'Content-Type': contentType,
@@ -141,5 +172,6 @@ module.exports = {
   getMinioClient,
   ensurePlaygroundBucket,
   uploadPlaygroundImageBuffer,
+  uploadVoiceSampleBuffer,
   buildPublicObjectUrl,
 };

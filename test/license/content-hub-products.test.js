@@ -1,0 +1,44 @@
+const { test, describe } = require('node:test');
+const assert = require('node:assert/strict');
+const {
+  buildContentHubProducts,
+  hubProductFields,
+} = require('../../src/data/content-hub-products');
+
+describe('content hub seed products', () => {
+  const products = buildContentHubProducts();
+
+  test('covers voice clone, watch films, and stories', () => {
+    const cats = products.map((p) => p.category);
+    assert.equal(cats.filter((c) => c === 'voice-clone').length, 4);
+    assert.equal(cats.filter((c) => c === 'ai-film-series').length, 4);
+    assert.equal(cats.filter((c) => c === 'story-book').length, 4);
+    assert.equal(cats.includes('text-to-video'), false);
+    assert.equal(cats.includes('image-to-video'), false);
+  });
+
+  test('voices bill by character and expose sample URL', () => {
+    const voices = products.filter((p) => p.category === 'voice-clone').map(hubProductFields);
+    for (const p of voices) {
+      assert.equal(p.contentMeta.kind, 'voice');
+      assert.ok(p.contentMeta.voiceModes.includes('tts'));
+      assert.ok(p.contentMeta.voiceSampleUrl);
+      assert.equal(p.pricing.model, 'usage');
+      assert.equal(p.productType, 'VOICE');
+    }
+  });
+
+  test('films and stories use day/month/year license prices', () => {
+    const licensed = products
+      .filter((p) => p.category === 'ai-film-series' || p.category === 'story-book')
+      .map(hubProductFields);
+    for (const p of licensed) {
+      assert.ok(p.contentMeta.licensePrices.day > 0);
+      assert.ok(p.contentMeta.licensePrices.month > 0);
+      assert.ok(p.contentMeta.licensePrices.year > 0);
+      assert.ok(p.contentMeta.episodeCount > 0);
+      assert.equal(p.productType, 'MEDIA_LICENSE');
+      assert.equal(p.contentMeta.kind, p.category === 'story-book' ? 'story' : 'series');
+    }
+  });
+});

@@ -70,5 +70,12 @@ describe('content meta', () => {
     assert.equal(meta.kind, 'voice');
     assert.deepEqual(meta.voiceModes, ['stt']);
     assert.equal(meta.charactersPerCredit, 1000);
+    assert.equal(meta.cloneStatus, 'pending');
+  });
+
+  test('voice clone meta is ready when sample exists', () => {
+    const meta = normalizeContentMeta('voice-clone', { voiceSampleUrl: 'https://x/a.mp3' });
+    assert.equal(meta.cloneStatus, 'ready');
+    assert.equal(meta.cloneEndpoint, 'chatterbox-turbo');
   });
 });

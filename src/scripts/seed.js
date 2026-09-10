@@ -18,12 +18,26 @@ const Notification = require('../models/Notification');
 const UsageStat = require('../models/UsageStat');
 const Deployment = require('../models/Deployment');
 const UsageEvent = require('../models/UsageEvent');
+const LicenseKey = require('../models/LicenseKey');
 const {
   CREATOR: RUNPOD_CREATOR,
   buildRunpodMarketplaceProducts,
   buildRunpodUser,
   buildRunpodCreator,
 } = require('../data/runpod-marketplace-products');
+const {
+  buildContentHubProducts,
+  buildContentHubReviews,
+  buildContentHubLicenseSeeds,
+  hubProductFields,
+  isHubCategory,
+} = require('../data/content-hub-products');
+const { inferProductType } = require('../data/marketplace-types');
+const { PRODUCT_CATEGORIES } = require('../data/categories');
+const { taxCategoryFromProduct } = require('../finance/tax-category');
+const { normalizeContentMeta, generateLicenseKey, expiresAtFrom } = require('../utils/license-keys');
+
+const ALLOWED_CATEGORIES = new Set([...PRODUCT_CATEGORIES, 'openrouter', 'featherless', 'runpod-public']);
 
 const MOCK_PATH = path.resolve(
   __dirname,
@@ -47,11 +61,22 @@ async function seed() {
   const runpodProducts = buildRunpodMarketplaceProducts();
   const existingSlugs = new Set(mock.products.map((p) => p.slug));
   for (const p of runpodProducts) {
-    if (!existingSlugs.has(p.slug)) mock.products.push(p);
+    if (!existingSlugs.has(p.slug)) {
+      mock.products.push(p);
+      existingSlugs.add(p.slug);
+    }
   }
+  const hubProducts = buildContentHubProducts();
+  for (const p of hubProducts) {
+    if (!existingSlugs.has(p.slug)) {
+      mock.products.push(p);
+      existingSlugs.add(p.slug);
+    }
+  }
+  mock.reviews = [...(mock.reviews || []), ...buildContentHubReviews()];
 
   await mongoose.connect(config.mongoUri);
-  console.log('[seed] connected', config.mongoUri);
+  console.log('[seed] connected', String(config.mongoUri).replace(/\/\/.*@/, '//***@'));
   console.log(`[seed] products including RunPod public endpoints: ${mock.products.length}`);
 
   await Promise.all([
@@ -64,6 +89,7 @@ async function seed() {
     UsageStat.deleteMany({}),
     Deployment.deleteMany({}),
     UsageEvent.deleteMany({}),
+    LicenseKey.deleteMany({}),
   ]);
 
   const passwordHash = await bcrypt.hash('password', 10);
@@ -109,8 +135,19 @@ async function seed() {
       console.warn('[seed] skip product without creator', p.slug);
       continue;
     }
+    if (!ALLOWED_CATEGORIES.has(p.category)) {
+      console.warn('[seed] skip product with unknown category', p.slug, p.category);
+      continue;
+    }
     const slugSafe = String(p.slug || 'model').replace(/[^a-z0-9-]/gi, '-');
-    const runtime = p.runtime
+    const hasRuntimeUrls = Boolean(
+      p.runtime &&
+        (p.runtime.publicEndpoint ||
+          p.runtime.serverlessEndpoint ||
+          p.runtime.gatewayUrl ||
+          p.runtime.tokenizeEndpoint),
+    );
+    const runtime = hasRuntimeUrls
       ? {
           serverlessEndpoint: p.runtime.serverlessEndpoint || '',
           publicEndpoint: p.runtime.publicEndpoint || '',
@@ -128,21 +165,25 @@ async function seed() {
           temperature: p.runtime.temperature ?? 0.7,
           maxTokens: p.runtime.maxTokens ?? 1024,
         }
-      : {
-          serverlessEndpoint: `https://api.runpod.ai/v2/${slugSafe}/runsync`,
-          publicEndpoint: `https://api.runpod.ai/v2/${slugSafe}/runsync`,
-          tokenizeEndpoint: '',
-          gatewayUrl: p.category === 'hire-agent' ? `wss://gateway.phaimarket.com/${slugSafe}` : '',
-          env: [
-            { key: 'RUNPOD_API_KEY', value: 'seed-replace-me' },
-            { key: 'MODEL_ID', value: p.name },
-          ],
-          skills: (p.tags || []).slice(0, 4),
-          baseModel: p.name,
-          systemPrompt: p.tagline || '',
-          temperature: 0.7,
-          maxTokens: 1024,
-        };
+      : isHubCategory(p.category)
+        ? {}
+        : {
+            serverlessEndpoint: `https://api.runpod.ai/v2/${slugSafe}/runsync`,
+            publicEndpoint: `https://api.runpod.ai/v2/${slugSafe}/runsync`,
+            tokenizeEndpoint: '',
+            gatewayUrl: p.category === 'hire-agent' ? `wss://gateway.phaimarket.com/${slugSafe}` : '',
+            env: [
+              { key: 'RUNPOD_API_KEY', value: 'seed-replace-me' },
+              { key: 'MODEL_ID', value: p.name },
+            ],
+            skills: (p.tags || []).slice(0, 4),
+            baseModel: p.name,
+            systemPrompt: p.tagline || '',
+            temperature: 0.7,
+            maxTokens: 1024,
+          };
+    const hub = isHubCategory(p.category) ? hubProductFields(p) : null;
+    const productType = hub?.productType || inferProductType(p.category, p.tags);
     const product = await Product.create({
       slug: p.slug,
       name: p.name,
@@ -156,21 +197,35 @@ async function seed() {
       gallery: p.gallery || [],
       pricing: p.pricing,
       runtime,
+      contentMeta: hub?.contentMeta || normalizeContentMeta(p.category, p.contentMeta) || undefined,
       rating: p.rating || 0,
       reviewCount: p.reviewCount || 0,
       installCount: p.installCount || 0,
+      salesCount: hub?.salesCount || p.salesCount || p.installCount || 0,
       tags: p.tags || [],
       apiDocsMarkdown: p.apiDocsMarkdown || '',
       changelog: p.changelog || [],
       featured: !!p.featured,
       publishedAt: p.publishedAt ? new Date(p.publishedAt) : new Date(),
+      productType,
+      taxCategory: hub?.taxCategory || taxCategoryFromProduct({ category: p.category, productType }),
+      ownershipType: hub?.ownershipType || p.ownershipType || 'THIRD_PARTY_SELLER',
+      published: true,
+      moderationStatus: 'active',
+      complianceStatus: hub?.complianceStatus || 'pending',
     });
     productByMockId.set(p.id, product);
   }
 
+  const seeded = [...productByMockId.values()];
   console.log(
-    `[seed] RunPod Official products: ${[...productByMockId.values()].filter((p) => p.creatorSlug === RUNPOD_CREATOR.creatorSlug).length}`
+    `[seed] RunPod Official products: ${seeded.filter((p) => p.creatorSlug === RUNPOD_CREATOR.creatorSlug).length}`
   );
+  console.log('[seed] content hubs', {
+    'voice-clone': seeded.filter((p) => p.category === 'voice-clone').length,
+    'ai-film-series': seeded.filter((p) => p.category === 'ai-film-series').length,
+    'story-book': seeded.filter((p) => p.category === 'story-book').length,
+  });
 
   for (const r of mock.reviews || []) {
     const product = productByMockId.get(r.productId);
@@ -280,6 +335,52 @@ async function seed() {
       currency: 'USD',
       note: `Sale: ${pulseProduct.name} (net after 20% platform fee)`,
     });
+  }
+
+  if (buyer) {
+    for (const licenseSeed of buildContentHubLicenseSeeds()) {
+      const product = seeded.find((p) => p.slug === licenseSeed.productSlug);
+      if (!product) continue;
+      const startsAt = licenseSeed.expired
+        ? new Date(Date.now() - 10 * 24 * 60 * 60 * 1000)
+        : new Date();
+      const order = await Order.create({
+        product: product._id,
+        productName: product.name,
+        buyer: buyer._id,
+        buyerName: buyer.name,
+        seller: product.creator,
+        ownershipType: product.ownershipType || 'THIRD_PARTY_SELLER',
+        quantity: 1,
+        amount: licenseSeed.amount,
+        currency: 'USD',
+        unitPrice: licenseSeed.amount,
+        grossAmount: licenseSeed.amount,
+        status: 'paid',
+        paymentStatus: 'paid',
+        fulfillmentStatus: 'fulfilled',
+        paymentProvider: 'internal_ledger',
+        provider: 'wallet',
+        completedAt: startsAt,
+        contractSnapshot: {
+          productName: product.name,
+          licenseTerm: licenseSeed.term,
+        },
+      });
+      await LicenseKey.create({
+        licenseKey: generateLicenseKey(),
+        order: order._id,
+        product: product._id,
+        productName: product.name,
+        buyer: buyer._id,
+        seller: product.creator,
+        category: product.category,
+        term: licenseSeed.term,
+        startsAt,
+        expiresAt: expiresAtFrom(startsAt, licenseSeed.term),
+        status: 'active',
+      });
+    }
   }
 
   if (nova) {

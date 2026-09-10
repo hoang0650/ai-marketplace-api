@@ -7,6 +7,18 @@ const { getBalance } = require('../utils/wallet');
 const { chargeUsage } = require('../finance/charge-usage');
 const { resolveProviderForProduct, computeUsageCost } = require('../utils/provider-resolve');
 const { inferWithFallback, quoteInference } = require('../utils/denglish-client');
+const {
+  isVoiceProduct,
+  voiceSampleUrl,
+  hasVoiceSample,
+  voiceAudioPublicUrl,
+  voiceSamplePublicUrl,
+  fetchMp3Buffer,
+  putVoiceAudio,
+  getVoiceAudio,
+  sendMp3,
+} = require('../utils/voice-audio');
+const { voiceTtsInput } = require('../utils/voice-clone');
 
 const router = express.Router();
 
@@ -108,13 +120,24 @@ router.post('/run', authenticate, async (req, res, next) => {
     if (!product && productSlug) product = await Product.findOne({ slug: String(productSlug).toLowerCase() });
     if (!product) return res.status(404).json({ message: 'Product not found' });
 
+    let inferInput = input;
+    if (isVoiceProduct(product)) {
+      if (!hasVoiceSample(product)) {
+        return res.status(400).json({
+          message: 'Seller has not uploaded a voice MP3 yet. Clone is pending.',
+          code: 'VOICE_SAMPLE_MISSING',
+        });
+      }
+      inferInput = voiceTtsInput(product, input);
+    }
+
     const resolved = resolveProviderForProduct(product);
     const provider = providerOverride || resolved.provider;
     const endpointId = endpointOverride || resolved.endpointId;
     const model = modelOverride || resolved.model;
 
-    const quote = await preflight({ provider, endpointId, model, input });
-    const estimatedCost = computeUsageCost(product, quote.usage, input, quote.providerCost);
+    const quote = await preflight({ provider, endpointId, model, input: inferInput });
+    const estimatedCost = computeUsageCost(product, quote.usage, inferInput, quote.providerCost);
     if (estimatedCost > 0) {
       const balance = await getBalance(req.user._id);
       // Allow run if balance covers estimate; final charge may differ slightly
@@ -133,8 +156,11 @@ router.post('/run', authenticate, async (req, res, next) => {
       provider,
       model,
       endpointId,
-      input,
+      input: inferInput,
       action,
+      category: product.category,
+      voiceSampleUrl: voiceSampleUrl(product),
+      product: { category: product.category, contentMeta: product.contentMeta },
     });
     const latencyMs = Date.now() - started;
 
@@ -145,6 +171,11 @@ router.post('/run', authenticate, async (req, res, next) => {
       unit: 'tokens',
       quantity: 0,
     };
+    if (isVoiceProduct(product)) {
+      const chars = Math.max(1, String(inferInput?.prompt || inferInput?.text || '').length);
+      usage.unit = 'characters';
+      usage.quantity = chars;
+    }
     const inputTokens = Number(usage.input_tokens) || 0;
     const outputTokens = Number(usage.output_tokens) || 0;
     const data = ai.data && typeof ai.data === 'object' ? ai.data : {};
@@ -153,7 +184,7 @@ router.post('/run', authenticate, async (req, res, next) => {
     // one, otherwise from the formula on the model's docs page.
     const providerCost = Number(data.cost) || quote.providerCost || 0;
     const upstreamCost = Number(data.upstream_cost) || quote.upstreamCost || 0;
-    const cost = computeUsageCost(product, usage, input, providerCost);
+    const cost = computeUsageCost(product, usage, inferInput, providerCost);
 
     const buyerId = req.user._id;
     const sellerId = product.creator;
@@ -216,12 +247,32 @@ router.post('/run', authenticate, async (req, res, next) => {
     ).catch(() => {});
 
     const output = buildOutput(data, {
-      kind: ai.raw?.kind,
+      kind: isVoiceProduct(product) ? 'audio' : ai.raw?.kind,
       charged,
       providerCost,
       upstreamCost,
       usage,
     });
+
+    if (isVoiceProduct(product)) {
+      output.kind = 'audio';
+      output.format = String(output.format || data.format || 'wav').replace(/^mp3$/i, 'mp3');
+      const prompt = String(inferInput?.prompt || '');
+      if (prompt && !output.text) output.text = prompt;
+      const remote = String(output.audio_url || data.audio_url || '').trim();
+      if (remote) {
+        try {
+          const audio = await fetchMp3Buffer(remote);
+          putVoiceAudio(event._id, audio.buffer, audio.contentType);
+          output.audio_url = voiceAudioPublicUrl(req, event._id);
+        } catch {
+          output.audio_url = remote;
+        }
+      } else {
+        output.audio_url = voiceSamplePublicUrl(req, product.slug);
+        output.cloneFallback = 'sample';
+      }
+    }
 
     res.json({
       ok: true,
@@ -254,6 +305,27 @@ router.post('/run', authenticate, async (req, res, next) => {
     if (err.status) {
       return res.status(502).json({ message: err.message, detail: err.body });
     }
+    next(err);
+  }
+});
+
+router.get('/audio/:file', (req, res) => {
+  const id = String(req.params.file || '').replace(/\.mp3$/i, '');
+  const cached = getVoiceAudio(id);
+  if (!cached) return res.status(404).json({ message: 'Audio expired. Run TTS again.' });
+  return sendMp3(res, cached);
+});
+
+router.get('/voice/:file', async (req, res, next) => {
+  try {
+    const slug = String(req.params.file || '').replace(/\.mp3$/i, '').toLowerCase();
+    const product = await Product.findOne({ slug }).lean();
+    if (!product || !isVoiceProduct(product)) {
+      return res.status(404).json({ message: 'Voice sample not found' });
+    }
+    const mp3 = await fetchMp3Buffer(voiceSampleUrl(product));
+    return sendMp3(res, mp3);
+  } catch (err) {
     next(err);
   }
 });

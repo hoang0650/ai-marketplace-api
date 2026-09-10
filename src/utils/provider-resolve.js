@@ -1,4 +1,6 @@
 const { getRunpodPublicEndpoint } = require('../data/runpod-public-endpoints');
+const { isVoiceCategory } = require('./license-keys');
+const { voiceCloneProvider } = require('./voice-clone');
 const {
   extractAimarketsModelId,
   extractProviderEndpointId,
@@ -12,6 +14,9 @@ const {
  * Public URLs may be api.aimarkets.vn — resolve upstream via env or catalog.
  */
 function resolveProviderForProduct(product) {
+  if (isVoiceCategory(product?.category)) {
+    return voiceCloneProvider();
+  }
   const slug = String(product.slug || '');
   const tags = product.tags || [];
   const runtime = product.runtime || {};
@@ -129,12 +134,19 @@ function computeUsageCost(product, usage, input = {}, providerCost = 0) {
   const pricing = product.pricing || {};
   if (pricing.model !== 'usage') return 0;
 
-  const unit = usage?.unit || pricing.usageUnit || 'tokens';
+  const unit = String(usage?.unit || pricing.usageUnit || 'tokens');
   const rate = Number(pricing.usageRate) || 0;
   const quantity = Number(usage?.quantity);
   const totalTokens = Number(usage?.total_tokens) || 0;
 
   if (rate > 0) {
+    if (/char/i.test(unit)) {
+      const chars =
+        Number.isFinite(quantity) && quantity > 0
+          ? quantity
+          : String(input?.prompt || input?.text || '').length;
+      return round6((Math.max(1, chars) / 1000) * rate);
+    }
     if (unit === 'seconds' || unit === 'images' || unit === 'requests') {
       let qty = Number.isFinite(quantity) && quantity > 0 ? quantity : 0;
       if (!qty) qty = unit === 'seconds' ? Number(input?.duration) || 0 : 1;

@@ -4,6 +4,7 @@ const config = require('../config/env');
 const User = require('../models/User');
 const TerminalSession = require('../models/TerminalSession');
 const GpuServer = require('../models/GpuServer');
+const { userIdFromPayload } = require('../middleware/auth');
 const { MAX_INPUT, SESSION_IDLE_MS, audit } = require('./permission.service');
 const provider = require('../utils/denglish-providers');
 
@@ -28,7 +29,7 @@ function attachTerminalGateway(httpServer) {
     try {
       if (!token) throw new Error('UNAUTHORIZED');
       const payload = jwt.verify(token, config.jwtSecret);
-      user = await User.findById(payload.sub);
+      user = await User.findById(userIdFromPayload(payload));
       if (!user) throw new Error('UNAUTHORIZED');
     } catch {
       send(ws, { type: 'error', message: 'UNAUTHORIZED', code: 'UNAUTHORIZED' });

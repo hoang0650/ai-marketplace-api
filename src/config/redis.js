@@ -1,11 +1,21 @@
 /**
- * Optional Redis client — fail-fast, never blocks the API when Redis is down.
+ * Redis client — on by default (127.0.0.1:6379), same fail-fast pattern as phhotel-api.
  *
- * Enable via REDIS_URL (Upstash/Render/Redis Cloud) or REDIS_ENABLED=true + REDIS_HOST.
- * When disabled/unavailable every command resolves to null (no-op cache).
+ * Disable with REDIS_ENABLED=0. Production typically sets REDIS_URL (Upstash / Redis Cloud).
+ * When Redis is down, cache helpers fail-open so Mongo still serves requests.
  */
 const redisUrl = (process.env.REDIS_URL || '').trim();
-const isRedisEnabled = !!redisUrl || (process.env.REDIS_ENABLED === 'true' && !!process.env.REDIS_HOST);
+
+function redisEnabled() {
+  if (process.env.NODE_TEST_CONTEXT) return false;
+  const v = String(process.env.REDIS_ENABLED || '').trim().toLowerCase();
+  if (['0', 'false', 'off', 'no'].includes(v)) return false;
+  return true;
+}
+
+const isRedisEnabled = redisEnabled();
+const redisHost = (process.env.REDIS_HOST || '127.0.0.1').trim();
+const redisPort = Number(process.env.REDIS_PORT) || 6379;
 
 let redis = null;
 let redisReady = false;
@@ -36,8 +46,8 @@ if (isRedisEnabled) {
     } else {
       redis = new Redis({
         ...baseOptions,
-        host: process.env.REDIS_HOST,
-        port: Number(process.env.REDIS_PORT) || 6379,
+        host: redisHost,
+        port: redisPort,
         username: process.env.REDIS_USERNAME || undefined,
         password: process.env.REDIS_PASSWORD || undefined,
       });
@@ -63,7 +73,7 @@ if (isRedisEnabled) {
     console.warn('[redis] init failed, running without cache:', err?.message || err);
   }
 } else {
-  console.log('[redis] disabled, running without cache');
+  console.log('[redis] disabled (REDIS_ENABLED=0)');
 }
 
 function isReady() {

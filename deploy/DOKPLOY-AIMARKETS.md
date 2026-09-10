@@ -29,6 +29,8 @@ PORT=4100
 TRUST_PROXY=1
 MDB_CONNECT=mongodb+srv://...
 JWT_SECRET=<>=24 ký tự>
+REFRESH_TOKEN_SECRET=<khác JWT_SECRET, >=24 ký tự>
+REDIS_URL=rediss://...
 # Bắt buộc có www — Vercel redirect aimarkets.vn → www.aimarkets.vn
 CORS_ORIGINS=https://aimarkets.vn,https://www.aimarkets.vn,http://localhost:4200,http://127.0.0.1:4200
 GOOGLE_CLIENT_ID=<web-client-id>.apps.googleusercontent.com

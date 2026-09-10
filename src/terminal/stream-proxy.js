@@ -5,6 +5,7 @@ const jwt = require('jsonwebtoken');
 const config = require('../config/env');
 const User = require('../models/User');
 const GameSession = require('../models/GameSession');
+const { userIdFromPayload } = require('../middleware/auth');
 
 const DROP_REQ = new Set([
   'connection',
@@ -144,7 +145,7 @@ function attachGameStreamProxy(httpServer) {
       try {
         if (!token) throw new Error('UNAUTHORIZED');
         const payload = jwt.verify(token, config.jwtSecret);
-        const user = await User.findById(payload.sub);
+        const user = await User.findById(userIdFromPayload(payload));
         if (!user) throw new Error('UNAUTHORIZED');
         const session = await GameSession.findOne({ sessionId, user: user._id, status: { $in: ['starting', 'live'] } });
         if (!session || !session.streamHost || !session.streamPort) throw new Error('SERVER_NOT_READY');

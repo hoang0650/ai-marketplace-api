@@ -3,11 +3,14 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const User = require('../models/User');
 const config = require('../config/env');
-const { signToken, publicUser, authenticate } = require('../middleware/auth');
+const { attachAuthSession, publicUser, authenticate, extractRefreshToken, loadActiveUser, clearRefreshCookie, extractAccessToken, userIdFromPayload, invalidateAuthUserCache, setRefreshCookie, signAccessToken, requireAuthSession, persistAuthCaches } = require('../middleware/auth');
 const { slugify } = require('../utils/serialize');
 const { deleteCachePattern } = require('../utils/cache');
 const {
   getGoogleClientId,
+  getGoogleClientIds,
+  getGoogleIosClientId,
+  getGoogleAndroidClientId,
   verifyGoogleIdToken,
   verifyGoogleAuthCode,
   googleCallbackUrl,
@@ -108,8 +111,8 @@ router.post('/register', async (req, res, next) => {
       deleteCachePattern('creators:*').catch(() => {});
     }
 
-    const token = signToken(user);
-    return res.status(201).json({ token, user: publicUser(user) });
+    const session = await attachAuthSession(res, user);
+    return res.status(201).json(session);
   } catch (err) {
     next(err);
   }
@@ -134,16 +137,21 @@ router.post('/login', async (req, res, next) => {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
     await assertAccountActive(user);
-    return res.json({ token: signToken(user), user: publicUser(user) });  } catch (err) {
+    return res.json(await attachAuthSession(res, user));
+  } catch (err) {
     next(err);
   }
 });
 
 router.get('/google/config', (_req, res) => {
   const clientId = getGoogleClientId();
+  const iosClientId = getGoogleIosClientId();
+  const androidClientId = getGoogleAndroidClientId();
   res.json({
-    enabled: !!clientId,
+    enabled: !!(clientId || iosClientId || androidClientId),
     clientId: clientId || undefined,
+    iosClientId: iosClientId || undefined,
+    androidClientId: androidClientId || undefined,
     mode: 'redirect',
   });
 });
@@ -202,8 +210,8 @@ router.get('/google/callback', async (req, res, next) => {
     const profile = await verifyGoogleAuthCode(code, redirectUri);
     const user = await findOrCreateGoogleUser(profile);
     await assertAccountActive(user);
-    const token = signToken(user);
-    const q = new URLSearchParams({ token, next: nextPath });
+    const session = await attachAuthSession(res, user);
+    const q = new URLSearchParams({ token: session.token, next: nextPath });
     return res.redirect(`${origin}/auth/google/callback?${q.toString()}`);
   } catch (err) {
     console.error('[google-callback]', err?.message || err);
@@ -213,24 +221,22 @@ router.get('/google/callback', async (req, res, next) => {
 
 router.post('/google/login', async (req, res, next) => {
   try {
-    const clientId = getGoogleClientId();
-    if (!clientId) {
+    if (!getGoogleClientIds().length) {
       return res.status(503).json({ message: 'Google Sign-In chưa được cấu hình trên máy chủ' });
     }
-
-    const { idToken, code, redirectUri } = req.body || {};
+    const { idToken, code, redirectUri, clientId: bodyClientId } = req.body || {};
     let profile;
     if (idToken) {
       profile = await verifyGoogleIdToken(idToken);
     } else if (code) {
-      profile = await verifyGoogleAuthCode(code, redirectUri || 'postmessage');
+      profile = await verifyGoogleAuthCode(code, redirectUri || 'postmessage', bodyClientId);
     } else {
       return res.status(400).json({ message: 'Thiếu idToken hoặc code Google' });
     }
 
     const user = await findOrCreateGoogleUser(profile);
     await assertAccountActive(user);
-    return res.json({ token: signToken(user), user: publicUser(user) });
+    return res.json(await attachAuthSession(res, user));
   } catch (err) {
     if (err.statusCode) {
       return res.status(err.statusCode).json({
@@ -241,6 +247,77 @@ router.post('/google/login', async (req, res, next) => {
     }
     next(err);
   }
+});
+
+router.post('/refresh-token', async (req, res, next) => {
+  try {
+    const refreshToken = extractRefreshToken(req);
+    if (!refreshToken) {
+      return res.status(401).json({ message: 'Không tìm thấy refresh token', code: 'UNAUTHORIZED' });
+    }
+    let decoded;
+    try {
+      decoded = jwt.verify(refreshToken, config.refreshTokenSecret);
+    } catch (err) {
+      clearRefreshCookie(res);
+      return res.status(401).json({
+        message: err.name === 'TokenExpiredError' ? 'Refresh token đã hết hạn' : 'Refresh token không hợp lệ',
+        code: err.name === 'TokenExpiredError' ? 'TOKEN_EXPIRED' : 'UNAUTHORIZED',
+      });
+    }
+    const userId = userIdFromPayload(decoded);
+    const user = await loadActiveUser(userId, { allowCache: false });
+    if (!user) {
+      clearRefreshCookie(res);
+      return res.status(401).json({ message: 'Unauthorized', code: 'UNAUTHORIZED' });
+    }
+    await assertAccountActive(user);
+    const sessionOk = await requireAuthSession(userId);
+    if (!sessionOk) {
+      clearRefreshCookie(res);
+      return res.status(401).json({ message: 'Phiên đăng nhập đã hết hạn', code: 'SESSION_EXPIRED' });
+    }
+    const token = signAccessToken(user);
+    setRefreshCookie(res, refreshToken);
+    await persistAuthCaches(user);
+    return res.json({ token, refreshToken, user: publicUser(user) });
+  } catch (err) {
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({
+        message: err.message,
+        code: err.code,
+        suspendedUntil: err.suspendedUntil,
+      });
+    }
+    next(err);
+  }
+});
+
+router.post('/logout', async (req, res) => {
+  const access = extractAccessToken(req);
+  if (access) {
+    try {
+      const payload = jwt.verify(access, config.jwtSecret);
+      await invalidateAuthUserCache(userIdFromPayload(payload));
+    } catch {
+      /* expired access is still a valid logout */
+    }
+  }
+  const refreshToken = extractRefreshToken(req);
+  if (refreshToken) {
+    try {
+      const payload = jwt.verify(refreshToken, config.refreshTokenSecret);
+      await invalidateAuthUserCache(userIdFromPayload(payload));
+    } catch {
+      /* ignore */
+    }
+  }
+  clearRefreshCookie(res);
+  return res.json({ message: 'Đăng xuất thành công' });
+});
+
+router.get('/info', authenticate, (req, res) => {
+  res.json(publicUser(req.user));
 });
 
 router.get('/me', authenticate, (req, res) => {
@@ -270,6 +347,7 @@ router.patch('/me', authenticate, async (req, res, next) => {
     }
 
     await user.save();
+    await invalidateAuthUserCache(user._id);
     deleteCachePattern('creators:*').catch(() => {});
     return res.json(publicUser(user));
   } catch (err) {

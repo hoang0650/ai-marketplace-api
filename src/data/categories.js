@@ -6,7 +6,7 @@ const AI_CATEGORIES = [
   { id: 'image-to-image', label: 'Image to Image', description: 'Edit, restyle, or transform existing images.', hubPath: '/image-to-image', group: 'models', navGroup: 'generate', lane: 'ai' },
   { id: 'text-to-video', label: 'Text to Video', description: 'Generate video from a text prompt.', hubPath: '/text-to-video', group: 'models', navGroup: 'generate', lane: 'ai' },
   { id: 'image-to-video', label: 'Image to Video', description: 'Animate a reference image with a prompt.', hubPath: '/image-to-video', group: 'models', navGroup: 'generate', lane: 'ai' },
-  { id: 'voice-clone', label: 'Voice clone', description: 'Rent cloned/uploaded voices for TTS and STT, billed by text credits or monthly.', hubPath: '/voice-clone', group: 'models', navGroup: 'generate', lane: 'ai' },
+  { id: 'voice-clone', label: 'Voice clone', description: 'Seller uploads an MP3 of their voice. The platform clones it; buyers run TTS/STT billed by text credits.', hubPath: '/voice-clone', group: 'models', navGroup: 'generate', lane: 'ai' },
   { id: 'ai-film-series', label: 'Watch AI films', description: 'Watch multi-episode AI films. Access is unlocked with a day / month / year license key.', hubPath: '/ai-film-series', group: 'models', navGroup: 'generate', lane: 'ai' },
   { id: 'story-book', label: 'Stories & books', description: 'AI story and audiobook reading with a time-bound license key.', hubPath: '/story-book', group: 'models', navGroup: 'generate', lane: 'ai' },
   { id: 'skill-pack', label: 'Skill packs', description: 'Download OpenClaw / agent skill bundles. Unlocked with a day / month / year license key.', hubPath: '/skill-pack', group: 'skills', navGroup: 'generate', lane: 'ai' },

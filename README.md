@@ -7,20 +7,20 @@ Express + MongoDB backend for [`ai-marketplace`](../ai-marketplace) (PH AI Marke
 - Node.js 18+
 - Express 4
 - MongoDB + Mongoose 8
-- JWT auth (`Authorization: Bearer <token>`)
+- JWT auth: access token `Authorization: Bearer <token>` + refresh token httpOnly cookie `refreshToken` (mobile có thể gửi `refreshToken` trong body)
 - Production hardening: `helmet`, `compression`, per-IP rate limiting (`express-rate-limit`), Mongo operator sanitization (`express-mongo-sanitize`)
 - Optional Redis cache (`ioredis`) — read-through cache cho products/creators với fail-fast + circuit breaker; app chạy bình thường khi không có Redis
 
 ## Production checklist
 
-- `NODE_ENV=production` — server **refuses to boot** without a strong `JWT_SECRET` (>= 24 chars) and explicit `MDB_CONNECT`.
+- `NODE_ENV=production` — server **refuses to boot** without strong `JWT_SECRET` + `REFRESH_TOKEN_SECRET` (>= 24 chars, khác nhau) and explicit `MDB_CONNECT`.
 - `TRUST_PROXY=1` khi chạy sau Render/NGINX/Cloudflare (tự bật khi `NODE_ENV=production`).
-- Rate limits: 300 req/min/IP toàn API, 20 req/15min/IP cho `/auth/login|register` (tùy chỉnh qua `RATE_LIMIT_*`).
+- Rate limits: 300 req/min/IP toàn API, 20 req/15min/IP cho `/auth/login|register|google`, 60 req/15min cho `/auth/refresh-token`.
 - Health probes: `GET /health` (liveness), `GET /health/ready` (MongoDB readiness — trả 503 khi DB chưa sẵn sàng).
 - Graceful shutdown: SIGTERM/SIGINT → đóng HTTP server rồi đóng MongoDB, force-exit sau 10s.
 - Wallet: withdraw kiểm tra số dư ledger, mọi giao dịch cap 100.000 USD, amount làm tròn 2 số thập phân.
 - Search sản phẩm escape regex (chống ReDoS), listing mặc định limit 100 (max 200, hỗ trợ `limit`/`offset`).
-- Redis (optional): bật qua `REDIS_URL` hoặc `REDIS_ENABLED=true` + `REDIS_HOST`. Command timeout 250ms, circuit breaker mở 30s sau 3 lỗi liên tiếp — Redis chết thì mọi request fallback thẳng MongoDB, không bao giờ treo. Cache: `GET /products` (60s), `GET /products/:slug`, `GET /creators*` (300s); tự invalidate khi create/update/delete/checkout. Xóa key bằng SCAN, không dùng KEYS.
+- Redis **bật mặc định** (`127.0.0.1:6379`). Tắt bằng `REDIS_ENABLED=0`. Production nên đặt `REDIS_URL`. Command timeout 250ms, circuit breaker 30s sau 3 lỗi — Redis chết thì fallback MongoDB. Auth: `auth:user` (1h) + `auth:session` (30 ngày) khi login; authenticate đọc Redis trước; logout/xóa user xóa cả hai key. Cache catalog: `GET /products` (60s), `GET /products/:slug`, `GET /creators*` (300s).
 
 ## Quick start
 
@@ -32,6 +32,8 @@ npm install
 # Ví dụ Atlas (DB riêng, không dùng chung Nest):
 # MDB_CONNECT=mongodb+srv://USER:PASS@cluster0.xxx.mongodb.net/ai_marketplace?retryWrites=true&w=majority
 npm run seed
+# Chỉ upsert giọng clone / Video AI / Stories (không xóa DB):
+npm run seed:hubs
 npm run dev
 ```
 
@@ -49,6 +51,16 @@ Health: `http://localhost:4100/health` · Readiness: `http://localhost:4100/heal
 | `pulse@creators.dev` | creator |
 | `buyer@example.com` | buyer |
 
+`npm run seed` và `npm run seed:hubs` tạo catalog test:
+
+| Hub | Category | Ví dụ slug |
+|-----|----------|------------|
+| Giọng clone | `voice-clone` | `mai-linh-narrator`, `khoa-bilingual-studio` |
+| Video AI | `ai-film-series` | `neon-harbor`, `sai-gon-after-rain` |
+| Stories | `story-book` | `dem-ha-noi`, `cao-va-rung` |
+
+Buyer `buyer@example.com` có sẵn license: Neon Harbor (tháng, còn hạn), Đêm Hà Nội (năm, còn hạn), Iron Lotus (ngày, hết hạn).
+
 ## Frontend
 
 Point Angular env to this API and disable mock interceptor:
@@ -63,9 +75,12 @@ useMockApi: false,
 
 | Method | Path | Auth |
 |--------|------|------|
-| POST | `/auth/register` | — |
-| POST | `/auth/login` | — |
-| GET | `/auth/me` | JWT |
+| POST | `/auth/register` | — | JWT access + refresh cookie |
+| POST | `/auth/login` | — | JWT access + refresh cookie |
+| POST | `/auth/refresh-token` | cookie / body `refreshToken` | access JWT mới |
+| POST | `/auth/logout` | cookie (optional Bearer) | xóa refresh cookie |
+| GET | `/auth/me` | JWT | user hiện tại |
+| GET | `/auth/info` | JWT | alias `/me` (cùng phhotel `/users/info`) |
 | GET | `/products` | — |
 | GET | `/products/:slug` | — |
 | POST/PUT/DELETE | `/products` | creator/admin |

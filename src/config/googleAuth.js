@@ -20,6 +20,63 @@ function getGoogleClientSecret() {
   return String(process.env.GOOGLE_CLIENT_SECRET || '').trim();
 }
 
+function getGoogleIosClientId() {
+  return String(process.env.GOOGLE_IOS_CLIENT_ID || '').trim();
+}
+
+function getGoogleAndroidClientId() {
+  return String(process.env.GOOGLE_ANDROID_CLIENT_ID || '').trim();
+}
+
+function isNativeGoogleRedirectUri(redirectUri) {
+  return /^com\.googleusercontent\.apps\.[^:]+:/.test(String(redirectUri || ''));
+}
+
+function resolveGoogleCodeExchangeCredentials(redirectUri, explicitClientId) {
+  const uri = String(redirectUri || 'postmessage').trim();
+  const webClientId = getGoogleClientId();
+  const iosClientId = getGoogleIosClientId();
+  const androidClientId = getGoogleAndroidClientId();
+  const allowedIds = getGoogleClientIds();
+
+  let clientId = String(explicitClientId || '').trim();
+  let clientSecret = null;
+
+  if (!clientId) {
+    if (isNativeGoogleRedirectUri(uri)) {
+      const schemePrefix = uri.match(/^com\.googleusercontent\.apps\.([^:]+):/)?.[1];
+      if (schemePrefix) {
+        clientId = `${schemePrefix}.apps.googleusercontent.com`;
+      }
+      if (!allowedIds.includes(clientId) && iosClientId) {
+        clientId = iosClientId;
+      }
+    } else if (uri.startsWith('http://') || uri.startsWith('https://')) {
+      clientId = androidClientId || webClientId;
+      if (clientId === webClientId) {
+        clientSecret = getGoogleClientSecret();
+      }
+    } else {
+      clientId = webClientId;
+      clientSecret = getGoogleClientSecret();
+    }
+  } else if (clientId === webClientId) {
+    clientSecret = getGoogleClientSecret();
+  }
+
+  if (!clientId) {
+    throw new Error('Chưa cấu hình GOOGLE_CLIENT_ID phù hợp');
+  }
+  if (!allowedIds.includes(clientId)) {
+    throw new Error('Google client_id không được phép');
+  }
+  if (clientId === webClientId && !clientSecret) {
+    throw new Error('Chưa cấu hình GOOGLE_CLIENT_SECRET cho Web client');
+  }
+
+  return { clientId, clientSecret, redirectUri: uri };
+}
+
 function publicApiBase(req) {
   if (config.isProduction) {
     const env = String(process.env.AIMARKETS_API_HOST || process.env.PUBLIC_API_URL || '')
@@ -101,24 +158,22 @@ async function verifyGoogleIdToken(idToken) {
   return normalizeGoogleProfile(data);
 }
 
-async function verifyGoogleAuthCode(code, redirectUri = 'postmessage') {
-  const clientId = getGoogleClientId();
-  const clientSecret = getGoogleClientSecret();
-  if (!clientId || !clientSecret) {
-    throw new Error('Chưa cấu hình GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET');
-  }
-
+async function verifyGoogleAuthCode(code, redirectUri = 'postmessage', explicitClientId) {
   const authCode = String(code || '').trim();
   if (!authCode) throw new Error('Thiếu Google authorization code');
-  const resolvedRedirectUri = String(redirectUri || 'postmessage');
+
+  const { clientId, clientSecret, redirectUri: resolvedRedirectUri } = resolveGoogleCodeExchangeCredentials(
+    redirectUri,
+    explicitClientId,
+  );
 
   const body = new URLSearchParams({
     code: authCode,
     client_id: clientId,
-    client_secret: clientSecret,
     redirect_uri: resolvedRedirectUri,
     grant_type: 'authorization_code',
   });
+  if (clientSecret) body.set('client_secret', clientSecret);
 
   const res = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
@@ -143,6 +198,8 @@ async function verifyGoogleAuthCode(code, redirectUri = 'postmessage') {
 module.exports = {
   getGoogleClientId,
   getGoogleClientIds,
+  getGoogleIosClientId,
+  getGoogleAndroidClientId,
   getGoogleClientSecret,
   publicApiBase,
   googleCallbackUrl,

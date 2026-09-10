@@ -10,7 +10,8 @@ const { inferProductType } = require('../data/marketplace-types');
 const { catalogVisibleFilter, isCatalogVisible } = require('../utils/moderation');
 const { assertCanPublishProduct } = require('../utils/seller-compliance');
 const { writeAuditLog } = require('../utils/audit');
-const { normalizeContentMeta } = require('../utils/license-keys');
+const { normalizeContentMeta, isVoiceCategory } = require('../utils/license-keys');
+const { applyVoiceCloneToProduct } = require('../utils/voice-clone');
 
 const router = express.Router();
 
@@ -179,6 +180,11 @@ router.post('/', authenticate, requireRoles('creator', 'admin'), async (req, res
       moderationStatus,
     });
 
+    if (isVoiceCategory(product.category)) {
+      applyVoiceCloneToProduct(product);
+      await product.save();
+    }
+
     await writeAuditLog({
       actorId: user._id,
       actorRole: user.role,
@@ -235,6 +241,9 @@ router.put('/:id', authenticate, requireRoles('creator', 'admin'), async (req, r
       });
     }
     if (body.slug) product.slug = slugify(body.slug) || product.slug;
+    if (isVoiceCategory(product.category)) {
+      applyVoiceCloneToProduct(product);
+    }
     await product.save();
     invalidateProductCaches();
     res.json(mapProduct(product, { includeSecrets: true }));

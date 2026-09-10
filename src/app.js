@@ -5,6 +5,7 @@ const compression = require('compression');
 const rateLimit = require('express-rate-limit');
 const mongoSanitize = require('express-mongo-sanitize');
 const morgan = require('morgan');
+const cookieParser = require('cookie-parser');
 const config = require('./config/env');
 const { isDbReady } = require('./config/db');
 const { isReady: isRedisReady } = require('./config/redis');
@@ -86,6 +87,7 @@ function createApp() {
     })
   );
   app.use(express.json({ limit: '1mb' }));
+  app.use(cookieParser());
   // Strip Mongo operators ($, .) from user payloads to prevent operator injection.
   app.use(mongoSanitize());
 
@@ -93,13 +95,13 @@ function createApp() {
   app.get('/health', (_req, res) => {
     res.json({ ok: true, service: 'ai-marketplace-api', uptime: process.uptime() });
   });
-  // Readiness — MongoDB required; Redis is optional (informational only).
+  // Readiness — MongoDB required; Redis is on by default (informational if down).
   app.get('/health/ready', (_req, res) => {
     const ready = isDbReady();
     res.status(ready ? 200 : 503).json({
       ok: ready,
       db: ready ? 'connected' : 'disconnected',
-      cache: isRedisReady() ? 'connected' : 'off',
+      cache: isRedisReady() ? 'connected' : 'disconnected',
     });
   });
 
@@ -120,11 +122,20 @@ function createApp() {
     message: { message: 'Too many auth attempts, please try again later.' },
   });
 
+  const refreshLimiter = rateLimit({
+    windowMs: config.rateLimit.refreshWindowMs,
+    max: config.rateLimit.refreshMax,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { message: 'Too many refresh attempts, please try again later.' },
+  });
+
   app.use('/v1', apiLimiter);
   app.use('/v1/auth/login', authLimiter);
   app.use('/v1/auth/register', authLimiter);
   app.use('/v1/auth/google/start', authLimiter);
   app.use('/v1/auth/google/login', authLimiter);
+  app.use('/v1/auth/refresh-token', refreshLimiter);
 
   // Static RunPod Public Endpoints catalog (docs) — no DB required.
   app.use('/v1/runpod', runpodRoutes);

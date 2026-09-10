@@ -61,6 +61,15 @@ function normalizeContentMeta(category, raw = {}) {
       voiceSampleUrl: String(src.voiceSampleUrl || '').slice(0, 500),
       creditUnit: src.creditUnit === 'word' ? 'word' : 'character',
       charactersPerCredit: Math.max(1, Number(src.charactersPerCredit) || 1000),
+      cloneStatus: ['pending', 'ready', 'failed'].includes(src.cloneStatus)
+        ? src.cloneStatus
+        : src.voiceSampleUrl
+          ? 'ready'
+          : 'pending',
+      cloneProvider: String(src.cloneProvider || 'runpod_public').slice(0, 64),
+      cloneEndpoint: String(src.cloneEndpoint || 'chatterbox-turbo').slice(0, 128),
+      cloneError: String(src.cloneError || '').slice(0, 500),
+      cloneReadyAt: String(src.cloneReadyAt || '').slice(0, 40),
     };
   }
   if (isLicenseCategory(category)) {

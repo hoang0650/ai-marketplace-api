@@ -119,11 +119,45 @@ async function quoteInference({ model, input }) {
   }
 }
 
+function isVoiceInfer(body = {}) {
+  const cat = String(body.category || body.product?.category || '');
+  const ep = String(body.endpointId || body.model || '');
+  return cat === 'voice-clone' || /tts|voice|speech|audio|whisper/i.test(ep);
+}
+
 /** Local sandbox when denglish-api is unreachable (dev only). */
-function localSandboxInfer({ provider, model, endpointId, input }) {
+function localSandboxInfer(body = {}) {
+  const { provider, model, endpointId, input = {} } = body;
   const prompt = String(input?.prompt || input?.text || '');
   const duration = Number(input?.duration) || 0;
   const ep = endpointId || model || 'sandbox';
+  if (isVoiceInfer(body)) {
+    const sample =
+      String(body.voiceSampleUrl || body.product?.contentMeta?.voiceSampleUrl || '').trim() ||
+      'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3';
+    const chars = Math.max(1, prompt.length);
+    return {
+      ok: true,
+      provider: provider || 'voice-clone',
+      model: model || ep,
+      data: {
+        kind: 'audio',
+        audio_url: sample,
+        format: 'mp3',
+        text: prompt,
+        status: 'COMPLETED',
+      },
+      usage: {
+        input_tokens: 0,
+        output_tokens: 0,
+        total_tokens: 0,
+        unit: 'characters',
+        quantity: chars,
+      },
+      latency_ms: 40,
+      raw: { sandbox: true, local: true, kind: 'audio' },
+    };
+  }
   if (duration > 0 || /video|i2v|t2v/i.test(ep)) {
     return {
       ok: true,

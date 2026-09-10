@@ -5,7 +5,7 @@ const Order = require('../models/Order');
 const Review = require('../models/Review');
 const WalletTx = require('../models/WalletTx');
 const Notification = require('../models/Notification');
-const { authenticate, requireRoles } = require('../middleware/auth');
+const { authenticate, requireRoles, invalidateAuthUserCache } = require('../middleware/auth');
 const { PLATFORM_COMMISSION_RATE } = require('../utils/platform');
 const { applyStatus, STATUSES, effectiveStatus } = require('../utils/moderation');
 const { deleteCachePattern } = require('../utils/cache');
@@ -329,6 +329,7 @@ router.patch('/users/:id/status', authenticate, requireRoles('admin'), async (re
     }
     applyStatus(u, { status, days: req.body?.days, reason: req.body?.reason }, 'accountStatus');
     await u.save();
+    await invalidateAuthUserCache(u._id);
     res.json(adminUserDto(u));
   } catch (err) {
     next(err);
@@ -348,6 +349,7 @@ router.delete('/users/:id', authenticate, requireRoles('admin'), async (req, res
     }
     await Product.updateMany({ creator: u._id }, { $set: { moderationStatus: 'inactive', published: false } });
     await User.deleteOne({ _id: u._id });
+    await invalidateAuthUserCache(u._id);
     deleteCachePattern('products:*').catch(() => {});
     deleteCachePattern('creators:*').catch(() => {});
     res.json({ ok: true });

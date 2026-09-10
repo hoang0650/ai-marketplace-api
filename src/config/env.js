@@ -6,12 +6,24 @@ const nodeEnv = process.env.NODE_ENV || 'development';
 const isProduction = nodeEnv === 'production';
 
 const jwtSecret = (process.env.JWT_SECRET || DEV_JWT_FALLBACK).trim();
+const refreshTokenSecret = (process.env.REFRESH_TOKEN_SECRET || `${jwtSecret}-refresh`).trim();
 
 // Fail fast: never boot production with a default/weak secret.
 if (isProduction) {
   if (!process.env.JWT_SECRET || jwtSecret === DEV_JWT_FALLBACK || jwtSecret.length < 24) {
     console.error(
       '[config] FATAL: JWT_SECRET must be set to a strong value (>= 24 chars) in production.'
+    );
+    process.exit(1);
+  }
+  if (
+    !process.env.REFRESH_TOKEN_SECRET ||
+    refreshTokenSecret.length < 24 ||
+    refreshTokenSecret === jwtSecret ||
+    refreshTokenSecret === `${DEV_JWT_FALLBACK}-refresh`
+  ) {
+    console.error(
+      '[config] FATAL: REFRESH_TOKEN_SECRET must be set to a strong value (>= 24 chars), different from JWT_SECRET.'
     );
     process.exit(1);
   }
@@ -25,7 +37,10 @@ const config = {
   port: Number(process.env.PORT || 4100),
   mongoUri: (process.env.MDB_CONNECT || 'mongodb://127.0.0.1:27017/ai_marketplace').trim(),
   jwtSecret,
-  jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
+  refreshTokenSecret,
+  jwtExpiresIn: process.env.JWT_EXPIRES_IN || '30d',
+  refreshExpiresIn: process.env.REFRESH_EXPIRES_IN || '30d',
+  cookieSameSite: (process.env.COOKIE_SAMESITE || 'lax').trim(),
   corsOrigins: String(process.env.CORS_ORIGINS || 'http://localhost:4200')
     .split(',')
     .map((s) => s.trim())
@@ -38,6 +53,8 @@ const config = {
     max: Number(process.env.RATE_LIMIT_MAX || 300),
     authWindowMs: Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS || 15 * 60_000),
     authMax: Number(process.env.AUTH_RATE_LIMIT_MAX || 20),
+    refreshWindowMs: Number(process.env.REFRESH_RATE_LIMIT_WINDOW_MS || 15 * 60_000),
+    refreshMax: Number(process.env.REFRESH_RATE_LIMIT_MAX || 60),
   },
   // Behind a reverse proxy (Render/Vercel/NGINX) set TRUST_PROXY=1
   trustProxy: process.env.TRUST_PROXY === '1' || isProduction,

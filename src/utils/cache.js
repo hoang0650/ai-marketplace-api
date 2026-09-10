@@ -123,6 +123,10 @@ async function cached(key, ttlSeconds, compute) {
   return value;
 }
 
+function generateCacheKey(...parts) {
+  return parts.map((p) => String(p ?? '')).filter(Boolean).join(':');
+}
+
 module.exports = {
   getCache,
   setCache,
@@ -130,4 +134,5 @@ module.exports = {
   deleteCachePattern,
   cached,
   isCacheAvailable,
+  generateCacheKey,
 };
