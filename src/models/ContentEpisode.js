@@ -20,6 +20,20 @@ const contentEpisodeSchema = new mongoose.Schema(
     /** Seed / remote original — never returned to buyers. Streamed only after license check. */
     sourceUrl: { type: String, default: '', maxlength: 800 },
     previewUrl: { type: String, default: '', maxlength: 800 },
+    /** Story chapters: many illustrated frames. Page 1 also mirrored on sourceUrl / objectName. */
+    pages: {
+      type: [
+        {
+          index: { type: Number, min: 1 },
+          objectName: { type: String, default: '', maxlength: 500 },
+          bucket: { type: String, default: '', maxlength: 120 },
+          contentType: { type: String, default: '', maxlength: 120 },
+          size: { type: Number, default: 0, min: 0 },
+          sourceUrl: { type: String, default: '', maxlength: 800 },
+        },
+      ],
+      default: [],
+    },
     published: { type: Boolean, default: true, index: true },
   },
   { timestamps: true, collection: 'content_episodes' }

@@ -154,8 +154,39 @@ async function findActiveLicense({ buyerId, licenseKey, productId }) {
   return null;
 }
 
+function resolveEpisodePages(episode) {
+  const o = episode && typeof episode.toObject === 'function' ? episode.toObject() : { ...(episode || {}) };
+  const raw = Array.isArray(o.pages) ? o.pages : [];
+  const pages = raw
+    .map((p, i) => ({
+      index: Math.max(1, Number(p?.index) || i + 1),
+      objectName: String(p?.objectName || ''),
+      bucket: String(p?.bucket || ''),
+      contentType: String(p?.contentType || o.contentType || ''),
+      size: Number(p?.size) || 0,
+      sourceUrl: String(p?.sourceUrl || ''),
+    }))
+    .filter((p) => p.objectName || p.sourceUrl)
+    .sort((a, b) => a.index - b.index);
+  if (pages.length) return pages;
+  if (o.objectName || o.sourceUrl) {
+    return [
+      {
+        index: 1,
+        objectName: String(o.objectName || ''),
+        bucket: String(o.bucket || ''),
+        contentType: String(o.contentType || ''),
+        size: Number(o.size) || 0,
+        sourceUrl: String(o.sourceUrl || ''),
+      },
+    ];
+  }
+  return [];
+}
+
 function publicEpisode(doc) {
   const o = typeof doc.toObject === 'function' ? doc.toObject({ virtuals: true }) : { ...doc };
+  const pageCount = Math.max(1, resolveEpisodePages(o).length || 1);
   return {
     id: String(o._id || o.id),
     productId: String(o.product?._id || o.product),
@@ -167,6 +198,7 @@ function publicEpisode(doc) {
     size: o.size || 0,
     previewUrl: o.previewUrl || '',
     published: o.published !== false,
+    pageCount,
   };
 }
 
@@ -182,4 +214,5 @@ module.exports = {
   playTokens,
   findActiveLicense,
   publicEpisode,
+  resolveEpisodePages,
 };

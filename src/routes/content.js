@@ -10,6 +10,7 @@ const {
   takePlayToken,
   packAimc,
   publicEpisode,
+  resolveEpisodePages,
 } = require('../utils/content-drm');
 const {
   isMinioEnabled,
@@ -49,6 +50,16 @@ const upload = multer({
     else cb(new Error('Unsupported media type for film/story chapter'));
   },
 });
+
+const uploadChapter = upload.fields([
+  { name: 'file', maxCount: 1 },
+  { name: 'files', maxCount: 40 },
+]);
+
+function uploadedFiles(req) {
+  const bag = req.files || {};
+  return [...(bag.files || []), ...(bag.file || [])].filter(Boolean);
+}
 
 function kindFromMime(mime, name = '') {
   const m = String(mime || '').toLowerCase();
@@ -127,7 +138,7 @@ router.post(
   '/products/:productId/episodes',
   authenticate,
   requireRoles('creator', 'admin'),
-  upload.single('file'),
+  uploadChapter,
   async (req, res, next) => {
     try {
       const product = await Product.findById(req.params.productId);
@@ -137,34 +148,51 @@ router.post(
       }
       if (!canManage(req, product)) return res.status(403).json({ message: 'Forbidden' });
 
-      const title = String(req.body?.title || req.file?.originalname || 'Untitled').trim().slice(0, 200);
+      const files = uploadedFiles(req);
+      const title = String(req.body?.title || files[0]?.originalname || 'Untitled').trim().slice(0, 200);
       const last = await ContentEpisode.findOne({ product: product._id }).sort({ index: -1 }).lean();
       const index = Math.max(1, Number(req.body?.index) || (last?.index || 0) + 1);
 
       let objectName = '';
       let bucket = '';
-      let contentType = String(req.file?.mimetype || req.body?.contentType || '').trim();
-      let size = req.file?.size || 0;
+      let contentType = String(req.body?.contentType || '').trim();
+      let size = 0;
       let sourceUrl = String(req.body?.sourceUrl || '').trim();
+      const pages = [];
 
-      if (req.file) {
+      if (files.length) {
         if (!isMinioEnabled()) {
           return res.status(503).json({ message: 'Media upload is not configured (MinIO)', code: 'MINIO_NOT_CONFIGURED' });
         }
-        const uploaded = await uploadContentBuffer(req.file.buffer, {
-          filename: req.file.originalname,
-          contentType: req.file.mimetype,
-        });
-        objectName = uploaded.objectName;
-        bucket = uploaded.bucket;
-        contentType = req.file.mimetype;
-        size = req.file.size;
-        sourceUrl = '';
+        let i = 1;
+        for (const file of files) {
+          const uploaded = await uploadContentBuffer(file.buffer, {
+            filename: file.originalname,
+            contentType: file.mimetype,
+          });
+          const page = {
+            index: i,
+            objectName: uploaded.objectName,
+            bucket: uploaded.bucket,
+            contentType: file.mimetype,
+            size: file.size,
+            sourceUrl: '',
+          };
+          pages.push(page);
+          if (i === 1) {
+            objectName = page.objectName;
+            bucket = page.bucket;
+            contentType = page.contentType;
+            size = page.size;
+            sourceUrl = '';
+          }
+          i += 1;
+        }
       } else if (!sourceUrl) {
         return res.status(400).json({ message: 'file or sourceUrl required' });
       }
 
-      const kind = String(req.body?.kind || kindFromMime(contentType, req.file?.originalname));
+      const kind = String(req.body?.kind || kindFromMime(contentType || files[0]?.mimetype, files[0]?.originalname));
       const episode = await ContentEpisode.create({
         product: product._id,
         seller: product.creator,
@@ -178,6 +206,7 @@ router.post(
         durationSec: Math.max(0, Number(req.body?.durationSec) || 0),
         sourceUrl,
         previewUrl: String(req.body?.previewUrl || '').trim(),
+        pages,
         published: req.body?.published !== 'false',
       });
       await syncEpisodeCount(product._id);
@@ -220,15 +249,22 @@ router.post('/unlock', authenticate, async (req, res, next) => {
       mime: episode.contentType,
     });
     const origin = publicApiOrigin(req);
-    const playPath = `/v1/content/play?token=${encodeURIComponent(token)}`;
+    const pages = resolveEpisodePages(episode);
+    const playPath = (page) => {
+      const q = `token=${encodeURIComponent(token)}&page=${Math.max(1, Number(page) || 1)}`;
+      return origin ? `${origin}/v1/content/play?${q}` : `/v1/content/play?${q}`;
+    };
+    const first = pages[0]?.index || 1;
     res.json({
       ok: true,
       playToken: token,
-      playUrl: origin ? `${origin}${playPath}` : playPath,
+      playUrl: playPath(first),
       downloadUrl: origin ? `${origin}/v1/content/episodes/${episode._id}/download` : `/v1/content/episodes/${episode._id}/download`,
       kind: episode.kind,
       mime: episode.contentType,
       title: episode.title,
+      pageCount: pages.length,
+      pages: pages.map((p) => ({ index: p.index, playUrl: playPath(p.index) })),
       expiresIn: 300,
       licenseExpiresAt: gate.license?.expiresAt || null,
       drm: 'aimc-v1',
@@ -259,18 +295,21 @@ async function handlePlay(req, res, next) {
     res.setHeader('X-Content-DRM', 'aimc-v1');
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
 
-    if (episode.objectName) {
-      const stream = await getContentObjectStream(episode.objectName);
-      res.setHeader('Content-Type', episode.contentType || row.mime || 'application/octet-stream');
+    const pages = resolveEpisodePages(episode);
+    const pageNum = Math.max(1, Number(req.query?.page) || 1);
+    const page = pages.find((p) => p.index === pageNum) || pages[0];
+    if (!page) return res.status(404).json({ message: 'No media' });
+
+    if (page.objectName) {
+      const stream = await getContentObjectStream(page.objectName);
+      res.setHeader('Content-Type', page.contentType || episode.contentType || row.mime || 'application/octet-stream');
       res.setHeader('Accept-Ranges', 'bytes');
       stream.on('error', (err) => next(err));
       return stream.pipe(res);
     }
-    const sourceUrl = playableSourceUrl(episode.sourceUrl, episode.index);
+    const sourceUrl = playableSourceUrl(page.sourceUrl || episode.sourceUrl, page.index || episode.index);
     if (sourceUrl) {
-      // Public sample CDNs serve Range correctly in the browser; proxying them
-      // through the API fails when the origin 403s (gtv-videos-bucket).
-      res.setHeader('Content-Type', episode.contentType || row.mime || 'video/mp4');
+      res.setHeader('Content-Type', page.contentType || episode.contentType || row.mime || 'image/jpeg');
       return res.redirect(302, sourceUrl);
     }
     return res.status(404).json({ message: 'No media' });

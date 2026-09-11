@@ -59,6 +59,10 @@ describe('content hub seed products', () => {
         assert.ok(item.sourceUrl);
         assert.equal(/gtv-videos-bucket/i.test(item.sourceUrl), false);
         assert.match(item.kind, /^(video|image)$/);
+        if (item.kind === 'image') {
+          assert.ok(Array.isArray(item.pages));
+          assert.ok(item.pages.length >= 8, `${item.title} should have many story frames`);
+        }
       }
     }
   });

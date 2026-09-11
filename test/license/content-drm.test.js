@@ -8,6 +8,7 @@ const {
   issuePlayToken,
   takePlayToken,
   playTokens,
+  resolveEpisodePages,
 } = require('../../src/utils/content-drm');
 
 describe('content DRM (.aimc)', () => {
@@ -79,5 +80,22 @@ describe('content DRM (.aimc)', () => {
     assert.equal(row.mime, 'video/mp4');
     assert.equal(takePlayToken('not-a-token'), null);
     assert.equal(takePlayToken(encodeURIComponent(token)).episodeId, '64b000000000000000000001');
+  });
+
+  test('story chapters expose many frames and fall back to a single sourceUrl', () => {
+    const pages = resolveEpisodePages({
+      sourceUrl: 'https://example.com/cover.jpg',
+      contentType: 'image/jpeg',
+      pages: [
+        { index: 2, sourceUrl: 'https://example.com/p2.jpg' },
+        { index: 1, sourceUrl: 'https://example.com/p1.jpg' },
+      ],
+    });
+    assert.equal(pages.length, 2);
+    assert.equal(pages[0].index, 1);
+    assert.equal(pages[1].sourceUrl, 'https://example.com/p2.jpg');
+    const one = resolveEpisodePages({ sourceUrl: 'https://example.com/only.jpg', objectName: '' });
+    assert.equal(one.length, 1);
+    assert.equal(one[0].sourceUrl, 'https://example.com/only.jpg');
   });
 });

@@ -502,6 +502,14 @@ const SAMPLE_PAGES = [
   'https://images.unsplash.com/photo-1519681393784-d120267933ba?w=1400&q=80',
   'https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?w=1400&q=80',
   'https://images.unsplash.com/photo-1495446815901-a7297e633e8d?w=1400&q=80',
+  'https://images.unsplash.com/photo-1512820790803-83ca734da794?w=1400&q=80',
+  'https://images.unsplash.com/photo-1457369804613-52c61a468e7d?w=1400&q=80',
+  'https://images.unsplash.com/photo-1516979187457-637abb4f9353?w=1400&q=80',
+  'https://images.unsplash.com/photo-1469474968028-56623f02e42e?w=1400&q=80',
+  'https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?w=1400&q=80',
+  'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?w=1400&q=80',
+  'https://images.unsplash.com/photo-1523906834658-6e24ef2386f9?w=1400&q=80',
+  'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=1400&q=80',
 ];
 
 function videoEp(title, i) {
@@ -513,12 +521,18 @@ function videoEp(title, i) {
   };
 }
 
-function imageEp(title, i) {
+function storyChapter(title, start, count = 10) {
+  const pages = Array.from({ length: count }, (_, i) => ({
+    index: i + 1,
+    sourceUrl: SAMPLE_PAGES[(start + i) % SAMPLE_PAGES.length],
+    contentType: 'image/jpeg',
+  }));
   return {
     title,
     kind: 'image',
-    sourceUrl: SAMPLE_PAGES[i % SAMPLE_PAGES.length],
+    sourceUrl: pages[0].sourceUrl,
     contentType: 'image/jpeg',
+    pages,
   };
 }
 
@@ -560,35 +574,35 @@ function buildContentHubEpisodes() {
     {
       productSlug: 'dem-ha-noi',
       items: [
-        imageEp('Chương 1 — Phố cổ', 0),
-        imageEp('Chương 2 — Mưa phùn', 1),
-        imageEp('Chương 3 — Đèn dầu', 2),
-        imageEp('Chương 4 — Hồ Gươm', 5),
+        storyChapter('Chương 1 — Phố cổ', 0, 12),
+        storyChapter('Chương 2 — Mưa phùn', 3, 10),
+        storyChapter('Chương 3 — Đèn dầu', 6, 10),
+        storyChapter('Chương 4 — Hồ Gươm', 9, 12),
       ],
     },
     {
       productSlug: 'cao-va-rung',
       items: [
-        imageEp('Chương 1 — Cáo gặp rừng', 3),
-        imageEp('Chương 2 — Lá vàng', 4),
-        imageEp('Chương 3 — Bài học', 6),
+        storyChapter('Chương 1 — Cáo gặp rừng', 3, 10),
+        storyChapter('Chương 2 — Lá vàng', 7, 10),
+        storyChapter('Chương 3 — Bài học', 11, 8),
       ],
     },
     {
       productSlug: 'founder-notes',
       items: [
-        imageEp('Chương 1 — Pitch đầu', 7),
-        imageEp('Chương 2 — Runway', 4),
-        imageEp('Chương 3 — Pivot', 0),
+        storyChapter('Chương 1 — Pitch đầu', 1, 8),
+        storyChapter('Chương 2 — Runway', 5, 8),
+        storyChapter('Chương 3 — Pivot', 9, 8),
       ],
     },
     {
       productSlug: 'mat-thu-mekong',
       items: [
-        imageEp('Chương 1 — Mật thư', 6),
-        imageEp('Chương 2 — Sông Tiền', 5),
-        imageEp('Chương 3 — Chợ nổi', 1),
-        imageEp('Chương 4 — Đêm cuối', 2),
+        storyChapter('Chương 1 — Mật thư', 2, 10),
+        storyChapter('Chương 2 — Sông Tiền', 6, 10),
+        storyChapter('Chương 3 — Chợ nổi', 10, 10),
+        storyChapter('Chương 4 — Đêm cuối', 4, 12),
       ],
     },
   ];
@@ -611,6 +625,16 @@ async function upsertContentHubEpisodes(ContentEpisode, Product) {
             kind: item.kind,
             contentType: item.contentType || '',
             sourceUrl: playableSourceUrl(item.sourceUrl, i),
+            pages: Array.isArray(item.pages)
+              ? item.pages.map((page, pi) => ({
+                  index: page.index || pi + 1,
+                  sourceUrl: playableSourceUrl(page.sourceUrl, page.index || pi + 1),
+                  contentType: page.contentType || item.contentType || 'image/jpeg',
+                  objectName: '',
+                  bucket: '',
+                  size: 0,
+                }))
+              : [],
             published: true,
           },
           $setOnInsert: { product: product._id, index: i },
