@@ -221,12 +221,26 @@ router.post('/checkout', authenticate, async (req, res, next) => {
       if (issued) license = mapLicense(issued);
     }
 
-    void sendCheckoutSuccessEmail({
-      buyer: req.user,
-      order,
-      product,
-      license,
-    });
+    let mail = { ok: false, to: null, reason: 'ERROR' };
+    try {
+      mail = await sendCheckoutSuccessEmail({
+        buyer: req.user,
+        order,
+        product,
+        license,
+      });
+    } catch (err) {
+      console.error('[mail] checkout email failed:', err.message);
+    }
+
+    await Notification.create({
+      user: req.user._id,
+      title: 'Thanh toán thành công',
+      body: license?.licenseKey
+        ? `${product.name} · license ${license.licenseKey}. Email xác nhận đã gửi.`
+        : `${product.name} đã thanh toán bằng ví AI Markets.`,
+      href: license?.licenseKey ? '/dashboard/licenses' : '/dashboard/orders',
+    }).catch(() => {});
 
     const balance = await getBalance(req.user._id);
     res.status(201).json({
@@ -246,6 +260,9 @@ router.post('/checkout', authenticate, async (req, res, next) => {
       balance,
       orderId: order._id.toString(),
       license,
+      emailSent: !!mail?.ok,
+      emailTo: mail?.to || null,
+      emailReason: mail?.ok ? undefined : mail?.reason || mail?.error,
     });
   } catch (err) {
     next(err);

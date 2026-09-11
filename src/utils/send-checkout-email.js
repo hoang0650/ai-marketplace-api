@@ -1,19 +1,34 @@
 const { sendResendEmail, isEmailReady } = require('./mailer');
 const { buildCheckoutEmail } = require('./checkout-email');
 const config = require('../config/env');
+const User = require('../models/User');
 
-function sendCheckoutSuccessEmail({ buyer, order, product, license }) {
-  const to = buyer?.email;
-  if (!to) return Promise.resolve({ skipped: true, reason: 'NO_BUYER_EMAIL' });
+async function resolveBuyer(buyer) {
+  const email = String(buyer?.email || '').trim();
+  const name = String(buyer?.name || '').trim();
+  if (email.includes('@')) return { email, name: name || email };
+  const id = buyer?._id || buyer?.id;
+  if (!id) return { email: '', name };
+  const doc = await User.findById(id).select('email name').lean();
+  return {
+    email: String(doc?.email || '').trim(),
+    name: name || String(doc?.name || '').trim(),
+  };
+}
+
+async function sendCheckoutSuccessEmail({ buyer, order, product, license }) {
+  const contact = await resolveBuyer(buyer);
+  const to = contact.email;
+  if (!to) return { skipped: true, reason: 'NO_BUYER_EMAIL' };
   if (!isEmailReady()) {
     if (!config.skipEmail) {
       console.warn('[mail] checkout email skipped (set RESEND_API_KEY + EMAIL_FROM)');
     }
-    return Promise.resolve({ skipped: true, reason: 'NOT_CONFIGURED' });
+    return { skipped: true, reason: 'NOT_CONFIGURED', to };
   }
 
   const payload = buildCheckoutEmail({
-    buyerName: buyer.name || buyer.email,
+    buyerName: contact.name || to,
     productName: product?.name || order?.productName,
     orderId: String(order?._id || order?.id || ''),
     amount: order?.amount ?? order?.grossAmount,
@@ -23,7 +38,7 @@ function sendCheckoutSuccessEmail({ buyer, order, product, license }) {
     licensesUrl: `${config.frontendUrl.replace(/\/+$/, '')}/dashboard/licenses`,
   });
 
-  return sendResendEmail({
+  const result = await sendResendEmail({
     to,
     subject: payload.subject,
     html: payload.html,
@@ -32,10 +47,8 @@ function sendCheckoutSuccessEmail({ buyer, order, product, license }) {
       { name: 'category', value: 'checkout' },
       { name: 'has_license', value: payload.hasLicense ? 'yes' : 'no' },
     ],
-  }).catch((err) => {
-    console.error('[mail] checkout email failed:', err.message);
-    return { ok: false, error: err.message };
   });
+  return { ...result, to };
 }
 
 module.exports = { sendCheckoutSuccessEmail };

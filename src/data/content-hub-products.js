@@ -471,36 +471,150 @@ function isHubCategory(category) {
   return isVoiceCategory(category) || isLicenseCategory(category);
 }
 
+const SAMPLE_VIDEOS = [
+  'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+  'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
+  'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4',
+  'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4',
+  'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4',
+  'https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
+  'https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4',
+  'https://storage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
+];
+
+const SAMPLE_PAGES = [
+  'https://images.unsplash.com/photo-1481627834876-b7833e8f5570?w=1400&q=80',
+  'https://images.unsplash.com/photo-1509248961158-e54f6934749c?w=1400&q=80',
+  'https://images.unsplash.com/photo-1517142089942-ba376ce32a2e?w=1400&q=80',
+  'https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=1400&q=80',
+  'https://images.unsplash.com/photo-1524995997946-a1c2e315a42f?w=1400&q=80',
+  'https://images.unsplash.com/photo-1519681393784-d120267933ba?w=1400&q=80',
+  'https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?w=1400&q=80',
+  'https://images.unsplash.com/photo-1495446815901-a7297e633e8d?w=1400&q=80',
+];
+
+function videoEp(title, i) {
+  return {
+    title,
+    kind: 'video',
+    sourceUrl: SAMPLE_VIDEOS[i % SAMPLE_VIDEOS.length],
+    contentType: 'video/mp4',
+  };
+}
+
+function imageEp(title, i) {
+  return {
+    title,
+    kind: 'image',
+    sourceUrl: SAMPLE_PAGES[i % SAMPLE_PAGES.length],
+    contentType: 'image/jpeg',
+  };
+}
+
 function buildContentHubEpisodes() {
   return [
     {
       productSlug: 'neon-harbor',
       items: [
-        { title: 'Tập 1 — Đèn cảng', kind: 'video', sourceUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4', contentType: 'video/mp4' },
-        { title: 'Tập 2 — Sương đêm', kind: 'video', sourceUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4', contentType: 'video/mp4' },
+        videoEp('Tập 1 — Đèn cảng', 0),
+        videoEp('Tập 2 — Sương đêm', 1),
+        videoEp('Tập 3 — Hàng cấm', 2),
+        videoEp('Tập 4 — Radio cũ', 3),
       ],
     },
     {
       productSlug: 'sai-gon-after-rain',
       items: [
-        { title: 'Tập 1 — Mưa chiều Q3', kind: 'video', sourceUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4', contentType: 'video/mp4' },
+        videoEp('Tập 1 — Mưa chiều Q3', 2),
+        videoEp('Tập 2 — Xe ôm đêm', 4),
+        videoEp('Tập 3 — Cà phê sữa', 5),
+      ],
+    },
+    {
+      productSlug: 'iron-lotus',
+      items: [
+        videoEp('Tập 1 — Lò rèn', 6),
+        videoEp('Tập 2 — Drone trên đỉnh', 7),
+        videoEp('Tập 3 — Hoa sen sắt', 0),
+      ],
+    },
+    {
+      productSlug: 'the-last-pagoda',
+      items: [
+        videoEp('Tập 1 — Chuông chùa', 1),
+        videoEp('Tập 2 — Sương núi', 3),
+        videoEp('Tập 3 — Bước chân', 5),
       ],
     },
     {
       productSlug: 'dem-ha-noi',
       items: [
-        { title: 'Chương 1 — Phố cổ', kind: 'image', sourceUrl: 'https://images.unsplash.com/photo-1481627834876-b7833e8f5570?w=1400&q=80', contentType: 'image/jpeg' },
-        { title: 'Chương 2 — Mưa phùn', kind: 'image', sourceUrl: 'https://images.unsplash.com/photo-1509248961158-e54f6934749c?w=1400&q=80', contentType: 'image/jpeg' },
-        { title: 'Chương 3 — Đèn dầu', kind: 'image', sourceUrl: 'https://images.unsplash.com/photo-1517142089942-ba376ce32a2e?w=1400&q=80', contentType: 'image/jpeg' },
+        imageEp('Chương 1 — Phố cổ', 0),
+        imageEp('Chương 2 — Mưa phùn', 1),
+        imageEp('Chương 3 — Đèn dầu', 2),
+        imageEp('Chương 4 — Hồ Gươm', 5),
       ],
     },
     {
       productSlug: 'cao-va-rung',
       items: [
-        { title: 'Chương 1 — Cáo gặp rừng', kind: 'image', sourceUrl: 'https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=1400&q=80', contentType: 'image/jpeg' },
+        imageEp('Chương 1 — Cáo gặp rừng', 3),
+        imageEp('Chương 2 — Lá vàng', 4),
+        imageEp('Chương 3 — Bài học', 6),
+      ],
+    },
+    {
+      productSlug: 'founder-notes',
+      items: [
+        imageEp('Chương 1 — Pitch đầu', 7),
+        imageEp('Chương 2 — Runway', 4),
+        imageEp('Chương 3 — Pivot', 0),
+      ],
+    },
+    {
+      productSlug: 'mat-thu-mekong',
+      items: [
+        imageEp('Chương 1 — Mật thư', 6),
+        imageEp('Chương 2 — Sông Tiền', 5),
+        imageEp('Chương 3 — Chợ nổi', 1),
+        imageEp('Chương 4 — Đêm cuối', 2),
       ],
     },
   ];
+}
+
+/** Upsert sample video/image chapters so Watch / Read can be tested without MinIO. */
+async function upsertContentHubEpisodes(ContentEpisode, Product) {
+  let n = 0;
+  for (const pack of buildContentHubEpisodes()) {
+    const product = await Product.findOne({ slug: pack.productSlug });
+    if (!product) continue;
+    let i = 1;
+    for (const item of pack.items) {
+      await ContentEpisode.findOneAndUpdate(
+        { product: product._id, index: i },
+        {
+          $set: {
+            seller: product.creator,
+            title: item.title,
+            kind: item.kind,
+            contentType: item.contentType || '',
+            sourceUrl: item.sourceUrl,
+            published: true,
+          },
+          $setOnInsert: { product: product._id, index: i },
+        },
+        { upsert: true },
+      );
+      i += 1;
+      n += 1;
+    }
+    await Product.updateOne(
+      { _id: product._id },
+      { $set: { 'contentMeta.episodeCount': pack.items.length } },
+    );
+  }
+  return n;
 }
 
 module.exports = {
@@ -509,6 +623,7 @@ module.exports = {
   buildContentHubReviews,
   buildContentHubLicenseSeeds,
   buildContentHubEpisodes,
+  upsertContentHubEpisodes,
   hubProductFields,
   isHubCategory,
 };

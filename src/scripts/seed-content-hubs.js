@@ -17,7 +17,7 @@ const {
   buildContentHubProducts,
   buildContentHubReviews,
   buildContentHubLicenseSeeds,
-  buildContentHubEpisodes,
+  upsertContentHubEpisodes,
   hubProductFields,
 } = require('../data/content-hub-products');
 const { generateLicenseKey, expiresAtFrom } = require('../utils/license-keys');
@@ -64,7 +64,7 @@ async function ensureUser(spec, passwordHash) {
 
 async function seedHubs() {
   await mongoose.connect(config.mongoUri, {
-    serverSelectionTimeoutMS: 20_000,
+    serverSelectionTimeoutMS: 45_000,
   });
   console.log('[seed:hubs] connected', String(config.mongoUri).replace(/\/\/.*@/, '//***@'));
 
@@ -181,32 +181,7 @@ async function seedHubs() {
     licenses += 1;
   }
 
-  let episodes = 0;
-  for (const pack of buildContentHubEpisodes()) {
-    const product = await Product.findOne({ slug: pack.productSlug });
-    if (!product) continue;
-    const existing = await ContentEpisode.countDocuments({ product: product._id });
-    if (existing) continue;
-    let i = 1;
-    for (const item of pack.items) {
-      await ContentEpisode.create({
-        product: product._id,
-        seller: product.creator,
-        index: i,
-        title: item.title,
-        kind: item.kind,
-        contentType: item.contentType || '',
-        sourceUrl: item.sourceUrl,
-        published: true,
-      });
-      i += 1;
-      episodes += 1;
-    }
-    await Product.updateOne(
-      { _id: product._id },
-      { $set: { 'contentMeta.episodeCount': pack.items.length } },
-    );
-  }
+  const episodes = await upsertContentHubEpisodes(ContentEpisode, Product);
 
   const counts = await Product.aggregate([
     { $match: { category: { $in: ['voice-clone', 'ai-film-series', 'story-book'] } } },

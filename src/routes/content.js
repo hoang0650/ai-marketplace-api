@@ -10,7 +10,6 @@ const {
   takePlayToken,
   packAimc,
   publicEpisode,
-  episodeDek,
 } = require('../utils/content-drm');
 const {
   isMinioEnabled,
@@ -65,6 +64,54 @@ async function syncEpisodeCount(productId) {
     { _id: productId, category: { $in: ['ai-film-series', 'story-book'] } },
     { $set: { 'contentMeta.episodeCount': n } },
   );
+}
+
+function publicApiOrigin(req) {
+  const env = String(process.env.PUBLIC_API_URL || '').trim().replace(/\/+$/, '').replace(/\/v1$/i, '');
+  if (env) return env;
+  const proto = String(req.get('x-forwarded-proto') || req.protocol || 'https')
+    .split(',')[0]
+    .trim();
+  const host = String(req.get('x-forwarded-host') || req.get('host') || '')
+    .split(',')[0]
+    .trim();
+  if (!host) return '';
+  return `${proto}://${host}`;
+}
+
+async function pipeRemoteMedia(req, res, sourceUrl, fallbackType) {
+  const headers = {
+    'User-Agent':
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+    Accept: '*/*',
+  };
+  if (req.headers.range) headers.Range = req.headers.range;
+  let up;
+  try {
+    up = await fetch(sourceUrl, { redirect: 'follow', headers, signal: AbortSignal.timeout(60_000) });
+  } catch {
+    if (!res.headersSent) return res.status(502).json({ message: 'Source media unavailable' });
+    return res.end();
+  }
+  if (!up.ok && up.status !== 206) {
+    if (!res.headersSent) return res.status(502).json({ message: 'Source media unavailable' });
+    return res.end();
+  }
+  res.status(up.status === 206 ? 206 : 200);
+  res.setHeader('Content-Type', up.headers.get('content-type') || fallbackType || 'application/octet-stream');
+  res.setHeader('Accept-Ranges', 'bytes');
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  const len = up.headers.get('content-length');
+  if (len) res.setHeader('Content-Length', len);
+  const cr = up.headers.get('content-range');
+  if (cr) res.setHeader('Content-Range', cr);
+  if (!up.body) {
+    if (!res.headersSent) return res.status(502).json({ message: 'Source media unavailable' });
+    return res.end();
+  }
+  const { Readable } = require('stream');
+  return Readable.fromWeb(up.body).pipe(res);
 }
 
 function canManage(req, product) {
@@ -204,18 +251,18 @@ router.post('/unlock', authenticate, async (req, res, next) => {
       licenseId: gate.license?._id,
       mime: episode.contentType,
     });
-    const origin = `${req.protocol}://${req.get('host')}`;
+    const origin = publicApiOrigin(req);
+    const playPath = `/v1/content/play?token=${encodeURIComponent(token)}`;
     res.json({
       ok: true,
-      playUrl: `${origin}/v1/content/play/${token}`,
-      downloadUrl: `${origin}/v1/content/episodes/${episode._id}/download`,
+      playToken: token,
+      playUrl: origin ? `${origin}${playPath}` : playPath,
+      downloadUrl: origin ? `${origin}/v1/content/episodes/${episode._id}/download` : `/v1/content/episodes/${episode._id}/download`,
       kind: episode.kind,
       mime: episode.contentType,
       title: episode.title,
       expiresIn: 300,
       licenseExpiresAt: gate.license?.expiresAt || null,
-      /** Only for in-app decrypt of .aimc — omitted after license expiry. */
-      dek: episodeDek(episode._id).toString('base64'),
       drm: 'aimc-v1',
     });
   } catch (err) {
@@ -224,9 +271,10 @@ router.post('/unlock', authenticate, async (req, res, next) => {
   }
 });
 
-router.get('/play/:token', async (req, res, next) => {
+async function handlePlay(req, res, next) {
   try {
-    const row = takePlayToken(req.params.token);
+    const token = String(req.query?.token || req.query?.t || req.params?.token || '').trim();
+    const row = takePlayToken(token);
     if (!row) return res.status(403).json({ message: 'Play token expired. Unlock again with a valid license.' });
     const episode = await ContentEpisode.findById(row.episodeId);
     if (!episode) return res.status(404).json({ message: 'Episode not found' });
@@ -239,27 +287,28 @@ router.get('/play/:token', async (req, res, next) => {
       }
     }
 
-    res.setHeader('Content-Type', episode.contentType || row.mime || 'application/octet-stream');
     res.setHeader('Cache-Control', 'private, no-store');
     res.setHeader('X-Content-DRM', 'aimc-v1');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
 
     if (episode.objectName) {
       const stream = await getContentObjectStream(episode.objectName);
+      res.setHeader('Content-Type', episode.contentType || row.mime || 'application/octet-stream');
+      res.setHeader('Accept-Ranges', 'bytes');
       stream.on('error', (err) => next(err));
       return stream.pipe(res);
     }
     if (episode.sourceUrl) {
-      const up = await fetch(episode.sourceUrl, { redirect: 'follow' });
-      if (!up.ok) return res.status(502).json({ message: 'Source media unavailable' });
-      res.setHeader('Content-Type', up.headers.get('content-type') || episode.contentType || 'application/octet-stream');
-      const { Readable } = require('stream');
-      return Readable.fromWeb(up.body).pipe(res);
+      return pipeRemoteMedia(req, res, episode.sourceUrl, episode.contentType || row.mime);
     }
     return res.status(404).json({ message: 'No media' });
   } catch (err) {
     next(err);
   }
-});
+}
+
+router.get('/play', handlePlay);
+router.get('/play/:token', handlePlay);
 
 router.get('/episodes/:id/download', authenticate, async (req, res, next) => {
   try {

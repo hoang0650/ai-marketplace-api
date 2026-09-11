@@ -46,10 +46,13 @@ describe('content hub seed products', () => {
   test('hub episodes cover seeded films and stories without public media URLs in catalog meta', () => {
     const packs = buildContentHubEpisodes();
     const slugs = packs.map((p) => p.productSlug);
+    assert.equal(slugs.length, 8);
     assert.ok(slugs.includes('neon-harbor'));
+    assert.ok(slugs.includes('iron-lotus'));
     assert.ok(slugs.includes('dem-ha-noi'));
+    assert.ok(slugs.includes('mat-thu-mekong'));
     for (const pack of packs) {
-      assert.ok(pack.items.length >= 1);
+      assert.ok(pack.items.length >= 3);
       for (const item of pack.items) {
         assert.ok(item.title);
         assert.ok(item.sourceUrl);

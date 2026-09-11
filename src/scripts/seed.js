@@ -19,6 +19,7 @@ const UsageStat = require('../models/UsageStat');
 const Deployment = require('../models/Deployment');
 const UsageEvent = require('../models/UsageEvent');
 const LicenseKey = require('../models/LicenseKey');
+const ContentEpisode = require('../models/ContentEpisode');
 const {
   CREATOR: RUNPOD_CREATOR,
   buildRunpodMarketplaceProducts,
@@ -29,6 +30,7 @@ const {
   buildContentHubProducts,
   buildContentHubReviews,
   buildContentHubLicenseSeeds,
+  upsertContentHubEpisodes,
   hubProductFields,
   isHubCategory,
 } = require('../data/content-hub-products');
@@ -382,6 +384,9 @@ async function seed() {
       });
     }
   }
+
+  const episodeCount = await upsertContentHubEpisodes(ContentEpisode, Product);
+  console.log('[seed] hub episodes', episodeCount);
 
   if (nova) {
     const days = mock.usage || [];

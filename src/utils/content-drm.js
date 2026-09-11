@@ -71,7 +71,18 @@ function prunePlayTokens(now = Date.now()) {
 
 function issuePlayToken({ episodeId, productId, licenseId, mime }) {
   prunePlayTokens();
-  const token = crypto.randomBytes(18).toString('base64url');
+  const payload = Buffer.from(
+    JSON.stringify({
+      e: String(episodeId),
+      p: String(productId),
+      l: licenseId ? String(licenseId) : '',
+      m: mime || 'application/octet-stream',
+      exp: Date.now() + PLAY_TTL_MS,
+    }),
+    'utf8',
+  ).toString('base64url');
+  const sig = crypto.createHmac('sha256', drmSecret()).update(payload).digest('base64url');
+  const token = `${payload}~${sig}`;
   playTokens.set(token, {
     episodeId: String(episodeId),
     productId: String(productId),
@@ -84,24 +95,63 @@ function issuePlayToken({ episodeId, productId, licenseId, mime }) {
 
 function takePlayToken(token) {
   prunePlayTokens();
-  const row = playTokens.get(String(token || ''));
-  if (!row) return null;
-  return row;
+  let raw = String(token || '');
+  try {
+    raw = decodeURIComponent(raw);
+  } catch {
+    /* already decoded */
+  }
+  const cached = playTokens.get(raw);
+  if (cached && cached.expires > Date.now()) return cached;
+
+  const parts = raw.split('~');
+  if (parts.length !== 2) return null;
+  const [payload, sig] = parts;
+  const expect = crypto.createHmac('sha256', drmSecret()).update(payload).digest('base64url');
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expect);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  let row;
+  try {
+    row = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+  } catch {
+    return null;
+  }
+  if (!row || Number(row.exp) <= Date.now()) return null;
+  return {
+    episodeId: String(row.e || ''),
+    productId: String(row.p || ''),
+    licenseId: String(row.l || ''),
+    mime: row.m || 'application/octet-stream',
+    expires: Number(row.exp),
+  };
 }
 
 async function findActiveLicense({ buyerId, licenseKey, productId }) {
   const pid = productId ? String(productId) : '';
-  let doc = null;
   const key = String(licenseKey || '').trim().toUpperCase();
+  const seen = new Set();
+  const docs = [];
+
   if (key) {
-    doc = await LicenseKey.findOne({ licenseKey: key });
-  } else if (buyerId && pid) {
-    doc = await LicenseKey.findOne({ buyer: buyerId, product: pid }).sort({ expiresAt: -1 });
+    const byKey = await LicenseKey.findOne({ licenseKey: key });
+    if (byKey) docs.push(byKey);
   }
-  if (!doc) return null;
-  if (pid && String(doc.product) !== pid) return null;
-  if (effectiveLicenseStatus(doc) !== 'active') return null;
-  return doc;
+  if (buyerId && pid) {
+    const byBuyer = await LicenseKey.find({ buyer: buyerId, product: pid })
+      .sort({ expiresAt: -1 })
+      .limit(8);
+    docs.push(...byBuyer);
+  }
+
+  for (const doc of docs) {
+    const id = String(doc._id);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    if (pid && String(doc.product) !== pid) continue;
+    if (effectiveLicenseStatus(doc) === 'active') return doc;
+  }
+  return null;
 }
 
 function publicEpisode(doc) {
@@ -129,6 +179,7 @@ module.exports = {
   parseAimcHeader,
   issuePlayToken,
   takePlayToken,
+  playTokens,
   findActiveLicense,
   publicEpisode,
 };

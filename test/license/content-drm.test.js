@@ -5,6 +5,9 @@ const {
   parseAimcHeader,
   decryptBuffer,
   episodeDek,
+  issuePlayToken,
+  takePlayToken,
+  playTokens,
 } = require('../../src/utils/content-drm');
 
 describe('content DRM (.aimc)', () => {
@@ -61,5 +64,20 @@ describe('content DRM (.aimc)', () => {
         'ep-other',
       ),
     );
+  });
+
+  test('signed play tokens verify on another process without the in-memory map', () => {
+    const token = issuePlayToken({
+      episodeId: '64b000000000000000000001',
+      productId: '64b000000000000000000002',
+      licenseId: '64b000000000000000000003',
+      mime: 'video/mp4',
+    });
+    playTokens.clear();
+    const row = takePlayToken(token);
+    assert.equal(row.episodeId, '64b000000000000000000001');
+    assert.equal(row.mime, 'video/mp4');
+    assert.equal(takePlayToken('not-a-token'), null);
+    assert.equal(takePlayToken(encodeURIComponent(token)).episodeId, '64b000000000000000000001');
   });
 });

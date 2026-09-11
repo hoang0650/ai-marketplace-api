@@ -81,7 +81,14 @@ function createApp() {
     })
   );
 
-  app.use(compression());
+  app.use(
+    compression({
+      filter(req, res) {
+        if (String(req.originalUrl || req.path || '').includes('/content/play')) return false;
+        return compression.filter(req, res);
+      },
+    }),
+  );
   app.use(
     morgan(config.isProduction ? 'combined' : 'dev', {
       skip: (req) => req.path === '/health' || req.path === '/health/ready',
@@ -113,6 +120,7 @@ function createApp() {
     standardHeaders: true,
     legacyHeaders: false,
     message: { message: 'Too many requests, please slow down.' },
+    skip: (req) => String(req.originalUrl || req.path || '').includes('/content/play'),
   });
   // Stricter limit for credential endpoints (brute-force protection).
   const authLimiter = rateLimit({
