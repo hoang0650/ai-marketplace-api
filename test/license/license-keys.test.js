@@ -49,6 +49,11 @@ describe('license price snapshot', () => {
     assert.deepEqual(resolveLicensePrice(p, 'day'), { term: 'day', unitPrice: 2 });
     assert.deepEqual(resolveLicensePrice(p, 'year'), { term: 'year', unitPrice: 70 });
   });
+
+  test('missing license prices do not look like a paid unlock', () => {
+    const p = { pricing: { price: 0 }, contentMeta: { licensePrices: {} } };
+    assert.equal(resolveLicensePrice(p, 'month').unitPrice, 0);
+  });
 });
 
 describe('status', () => {

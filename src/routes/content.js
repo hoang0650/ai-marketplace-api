@@ -88,7 +88,9 @@ function canManage(req, product) {
 
 async function assertCanPlay(req, episode) {
   const productId = String(episode.product);
-  if (req.user && (req.user.role === 'admin' || String(episode.seller) === String(req.user._id))) {
+  const sellerId = episode.seller ? String(episode.seller) : '';
+  const userId = req.user?._id ? String(req.user._id) : '';
+  if (req.user && (req.user.role === 'admin' || (sellerId && userId && sellerId === userId))) {
     return { ok: true, license: null, seller: true };
   }
   const license = await findActiveLicense({

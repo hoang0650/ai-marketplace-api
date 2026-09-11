@@ -19,6 +19,7 @@ const { writeAuditLog } = require('../utils/audit');
 const { normalizeSalesChannel } = require('../finance/store-fee-engine');
 const { isLicenseCategory, resolveLicensePrice } = require('../utils/license-keys');
 const { issueLicenseForOrder, mapLicense } = require('../utils/issue-license');
+const { findActiveLicense } = require('../utils/content-drm');
 const { sendCheckoutSuccessEmail } = require('../utils/send-checkout-email');
 
 const router = express.Router();
@@ -36,6 +37,27 @@ router.post('/checkout', authenticate, async (req, res, next) => {
     const licensePick = isLicenseCategory(product.category)
       ? resolveLicensePrice(product.toObject ? product.toObject() : product, req.body?.licenseTerm)
       : null;
+    if (licensePick && !(licensePick.unitPrice > 0)) {
+      return res.status(400).json({
+        message: 'This product has no license price. It cannot be unlocked for free.',
+        code: 'LICENSE_PRICE_REQUIRED',
+      });
+    }
+    if (licensePick) {
+      const existing = await findActiveLicense({ buyerId: req.user._id, productId: product._id });
+      if (existing) {
+        return res.json({
+          checkoutId: `chk_licensed_${existing._id}`,
+          provider: 'wallet',
+          paymentProvider: 'internal_ledger',
+          status: 'paid',
+          alreadyLicensed: true,
+          amount: 0,
+          currency: product.pricing?.currency || 'USD',
+          license: mapLicense(existing),
+        });
+      }
+    }
     const unit = licensePick
       ? licensePick.unitPrice
       : product.pricing?.model === 'usage'
