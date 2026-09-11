@@ -12,10 +12,12 @@ const Product = require('../models/Product');
 const Review = require('../models/Review');
 const Order = require('../models/Order');
 const LicenseKey = require('../models/LicenseKey');
+const ContentEpisode = require('../models/ContentEpisode');
 const {
   buildContentHubProducts,
   buildContentHubReviews,
   buildContentHubLicenseSeeds,
+  buildContentHubEpisodes,
   hubProductFields,
 } = require('../data/content-hub-products');
 const { generateLicenseKey, expiresAtFrom } = require('../utils/license-keys');
@@ -179,6 +181,33 @@ async function seedHubs() {
     licenses += 1;
   }
 
+  let episodes = 0;
+  for (const pack of buildContentHubEpisodes()) {
+    const product = await Product.findOne({ slug: pack.productSlug });
+    if (!product) continue;
+    const existing = await ContentEpisode.countDocuments({ product: product._id });
+    if (existing) continue;
+    let i = 1;
+    for (const item of pack.items) {
+      await ContentEpisode.create({
+        product: product._id,
+        seller: product.creator,
+        index: i,
+        title: item.title,
+        kind: item.kind,
+        contentType: item.contentType || '',
+        sourceUrl: item.sourceUrl,
+        published: true,
+      });
+      i += 1;
+      episodes += 1;
+    }
+    await Product.updateOne(
+      { _id: product._id },
+      { $set: { 'contentMeta.episodeCount': pack.items.length } },
+    );
+  }
+
   const counts = await Product.aggregate([
     { $match: { category: { $in: ['voice-clone', 'ai-film-series', 'story-book'] } } },
     { $group: { _id: '$category', n: { $sum: 1 } } },
@@ -187,6 +216,7 @@ async function seedHubs() {
 
   console.log('[seed:hubs] products created', created, 'updated', updated);
   console.log('[seed:hubs] licenses issued', licenses);
+  console.log('[seed:hubs] episodes', episodes);
   console.log('[seed:hubs] catalog', {
     'voice-clone': countMap['voice-clone'] || 0,
     'ai-film-series': countMap['ai-film-series'] || 0,

@@ -231,6 +231,7 @@ router.post('/run', authenticate, async (req, res, next) => {
       quantity: Number(usage.quantity) || 0,
       rawUsage: usage,
       source: 'playground',
+      usageType: isVoiceProduct(product) ? 'VOICE_TTS' : 'API_REQUEST',
     });
 
     const day = new Date().toISOString().slice(0, 10);

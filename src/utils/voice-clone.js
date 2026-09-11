@@ -67,11 +67,12 @@ function applyVoiceCloneToProduct(product) {
 function voiceTtsInput(product, input = {}) {
   const prompt = String(input.prompt || input.text || '').trim();
   const sample = String(product?.contentMeta?.voiceSampleUrl || '').trim();
+  const { id: _dropId, idempotencyKey: _dropKey, ...rest } = input && typeof input === 'object' ? input : {};
   return {
-    ...input,
+    ...rest,
     prompt,
     audio_url: sample,
-    format: input.format || 'wav',
+    format: rest.format || 'wav',
   };
 }
 

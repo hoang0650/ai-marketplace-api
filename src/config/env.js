@@ -83,10 +83,16 @@ const config = {
     process.env.SKIP_EMAIL === 'true' ||
     nodeEnv === 'test' ||
     !!process.env.NODE_TEST_CONTEXT,
+  /** AES wrapping for licensed film/story downloads — not the license key itself. */
+  contentDrmSecret: (process.env.CONTENT_DRM_SECRET || '').trim(),
 };
 
 if (isProduction && !config.resendApiKey) {
   console.warn('[config] RESEND_API_KEY is empty — checkout confirmation emails will not be sent.');
+}
+
+if (isProduction && (!config.contentDrmSecret || config.contentDrmSecret.length < 24)) {
+  console.warn('[config] CONTENT_DRM_SECRET should be a strong random value (>= 24 chars) for licensed film/story downloads.');
 }
 
 module.exports = config;

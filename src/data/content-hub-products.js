@@ -471,11 +471,44 @@ function isHubCategory(category) {
   return isVoiceCategory(category) || isLicenseCategory(category);
 }
 
+function buildContentHubEpisodes() {
+  return [
+    {
+      productSlug: 'neon-harbor',
+      items: [
+        { title: 'Tập 1 — Đèn cảng', kind: 'video', sourceUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4', contentType: 'video/mp4' },
+        { title: 'Tập 2 — Sương đêm', kind: 'video', sourceUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4', contentType: 'video/mp4' },
+      ],
+    },
+    {
+      productSlug: 'sai-gon-after-rain',
+      items: [
+        { title: 'Tập 1 — Mưa chiều Q3', kind: 'video', sourceUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4', contentType: 'video/mp4' },
+      ],
+    },
+    {
+      productSlug: 'dem-ha-noi',
+      items: [
+        { title: 'Chương 1 — Phố cổ', kind: 'image', sourceUrl: 'https://images.unsplash.com/photo-1481627834876-b7833e8f5570?w=1400&q=80', contentType: 'image/jpeg' },
+        { title: 'Chương 2 — Mưa phùn', kind: 'image', sourceUrl: 'https://images.unsplash.com/photo-1509248961158-e54f6934749c?w=1400&q=80', contentType: 'image/jpeg' },
+        { title: 'Chương 3 — Đèn dầu', kind: 'image', sourceUrl: 'https://images.unsplash.com/photo-1517142089942-ba376ce32a2e?w=1400&q=80', contentType: 'image/jpeg' },
+      ],
+    },
+    {
+      productSlug: 'cao-va-rung',
+      items: [
+        { title: 'Chương 1 — Cáo gặp rừng', kind: 'image', sourceUrl: 'https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=1400&q=80', contentType: 'image/jpeg' },
+      ],
+    },
+  ];
+}
+
 module.exports = {
   SAMPLE_VOICE,
   buildContentHubProducts,
   buildContentHubReviews,
   buildContentHubLicenseSeeds,
+  buildContentHubEpisodes,
   hubProductFields,
   isHubCategory,
 };

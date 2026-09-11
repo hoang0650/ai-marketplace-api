@@ -41,9 +41,11 @@ describe('voice clone playground', () => {
     assert.equal(env.AI_PROVIDER, 'runpod_public');
     assert.equal(env.PROVIDER_ENDPOINT_ID, VOICE_CLONE_ENDPOINT);
     assert.equal(env.VOICE_SAMPLE_URL, 'https://cdn.example/me.mp3');
-    const tts = voiceTtsInput(product, { prompt: 'xin chao' });
+    const tts = voiceTtsInput(product, { prompt: 'xin chao', id: 'reuse-me', idempotencyKey: 'dup' });
     assert.equal(tts.audio_url, 'https://cdn.example/me.mp3');
     assert.equal(tts.prompt, 'xin chao');
+    assert.equal(tts.id, undefined);
+    assert.equal(tts.idempotencyKey, undefined);
     assert.deepEqual(resolveProviderForProduct(product), {
       provider: 'runpod_public',
       endpointId: VOICE_CLONE_ENDPOINT,

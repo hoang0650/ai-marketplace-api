@@ -49,6 +49,7 @@ const adminFinanceRoutes = require('./routes/admin-finance');
 const paymentRoutes = require('./routes/payments');
 const licenseRoutes = require('./routes/licenses');
 const complaintRoutes = require('./routes/complaints');
+const contentRoutes = require('./routes/content');
 
 function createApp() {
   const app = express();
@@ -182,6 +183,7 @@ function createApp() {
   app.use('/v1/sellers', sellerRoutes);
   app.use('/v1/legal', legalRoutes);
   app.use('/v1/licenses', licenseRoutes);
+  app.use('/v1/content', contentRoutes);
   app.use('/v1/complaints', complaintRoutes);
 
   app.use(notFound);

@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const {
   isLicenseCategory,
   isVoiceCategory,
+  isWatchContentCategory,
   normalizeLicenseTerm,
   expiresAtFrom,
   resolveLicensePrice,
@@ -19,6 +20,9 @@ describe('license categories', () => {
     assert.equal(isLicenseCategory('dataset'), true);
     assert.equal(isLicenseCategory('voice-clone'), false);
     assert.equal(isVoiceCategory('voice-clone'), true);
+    assert.equal(isWatchContentCategory('ai-film-series'), true);
+    assert.equal(isWatchContentCategory('story-book'), true);
+    assert.equal(isWatchContentCategory('skill-pack'), false);
   });
 });
 

@@ -41,6 +41,7 @@ function getMinioConfig() {
     publicBaseUrl: trimSlash(process.env.MINIO_PUBLIC_URL || 'https://minio.phhotel.vn'),
     playgroundPrefix: cleanPrefix(process.env.MINIO_PLAYGROUND_PREFIX, 'aimarkets/playground'),
     voicePrefix: cleanPrefix(process.env.MINIO_VOICE_PREFIX, 'aimarkets/voices'),
+    contentPrefix: cleanPrefix(process.env.MINIO_CONTENT_PREFIX, 'aimarkets/content'),
   };
 }
 
@@ -120,7 +121,10 @@ function extForMime(mime) {
     'audio/m4a': 'm4a',
     'audio/aac': 'aac',
     'audio/ogg': 'ogg',
-    'audio/webm': 'webm',
+    'video/mp4': 'mp4',
+    'video/webm': 'webm',
+    'video/quicktime': 'mov',
+    'image/gif': 'gif',
   };
   return map[String(mime || '').toLowerCase()] || 'bin';
 }
@@ -140,6 +144,28 @@ async function uploadVoiceSampleBuffer(buffer, { filename, contentType = 'audio/
     contentType,
     prefix: cfg.voicePrefix,
   });
+}
+
+async function uploadContentBuffer(buffer, { filename, contentType = 'application/octet-stream' } = {}) {
+  const cfg = await ensurePlaygroundBucket();
+  const minio = getMinioClient();
+  const ext = extForMime(contentType);
+  const objectName = `${cfg.contentPrefix}/${Date.now()}-${crypto.randomBytes(12).toString('hex')}.${ext}`;
+  await minio.putObject(cfg.bucket, objectName, buffer, buffer.length, {
+    'Content-Type': contentType || 'application/octet-stream',
+    'Cache-Control': 'private, no-store',
+  });
+  return {
+    bucket: cfg.bucket,
+    objectName,
+    filename: String(filename || objectName),
+  };
+}
+
+async function getContentObjectStream(objectName) {
+  const cfg = await ensurePlaygroundBucket();
+  const minio = getMinioClient();
+  return minio.getObject(cfg.bucket, objectName);
 }
 
 async function uploadPublicBuffer(buffer, { filename, contentType, prefix }) {
@@ -173,5 +199,7 @@ module.exports = {
   ensurePlaygroundBucket,
   uploadPlaygroundImageBuffer,
   uploadVoiceSampleBuffer,
+  uploadContentBuffer,
+  getContentObjectStream,
   buildPublicObjectUrl,
 };

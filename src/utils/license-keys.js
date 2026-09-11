@@ -2,6 +2,7 @@ const crypto = require('crypto');
 
 const LICENSE_CATEGORIES = new Set(['ai-film-series', 'story-book', 'skill-pack', 'dataset']);
 const VOICE_CATEGORIES = new Set(['voice-clone']);
+const WATCH_CONTENT_CATEGORIES = new Set(['ai-film-series', 'story-book']);
 const LICENSE_TERMS = ['day', 'month', 'year'];
 
 function isLicenseCategory(category) {
@@ -10,6 +11,10 @@ function isLicenseCategory(category) {
 
 function isVoiceCategory(category) {
   return VOICE_CATEGORIES.has(String(category || ''));
+}
+
+function isWatchContentCategory(category) {
+  return WATCH_CONTENT_CATEGORIES.has(String(category || ''));
 }
 
 function normalizeLicenseTerm(raw, fallback = 'month') {
@@ -102,9 +107,11 @@ function normalizeContentMeta(category, raw = {}) {
 module.exports = {
   LICENSE_CATEGORIES,
   VOICE_CATEGORIES,
+  WATCH_CONTENT_CATEGORIES,
   LICENSE_TERMS,
   isLicenseCategory,
   isVoiceCategory,
+  isWatchContentCategory,
   normalizeLicenseTerm,
   generateLicenseKey,
   expiresAtFrom,

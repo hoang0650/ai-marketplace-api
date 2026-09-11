@@ -2,6 +2,7 @@ const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
 const {
   buildContentHubProducts,
+  buildContentHubEpisodes,
   hubProductFields,
 } = require('../../src/data/content-hub-products');
 
@@ -39,6 +40,21 @@ describe('content hub seed products', () => {
       assert.ok(p.contentMeta.episodeCount > 0);
       assert.equal(p.productType, 'MEDIA_LICENSE');
       assert.equal(p.contentMeta.kind, p.category === 'story-book' ? 'story' : 'series');
+    }
+  });
+
+  test('hub episodes cover seeded films and stories without public media URLs in catalog meta', () => {
+    const packs = buildContentHubEpisodes();
+    const slugs = packs.map((p) => p.productSlug);
+    assert.ok(slugs.includes('neon-harbor'));
+    assert.ok(slugs.includes('dem-ha-noi'));
+    for (const pack of packs) {
+      assert.ok(pack.items.length >= 1);
+      for (const item of pack.items) {
+        assert.ok(item.title);
+        assert.ok(item.sourceUrl);
+        assert.match(item.kind, /^(video|image)$/);
+      }
     }
   });
 });
