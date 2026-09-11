@@ -32,6 +32,14 @@ router.post('/create-order', authenticate, async (req, res, next) => {
       return res.status(400).json({ message: 'Invalid amount for PayPal (USD or VND)' });
     }
 
+    const funding = String(req.body?.fundingSource || 'paypal').toLowerCase();
+    const note =
+      funding === 'apple' || funding === 'applepay'
+        ? 'Apple Pay via PayPal'
+        : funding === 'gpay' || funding === 'googlepay'
+          ? 'Google Pay via PayPal'
+          : 'PayPal wallet deposit';
+
     const tx = await WalletTx.create({
       user: req.user._id,
       type: 'deposit',
@@ -39,7 +47,7 @@ router.post('/create-order', authenticate, async (req, res, next) => {
       currency: 'USD',
       status: 'pending',
       paymentMethod: 'paypal',
-      note: 'PayPal wallet deposit',
+      note,
     });
 
     let order;
@@ -96,7 +104,7 @@ router.post('/capture-order', authenticate, async (req, res, next) => {
     tx.status = ok ? 'completed' : 'failed';
     tx.paypalPayerId = captured.payer?.payer_id || '';
     tx.reviewedAt = new Date();
-    tx.note = ok ? 'PayPal wallet deposit' : `PayPal status ${captured.status || 'failed'}`;
+    if (!ok) tx.note = `PayPal status ${captured.status || 'failed'}`;
     await tx.save();
 
     res.json({
