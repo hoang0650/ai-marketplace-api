@@ -63,6 +63,19 @@ describe('status', () => {
   });
 });
 
+describe('license is per product, not per shop', () => {
+  test('a key for product A does not cover product B from the same seller', () => {
+    const { licenseCoversProduct } = require('../../src/utils/license-keys');
+    const shop = '64b000000000000000000099';
+    const filmA = '64b0000000000000000000a1';
+    const filmB = '64b0000000000000000000a2';
+    const keyA = { product: filmA, seller: shop };
+    assert.equal(licenseCoversProduct(keyA, filmA), true);
+    assert.equal(licenseCoversProduct(keyA, filmB), false);
+    assert.equal(licenseCoversProduct({ product: { _id: filmA }, seller: shop }, filmB), false);
+  });
+});
+
 describe('content meta', () => {
   test('skill and dataset meta kind', () => {
     assert.equal(normalizeContentMeta('skill-pack', { licensePrices: { month: 5 } }).kind, 'skill');

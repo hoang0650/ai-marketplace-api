@@ -65,7 +65,7 @@ function buildCheckoutEmail({
         `Thời hạn: ${formatTerm(license.term)}`,
         license.expiresAt ? `Hết hạn: ${formatWhen(license.expiresAt)}` : '',
         `Quản lý key: ${licensesUrl}`,
-        'Không chia sẻ key. Hết hạn hoặc hoàn tiền thì key vô hiệu.',
+        'Không chia sẻ key. Key chỉ mở đúng sản phẩm đã mua — không dùng cho listing khác cùng shop. Hết hạn hoặc hoàn tiền thì key vô hiệu.',
       ]
         .filter(Boolean)
         .join('\n')
@@ -105,7 +105,7 @@ function buildCheckoutEmail({
       </tr>
       <tr>
         <td style="padding:8px 0 0;font-size:13px;color:#666">
-          Key chỉ cho phép xem / đọc / tải xuống trong thời hạn đã mua. Không chia sẻ. Hết hạn hoặc hoàn tiền thì key vô hiệu.
+          Key chỉ mở đúng sản phẩm đã mua (không dùng chung cho listing khác cùng shop). Chỉ xem / đọc / tải trong thời hạn. Không chia sẻ. Hết hạn hoặc hoàn tiền thì key vô hiệu.
           <br /><a href="${escapeHtml(licensesUrl)}" style="color:#8b5a2b">Xem license trong dashboard</a>
         </td>
       </tr>`

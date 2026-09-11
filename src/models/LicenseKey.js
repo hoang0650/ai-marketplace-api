@@ -6,6 +6,7 @@ const licenseKeySchema = new mongoose.Schema(
     order: { type: mongoose.Schema.Types.ObjectId, ref: 'Order', required: true, index: true },
     product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true, index: true },
     productName: { type: String, default: '' },
+    sellerName: { type: String, default: '' },
     buyer: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     seller: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     category: { type: String, default: '' },

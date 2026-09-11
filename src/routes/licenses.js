@@ -1,7 +1,7 @@
 const express = require('express');
 const LicenseKey = require('../models/LicenseKey');
 const { authenticate } = require('../middleware/auth');
-const { effectiveLicenseStatus } = require('../utils/license-keys');
+const { effectiveLicenseStatus, licenseCoversProduct } = require('../utils/license-keys');
 const { mapLicense } = require('../utils/issue-license');
 
 const router = express.Router();
@@ -22,7 +22,7 @@ router.post('/validate', async (req, res, next) => {
     const doc = await LicenseKey.findOne({ licenseKey: key });
     if (!doc) return res.status(404).json({ valid: false, status: 'not_found' });
     const productId = req.body?.productId ? String(req.body.productId) : '';
-    if (productId && String(doc.product) !== productId) {
+    if (productId && !licenseCoversProduct(doc, productId)) {
       return res.status(403).json({ valid: false, status: 'product_mismatch' });
     }
     const status = effectiveLicenseStatus(doc);

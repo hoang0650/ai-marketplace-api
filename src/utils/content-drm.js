@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const config = require('../config/env');
 const LicenseKey = require('../models/LicenseKey');
-const { effectiveLicenseStatus } = require('./license-keys');
+const { effectiveLicenseStatus, licenseCoversProduct } = require('./license-keys');
 
 const MAGIC = Buffer.from('AIMC');
 const PLAY_TTL_MS = 5 * 60 * 1000;
@@ -148,7 +148,7 @@ async function findActiveLicense({ buyerId, licenseKey, productId }) {
     const id = String(doc._id);
     if (seen.has(id)) continue;
     seen.add(id);
-    if (pid && String(doc.product) !== pid) continue;
+    if (!licenseCoversProduct(doc, pid)) continue;
     if (effectiveLicenseStatus(doc) === 'active') return doc;
   }
   return null;

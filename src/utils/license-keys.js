@@ -54,6 +54,12 @@ function effectiveLicenseStatus(doc, now = new Date()) {
   return 'active';
 }
 
+/** One listing = one license. Same shop / seller never shares a key across products. */
+function licenseCoversProduct(doc, productId) {
+  if (!doc || !productId) return false;
+  return String(doc.product?._id || doc.product) === String(productId);
+}
+
 function normalizeContentMeta(category, raw = {}) {
   const src = raw && typeof raw === 'object' ? raw : {};
   if (isVoiceCategory(category)) {
@@ -117,5 +123,6 @@ module.exports = {
   expiresAtFrom,
   resolveLicensePrice,
   effectiveLicenseStatus,
+  licenseCoversProduct,
   normalizeContentMeta,
 };

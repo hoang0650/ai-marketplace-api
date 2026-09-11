@@ -10,13 +10,16 @@ async function issueLicenseForOrder({ order, product, term }) {
   if (!isLicenseCategory(product?.category || order?.contractSnapshot?.category)) {
     return null;
   }
+  const productId = product._id || order.product;
+  if (!productId) return null;
   const startsAt = new Date();
   const licenseTerm = term || 'month';
   const doc = await LicenseKey.create({
     licenseKey: generateLicenseKey(),
     order: order._id,
-    product: product._id || order.product,
+    product: productId,
     productName: product.name || order.productName,
+    sellerName: product.creatorName || '',
     buyer: order.buyer,
     seller: order.seller,
     category: product.category || '',
@@ -44,6 +47,8 @@ function mapLicense(doc, now = new Date()) {
     orderId: String(o.order?._id || o.order),
     productId: String(o.product?._id || o.product),
     productName: o.productName || '',
+    sellerId: String(o.seller?._id || o.seller || ''),
+    sellerName: o.sellerName || '',
     category: o.category || '',
     term: o.term,
     startsAt: o.startsAt ? new Date(o.startsAt).toISOString() : null,
