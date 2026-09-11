@@ -84,13 +84,13 @@ const orderSchema = new mongoose.Schema(
     /** Payment rail — NOT infra provider. */
     paymentProvider: {
       type: String,
-      enum: ['wallet', 'stripe', 'paypal', 'paddle', 'payos', 'internal_ledger'],
+      enum: ['wallet', 'paypal', 'paddle', 'payos', 'internal_ledger'],
       default: 'wallet',
     },
     /** @deprecated Alias of paymentProvider (historical field name). */
     provider: {
       type: String,
-      enum: ['wallet', 'stripe', 'paypal', 'paddle', 'payos', 'internal_ledger'],
+      enum: ['wallet', 'paypal', 'paddle', 'payos', 'internal_ledger'],
       default: 'wallet',
       required: true,
     },

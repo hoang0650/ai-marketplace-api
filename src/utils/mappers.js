@@ -128,6 +128,8 @@ function mapWallet(doc) {
     note: o.note || '',
     status: o.status || 'completed',
     payoutId: o.payoutId || '',
+    paymentMethod: o.paymentMethod || '',
+    paypalOrderId: o.paypalOrderId || '',
     reviewNote: o.reviewNote || '',
     reviewedAt: o.reviewedAt ? new Date(o.reviewedAt).toISOString() : null,
     createdAt: o.createdAt ? new Date(o.createdAt).toISOString() : new Date().toISOString(),

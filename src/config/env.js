@@ -85,6 +85,11 @@ const config = {
     !!process.env.NODE_TEST_CONTEXT,
   /** AES wrapping for licensed film/story downloads — not the license key itself. */
   contentDrmSecret: (process.env.CONTENT_DRM_SECRET || '').trim(),
+  /** Same PayPal REST Orders v2 credentials as phhotel-api */
+  paypalClientId: (process.env.PAYPAL_CLIENT_ID || '').trim(),
+  paypalClientSecret: (process.env.PAYPAL_CLIENT_SECRET || '').trim(),
+  paypalSandbox: process.env.PAYPAL_SANDBOX !== 'false',
+  paypalVndPerUsd: Number(process.env.PAYPAL_VND_PER_USD || 26000),
 };
 
 if (isProduction && !config.resendApiKey) {

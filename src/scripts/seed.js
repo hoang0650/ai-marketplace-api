@@ -259,7 +259,7 @@ async function seed() {
       amount: 29,
       currency: 'USD',
       status: 'paid',
-      provider: 'stripe',
+      provider: 'wallet',
     });
     await WalletTx.create({
       user: nova._id,
@@ -328,7 +328,7 @@ async function seed() {
       amount: 79,
       currency: 'USD',
       status: 'paid',
-      provider: 'stripe',
+      provider: 'wallet',
     });
     await WalletTx.create({
       user: pulse._id,
