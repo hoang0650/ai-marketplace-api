@@ -472,15 +472,26 @@ function isHubCategory(category) {
 }
 
 const SAMPLE_VIDEOS = [
-  'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-  'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
-  'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4',
-  'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4',
-  'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4',
-  'https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
-  'https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4',
-  'https://storage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
+  'https://media.w3.org/2010/05/sintel/trailer.mp4',
+  'https://media.w3.org/2010/05/bunny/trailer.mp4',
+  'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
+  'https://www.w3schools.com/html/mov_bbb.mp4',
+  'https://media.w3.org/2010/05/video/movie_300.mp4',
+  'https://media.w3.org/2010/05/bunny/movie.mp4',
+  'https://media.w3.org/2010/05/sintel/trailer.mp4',
+  'https://media.w3.org/2010/05/bunny/trailer.mp4',
 ];
+
+/** Google's gtv-videos-bucket now 403s; keep old DB rows playable. */
+function playableSourceUrl(url, index = 0) {
+  const raw = String(url || '').trim();
+  if (!raw) return raw;
+  if (/gtv-videos-bucket|commondatastorage\.googleapis\.com\/gtv-videos/i.test(raw)) {
+    const i = Math.max(0, Number(index) || 0);
+    return SAMPLE_VIDEOS[i % SAMPLE_VIDEOS.length];
+  }
+  return raw;
+}
 
 const SAMPLE_PAGES = [
   'https://images.unsplash.com/photo-1481627834876-b7833e8f5570?w=1400&q=80',
@@ -599,7 +610,7 @@ async function upsertContentHubEpisodes(ContentEpisode, Product) {
             title: item.title,
             kind: item.kind,
             contentType: item.contentType || '',
-            sourceUrl: item.sourceUrl,
+            sourceUrl: playableSourceUrl(item.sourceUrl, i),
             published: true,
           },
           $setOnInsert: { product: product._id, index: i },
@@ -624,6 +635,8 @@ module.exports = {
   buildContentHubLicenseSeeds,
   buildContentHubEpisodes,
   upsertContentHubEpisodes,
+  playableSourceUrl,
+  SAMPLE_VIDEOS,
   hubProductFields,
   isHubCategory,
 };

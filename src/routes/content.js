@@ -16,6 +16,7 @@ const {
   uploadContentBuffer,
   getContentObjectStream,
 } = require('../config/minio');
+const { playableSourceUrl } = require('../data/content-hub-products');
 
 const router = express.Router();
 
@@ -77,41 +78,6 @@ function publicApiOrigin(req) {
     .trim();
   if (!host) return '';
   return `${proto}://${host}`;
-}
-
-async function pipeRemoteMedia(req, res, sourceUrl, fallbackType) {
-  const headers = {
-    'User-Agent':
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
-    Accept: '*/*',
-  };
-  if (req.headers.range) headers.Range = req.headers.range;
-  let up;
-  try {
-    up = await fetch(sourceUrl, { redirect: 'follow', headers, signal: AbortSignal.timeout(60_000) });
-  } catch {
-    if (!res.headersSent) return res.status(502).json({ message: 'Source media unavailable' });
-    return res.end();
-  }
-  if (!up.ok && up.status !== 206) {
-    if (!res.headersSent) return res.status(502).json({ message: 'Source media unavailable' });
-    return res.end();
-  }
-  res.status(up.status === 206 ? 206 : 200);
-  res.setHeader('Content-Type', up.headers.get('content-type') || fallbackType || 'application/octet-stream');
-  res.setHeader('Accept-Ranges', 'bytes');
-  res.setHeader('Cache-Control', 'private, no-store');
-  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-  const len = up.headers.get('content-length');
-  if (len) res.setHeader('Content-Length', len);
-  const cr = up.headers.get('content-range');
-  if (cr) res.setHeader('Content-Range', cr);
-  if (!up.body) {
-    if (!res.headersSent) return res.status(502).json({ message: 'Source media unavailable' });
-    return res.end();
-  }
-  const { Readable } = require('stream');
-  return Readable.fromWeb(up.body).pipe(res);
 }
 
 function canManage(req, product) {
@@ -298,8 +264,12 @@ async function handlePlay(req, res, next) {
       stream.on('error', (err) => next(err));
       return stream.pipe(res);
     }
-    if (episode.sourceUrl) {
-      return pipeRemoteMedia(req, res, episode.sourceUrl, episode.contentType || row.mime);
+    const sourceUrl = playableSourceUrl(episode.sourceUrl, episode.index);
+    if (sourceUrl) {
+      // Public sample CDNs serve Range correctly in the browser; proxying them
+      // through the API fails when the origin 403s (gtv-videos-bucket).
+      res.setHeader('Content-Type', episode.contentType || row.mime || 'video/mp4');
+      return res.redirect(302, sourceUrl);
     }
     return res.status(404).json({ message: 'No media' });
   } catch (err) {
@@ -322,7 +292,10 @@ router.get('/episodes/:id/download', authenticate, async (req, res, next) => {
       for await (const c of stream) chunks.push(c);
       plain = Buffer.concat(chunks);
     } else if (episode.sourceUrl) {
-      const up = await fetch(episode.sourceUrl, { redirect: 'follow' });
+      const up = await fetch(playableSourceUrl(episode.sourceUrl, episode.index), {
+        redirect: 'follow',
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+      });
       if (!up.ok) return res.status(502).json({ message: 'Source media unavailable' });
       plain = Buffer.from(await up.arrayBuffer());
     } else {

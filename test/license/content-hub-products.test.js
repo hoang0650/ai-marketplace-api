@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const {
   buildContentHubProducts,
   buildContentHubEpisodes,
+  playableSourceUrl,
   hubProductFields,
 } = require('../../src/data/content-hub-products');
 
@@ -56,8 +57,21 @@ describe('content hub seed products', () => {
       for (const item of pack.items) {
         assert.ok(item.title);
         assert.ok(item.sourceUrl);
+        assert.equal(/gtv-videos-bucket/i.test(item.sourceUrl), false);
         assert.match(item.kind, /^(video|image)$/);
       }
     }
+  });
+
+  test('maps retired Google sample-bucket URLs onto working public MP4s', () => {
+    const next = playableSourceUrl(
+      'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
+      2,
+    );
+    assert.match(next, /^https:\/\/(media\.w3\.org|interactive-examples\.mdn\.mozilla\.net|www\.w3schools\.com)\//);
+    assert.equal(
+      playableSourceUrl('https://media.w3.org/2010/05/sintel/trailer.mp4', 0),
+      'https://media.w3.org/2010/05/sintel/trailer.mp4',
+    );
   });
 });
