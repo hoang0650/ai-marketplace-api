@@ -29,25 +29,13 @@ router.get('/summary', authenticate, async (req, res, next) => {
   }
 });
 
-/** Buyer top-up / nạp tiền vào ví */
-router.post('/deposit', authenticate, async (req, res, next) => {
-  try {
-    const amount = normalizeAmount(req.body?.amount);
-    if (amount === null) {
-      return res.status(400).json({ message: `Invalid amount (0 < amount <= ${MAX_TX_AMOUNT})` });
-    }
-    const tx = await WalletTx.create({
-      user: req.user._id,
-      type: 'deposit',
-      amount,
-      currency: String(req.body?.currency || 'USD'),
-      status: 'pending',
-      note: String(req.body?.note || 'Buyer wallet deposit'),
-    });
-    res.status(201).json(mapWallet(tx));
-  } catch (err) {
-    next(err);
-  }
+/** SePay / bank-transfer top-up is retired. Web uses PayPal rails; mobile uses IAP. */
+router.post('/deposit', authenticate, (_req, res) => {
+  res.status(410).json({
+    code: 'SEPAY_DISABLED',
+    message:
+      'Bank transfer top-up is no longer available. Use Apple Pay, Google Pay, or PayPal on the website, or in-app purchase in the iOS/Android app.',
+  });
 });
 
 router.post('/withdraw', authenticate, requireRoles('creator', 'admin'), async (req, res, next) => {

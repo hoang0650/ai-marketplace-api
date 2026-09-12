@@ -14,8 +14,10 @@ const walletTxSchema = new mongoose.Schema(
       index: true,
     },
     payoutId: { type: String, default: '', index: true },
-    paymentMethod: { type: String, enum: ['', 'sepay', 'paypal'], default: '' },
+    paymentMethod: { type: String, enum: ['', 'sepay', 'paypal', 'iap'], default: '' },
     paypalOrderId: { type: String, default: '', index: true },
+    iapTransactionId: { type: String, index: true },
+    iapProductId: { type: String, default: '' },
     paypalPayerId: { type: String, default: '' },
     reviewedAt: { type: Date, default: null },
     reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
@@ -24,6 +26,7 @@ const walletTxSchema = new mongoose.Schema(
   { timestamps: { createdAt: true, updatedAt: false } }
 );
 walletTxSchema.index({ type: 1, status: 1, createdAt: -1 });
+walletTxSchema.index({ iapTransactionId: 1 }, { unique: true, sparse: true });
 
 walletTxSchema.virtual('id').get(function idVirtual() {
   return this._id.toString();

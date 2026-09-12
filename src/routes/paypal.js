@@ -14,10 +14,15 @@ const config = require('../config/env');
 const router = express.Router();
 
 router.get('/config', (_req, res) => {
+  const on = paypalEnabled();
   res.json({
-    enabled: paypalEnabled(),
-    clientId: paypalEnabled() ? config.paypalClientId : '',
+    enabled: on,
+    clientId: on ? config.paypalClientId : '',
     sandbox: config.paypalSandbox,
+    merchantName: 'AI Markets',
+    applePay: on && config.paypalApplePay,
+    googlePay: on && config.paypalGooglePay,
+    applePayDomains: config.paypalApplePayDomains,
   });
 });
 

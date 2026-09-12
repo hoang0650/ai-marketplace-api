@@ -90,6 +90,18 @@ const config = {
   paypalClientSecret: (process.env.PAYPAL_CLIENT_SECRET || '').trim(),
   paypalSandbox: process.env.PAYPAL_SANDBOX !== 'false',
   paypalVndPerUsd: Number(process.env.PAYPAL_VND_PER_USD || 26000),
+  paypalApplePay: process.env.PAYPAL_APPLE_PAY !== 'false',
+  paypalGooglePay: process.env.PAYPAL_GOOGLE_PAY !== 'false',
+  paypalApplePayDomains: String(process.env.PAYPAL_APPLE_PAY_DOMAINS || 'aimarkets.vn,www.aimarkets.vn')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean),
+  appleIapSharedSecret: (process.env.APPLE_IAP_SHARED_SECRET || '').trim(),
+  googlePlayVerifyUrl: (process.env.GOOGLE_PLAY_VERIFY_URL || '').trim(),
+  iapSkipVerify:
+    process.env.IAP_SKIP_VERIFY === '1' ||
+    process.env.IAP_SKIP_VERIFY === 'true' ||
+    (!isProduction && process.env.IAP_SKIP_VERIFY !== '0'),
 };
 
 if (isProduction && !config.resendApiKey) {

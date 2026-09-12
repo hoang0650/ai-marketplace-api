@@ -88,8 +88,9 @@ function buildCheckoutOrder({ amountUsd, customId, description }) {
     ],
     application_context: {
       brand_name: 'AI Markets',
-      landing_page: 'BILLING',
+      landing_page: 'NO_PREFERENCE',
       user_action: 'PAY_NOW',
+      shipping_preference: 'NO_SHIPPING',
       return_url: `${config.frontendUrl.replace(/\/+$/, '')}/wallet?paymentStatus=success&paymentMethod=paypal`,
       cancel_url: `${config.frontendUrl.replace(/\/+$/, '')}/wallet?paymentStatus=cancel&paymentMethod=paypal`,
     },

@@ -25,6 +25,7 @@ describe('PayPal client helpers (phhotel-api Orders v2 pattern)', () => {
     assert.equal(body.purchase_units[0].amount.currency_code, 'USD');
     assert.equal(body.purchase_units[0].amount.value, '4.99');
     assert.equal(body.application_context.user_action, 'PAY_NOW');
+    assert.equal(body.application_context.shipping_preference, 'NO_SHIPPING');
     assert.match(body.application_context.return_url, /paymentMethod=paypal/);
   });
 });
