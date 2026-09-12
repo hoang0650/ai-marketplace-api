@@ -7,7 +7,7 @@ const { liftExpired, effectiveStatus, denyMessage } = require('../utils/moderati
 
 const AUTH_USER_CACHE_TTL = 60 * 60;
 const AUTH_SESSION_TTL = 30 * 24 * 60 * 60;
-const AUTH_DB_TIMEOUT_MS = Number(process.env.AUTH_DB_TIMEOUT_MS) || 1200;
+const AUTH_DB_TIMEOUT_MS = Number(process.env.AUTH_DB_TIMEOUT_MS) || 8000;
 const REFRESH_COOKIE = 'refreshToken';
 const REFRESH_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -202,8 +202,15 @@ async function loadActiveUser(userId, { allowCache = true } = {}) {
 
 async function requireAuthSession(userId) {
   if (!userId || !isCacheAvailable()) return true;
-  const session = await getCache(authSessionCacheKey(String(userId)));
-  return !!(session && session.userId);
+  try {
+    const session = await getCache(authSessionCacheKey(String(userId)));
+    // Missing key is not a logout: Redis writes are best-effort and can drop
+    // on timeout. A valid refresh JWT + cookie is enough to continue.
+    if (!session) return true;
+    return String(session.userId) === String(userId);
+  } catch {
+    return true;
+  }
 }
 
 function issueAuthTokens(user) {

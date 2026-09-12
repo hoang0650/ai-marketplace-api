@@ -55,6 +55,25 @@ router.post('/checkout', authenticate, async (req, res, next) => {
           amount: 0,
           currency: product.pricing?.currency || 'USD',
           license: mapLicense(existing),
+          orderId: existing.order ? String(existing.order) : undefined,
+        });
+      }
+    } else {
+      const existingOrder = await Order.findOne({
+        buyer: req.user._id,
+        product: product._id,
+        status: 'paid',
+      }).sort({ createdAt: -1 });
+      if (existingOrder) {
+        return res.json({
+          checkoutId: `chk_owned_${existingOrder._id}`,
+          provider: 'wallet',
+          paymentProvider: 'internal_ledger',
+          status: 'paid',
+          alreadyPurchased: true,
+          amount: 0,
+          currency: product.pricing?.currency || 'USD',
+          orderId: String(existingOrder._id),
         });
       }
     }

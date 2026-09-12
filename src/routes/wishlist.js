@@ -1,8 +1,8 @@
 const express = require('express');
-const Product = require('../models/Product');
 const User = require('../models/User');
 const { authenticate, invalidateAuthUserCache } = require('../middleware/auth');
 const { mapProduct } = require('../utils/mappers');
+const { findProductByRef, hasWishlistId } = require('../utils/wishlist');
 
 const router = express.Router();
 
@@ -16,12 +16,15 @@ async function loadUserDoc(req) {
   return user;
 }
 
+function mappedWishlist(user) {
+  return (user.wishlist || []).filter(Boolean).map(mapProduct).filter(Boolean);
+}
+
 router.get('/', authenticate, async (req, res, next) => {
   try {
     const user = await loadUserDoc(req);
     await user.populate({ path: 'wishlist' });
-    const items = (user.wishlist || []).filter(Boolean).map(mapProduct);
-    res.json(items);
+    res.json(mappedWishlist(user));
   } catch (err) {
     next(err);
   }
@@ -29,27 +32,24 @@ router.get('/', authenticate, async (req, res, next) => {
 
 router.post('/toggle', authenticate, async (req, res, next) => {
   try {
-    const productId = req.body?.productId;
-    if (!productId) return res.status(400).json({ message: 'productId required' });
-    const product = await Product.findById(productId);
+    const ref = String(req.body?.productId || req.body?.slug || '').trim();
+    if (!ref) return res.status(400).json({ message: 'productId required' });
+    const product = await findProductByRef(ref);
     if (!product) return res.status(404).json({ message: 'Product not found' });
 
     const user = await loadUserDoc(req);
-    const list = (user.wishlist || []).map(String);
-    const idx = list.indexOf(String(productId));
-    let added = false;
-    if (idx >= 0) {
-      user.wishlist.splice(idx, 1);
+    const added = !hasWishlistId(user, product._id);
+    if (added) {
+      await User.updateOne({ _id: user._id }, { $addToSet: { wishlist: product._id } });
     } else {
-      user.wishlist.push(product._id);
-      added = true;
+      await User.updateOne({ _id: user._id }, { $pull: { wishlist: product._id } });
     }
-    await user.save();
     await invalidateAuthUserCache(user._id);
-    await user.populate({ path: 'wishlist' });
+    const fresh = await User.findById(user._id).populate({ path: 'wishlist' });
     res.json({
-      wishlist: (user.wishlist || []).filter(Boolean).map(mapProduct),
+      wishlist: mappedWishlist(fresh),
       added,
+      productId: String(product._id),
     });
   } catch (err) {
     next(err);
