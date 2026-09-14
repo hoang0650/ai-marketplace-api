@@ -90,18 +90,20 @@ const config = {
   paypalClientSecret: (process.env.PAYPAL_CLIENT_SECRET || '').trim(),
   paypalSandbox: process.env.PAYPAL_SANDBOX !== 'false',
   paypalVndPerUsd: Number(process.env.PAYPAL_VND_PER_USD || 26000),
-  paypalApplePay: process.env.PAYPAL_APPLE_PAY !== 'false',
-  paypalGooglePay: process.env.PAYPAL_GOOGLE_PAY !== 'false',
-  paypalApplePayDomains: String(process.env.PAYPAL_APPLE_PAY_DOMAINS || 'aimarkets.vn,www.aimarkets.vn')
-    .split(',')
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean),
   appleIapSharedSecret: (process.env.APPLE_IAP_SHARED_SECRET || '').trim(),
-  googlePlayVerifyUrl: (process.env.GOOGLE_PLAY_VERIFY_URL || '').trim(),
+  appleIapIssuerId: (process.env.APPLE_IAP_ISSUER_ID || '').trim(),
+  appleIapKeyId: (process.env.APPLE_IAP_KEY_ID || '').trim(),
+  appleIapPrivateKey: (process.env.APPLE_IAP_PRIVATE_KEY || '').trim(),
+  appleIapBundleId: (process.env.APPLE_IAP_BUNDLE_ID || 'app.phgroup.ai-market-vn').trim(),
+  googlePlayPackageName: (process.env.GOOGLE_PLAY_PACKAGE_NAME || 'app.phgroup.ai_market_vn').trim(),
+  googlePlayServiceAccountJson: (process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON || '').trim(),
+  /** Production never skips store verify. Dev skips unless IAP_SKIP_VERIFY=0. Tests skip. */
   iapSkipVerify:
-    process.env.IAP_SKIP_VERIFY === '1' ||
-    process.env.IAP_SKIP_VERIFY === 'true' ||
-    (!isProduction && process.env.IAP_SKIP_VERIFY !== '0'),
+    nodeEnv === 'test' || !!process.env.NODE_TEST_CONTEXT
+      ? true
+      : isProduction
+        ? false
+        : process.env.IAP_SKIP_VERIFY !== '0',
 };
 
 if (isProduction && !config.resendApiKey) {
@@ -110,6 +112,21 @@ if (isProduction && !config.resendApiKey) {
 
 if (isProduction && (!config.contentDrmSecret || config.contentDrmSecret.length < 24)) {
   console.warn('[config] CONTENT_DRM_SECRET should be a strong random value (>= 24 chars) for licensed film/story downloads.');
+}
+
+if (isProduction) {
+  if (process.env.IAP_SKIP_VERIFY === '1' || process.env.IAP_SKIP_VERIFY === 'true') {
+    console.warn('[config] IAP_SKIP_VERIFY is ignored in production — store receipts are always verified.');
+  }
+  const appleReady = !!(config.appleIapIssuerId && config.appleIapKeyId && config.appleIapPrivateKey)
+    || !!config.appleIapSharedSecret;
+  const googleReady = !!config.googlePlayServiceAccountJson;
+  if (!appleReady) {
+    console.warn('[config] Apple IAP keys missing — POST /v1/iap/verify (ios) will fail until APPLE_IAP_ISSUER_ID/KEY_ID/PRIVATE_KEY or APPLE_IAP_SHARED_SECRET is set.');
+  }
+  if (!googleReady) {
+    console.warn('[config] GOOGLE_PLAY_SERVICE_ACCOUNT_JSON missing — POST /v1/iap/verify (android) will fail.');
+  }
 }
 
 module.exports = config;

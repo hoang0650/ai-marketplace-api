@@ -4,6 +4,9 @@ const { authenticate } = require('../middleware/auth');
 const { mapWallet } = require('../utils/mappers');
 const { claimEvent } = require('../finance/idempotency');
 const { WALLET_IAP_PACKS, findIapPack } = require('../iap-packs');
+const { IOS_BUNDLE_ID, ANDROID_PACKAGE } = require('../iap/constants');
+const { verifyAppleIap } = require('../iap/verify-apple');
+const { verifyGoogleIap } = require('../iap/verify-google');
 const config = require('../config/env');
 
 const router = express.Router();
@@ -11,8 +14,8 @@ const router = express.Router();
 router.get('/packs', (_req, res) => {
   res.json({
     packs: WALLET_IAP_PACKS.map((p) => ({ sku: p.sku, usd: p.usd, currency: 'USD' })),
-    iosBundle: 'app.phgroup.ai-market-vn',
-    androidPackage: 'app.phgroup.ai_market_vn',
+    iosBundle: IOS_BUNDLE_ID,
+    androidPackage: ANDROID_PACKAGE,
   });
 });
 
@@ -27,30 +30,44 @@ router.post('/verify', authenticate, async (req, res, next) => {
     if (!pack) {
       return res.status(400).json({ message: 'Unknown IAP product', code: 'IAP_UNKNOWN_SKU' });
     }
-    const transactionId = String(req.body?.transactionId || req.body?.purchaseToken || '').trim();
-    if (!transactionId) {
+    const clientTxId = String(req.body?.transactionId || req.body?.purchaseToken || '').trim();
+    const purchaseToken = String(req.body?.purchaseToken || '').trim();
+    const signedTransaction = String(req.body?.signedTransaction || '').trim();
+    if (!clientTxId && !purchaseToken && !signedTransaction) {
       return res.status(400).json({ message: 'transactionId or purchaseToken required', code: 'IAP_NO_TX' });
     }
-    const purchaseToken = String(req.body?.purchaseToken || '').trim();
 
+    let storeTxId = clientTxId || purchaseToken;
     if (!config.iapSkipVerify) {
-      const verified = await verifyWithStore({ platform, productId, purchaseToken, transactionId });
+      const verified = platform === 'ios'
+        ? await verifyAppleIap({
+          productId,
+          transactionId: clientTxId,
+          purchaseToken,
+          signedTransaction,
+        })
+        : await verifyGoogleIap({
+          productId,
+          purchaseToken,
+          packageName: req.body?.packageName,
+        });
       if (!verified.ok) {
         return res.status(400).json({
           message: verified.message || 'IAP verification failed',
           code: verified.code || 'IAP_VERIFY_FAILED',
         });
       }
+      if (verified.transactionId) storeTxId = verified.transactionId;
     }
 
-    const eventId = `iap_${platform}_${transactionId}`;
+    const eventId = `iap_${platform}_${storeTxId}`;
     const { duplicate } = await claimEvent({
       eventId,
       provider: platform === 'ios' ? 'app_store' : 'google_play',
       kind: 'iap_credit',
     });
 
-    const existing = await WalletTx.findOne({ iapTransactionId: transactionId });
+    const existing = await WalletTx.findOne({ iapTransactionId: storeTxId });
     if (duplicate || (existing && existing.status === 'completed')) {
       if (existing && String(existing.user) !== String(req.user._id)) {
         return res.status(409).json({ message: 'IAP transaction already credited', code: 'IAP_TX_TAKEN' });
@@ -73,7 +90,7 @@ router.post('/verify', authenticate, async (req, res, next) => {
       currency: 'USD',
       status: 'completed',
       paymentMethod: 'iap',
-      iapTransactionId: transactionId,
+      iapTransactionId: storeTxId,
       iapProductId: productId,
       note: `${storeLabel} IAP ${productId}`,
       reviewedAt: new Date(),
@@ -84,55 +101,5 @@ router.post('/verify', authenticate, async (req, res, next) => {
     next(err);
   }
 });
-
-async function verifyWithStore({ platform, productId, purchaseToken, transactionId }) {
-  if (platform === 'ios' && config.appleIapSharedSecret && looksLikeAppleReceipt(purchaseToken)) {
-    const result = await verifyAppleReceipt(purchaseToken);
-    if (!result.ok) return result;
-    const inApp = result.receipt?.in_app || result.latest_receipt_info || [];
-    const hit = Array.isArray(inApp)
-      ? inApp.find((row) => String(row.product_id) === productId && String(row.transaction_id || row.original_transaction_id) === transactionId)
-      : null;
-    if (!hit && inApp.length) {
-      return { ok: false, code: 'IAP_APPLE_MISMATCH', message: 'Apple receipt does not match product' };
-    }
-    return { ok: true };
-  }
-  if (platform === 'ios' && !config.appleIapSharedSecret) {
-    return { ok: false, code: 'IAP_NOT_CONFIGURED', message: 'Apple IAP shared secret is not configured' };
-  }
-  if (platform === 'android' && !config.googlePlayVerifyUrl) {
-    return { ok: false, code: 'IAP_NOT_CONFIGURED', message: 'Google Play IAP verification is not configured' };
-  }
-  return { ok: true };
-}
-
-function looksLikeAppleReceipt(token) {
-  const s = String(token || '');
-  return s.length > 80 && !s.includes('.');
-}
-
-async function verifyAppleReceipt(receiptData) {
-  const body = {
-    'receipt-data': receiptData,
-    password: config.appleIapSharedSecret,
-    'exclude-old-transactions': true,
-  };
-  const post = (url) =>
-    fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    }).then((r) => r.json());
-
-  let json = await post('https://buy.itunes.apple.com/verifyReceipt');
-  if (json.status === 21007) {
-    json = await post('https://sandbox.itunes.apple.com/verifyReceipt');
-  }
-  if (json.status !== 0) {
-    return { ok: false, code: 'IAP_APPLE_STATUS', message: `Apple verifyReceipt status ${json.status}` };
-  }
-  return { ok: true, receipt: json.receipt, latest_receipt_info: json.latest_receipt_info };
-}
 
 module.exports = router;

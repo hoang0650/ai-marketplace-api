@@ -20,9 +20,6 @@ router.get('/config', (_req, res) => {
     clientId: on ? config.paypalClientId : '',
     sandbox: config.paypalSandbox,
     merchantName: 'AI Markets',
-    applePay: on && config.paypalApplePay,
-    googlePay: on && config.paypalGooglePay,
-    applePayDomains: config.paypalApplePayDomains,
   });
 });
 
@@ -37,13 +34,7 @@ router.post('/create-order', authenticate, async (req, res, next) => {
       return res.status(400).json({ message: 'Invalid amount for PayPal (USD or VND)' });
     }
 
-    const funding = String(req.body?.fundingSource || 'paypal').toLowerCase();
-    const note =
-      funding === 'apple' || funding === 'applepay'
-        ? 'Apple Pay via PayPal'
-        : funding === 'gpay' || funding === 'googlepay'
-          ? 'Google Pay via PayPal'
-          : 'PayPal wallet deposit';
+    const note = 'PayPal wallet deposit';
 
     const tx = await WalletTx.create({
       user: req.user._id,

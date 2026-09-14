@@ -29,12 +29,12 @@ router.get('/summary', authenticate, async (req, res, next) => {
   }
 });
 
-/** SePay / bank-transfer top-up is retired. Web uses PayPal rails; mobile uses IAP. */
+/** SePay / bank-transfer top-up is retired. Web uses PayPal; mobile uses IAP. */
 router.post('/deposit', authenticate, (_req, res) => {
   res.status(410).json({
     code: 'SEPAY_DISABLED',
     message:
-      'Bank transfer top-up is no longer available. Use Apple Pay, Google Pay, or PayPal on the website, or in-app purchase in the iOS/Android app.',
+      'Bank transfer top-up is no longer available. Use PayPal on the website, or in-app purchase in the iOS/Android app.',
   });
 });
 

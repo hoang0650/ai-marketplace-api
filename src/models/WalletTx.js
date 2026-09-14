@@ -14,7 +14,7 @@ const walletTxSchema = new mongoose.Schema(
       index: true,
     },
     payoutId: { type: String, default: '', index: true },
-    paymentMethod: { type: String, enum: ['', 'sepay', 'paypal', 'iap'], default: '' },
+    paymentMethod: { type: String, enum: ['', 'sepay', 'paypal', 'iap', 'apple_pay', 'google_pay'], default: '' },
     paypalOrderId: { type: String, default: '', index: true },
     iapTransactionId: { type: String, index: true },
     iapProductId: { type: String, default: '' },
