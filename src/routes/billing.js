@@ -221,6 +221,7 @@ router.post('/checkout', authenticate, async (req, res, next) => {
     await Product.updateOne({ _id: product._id }, { $inc: { salesCount: quantity } });
     deleteCachePattern('products:*').catch(() => {});
     deleteCachePattern('creators:*').catch(() => {});
+    deleteCachePattern('home:*').catch(() => {});
 
     await Notification.create({
       user: product.creator,

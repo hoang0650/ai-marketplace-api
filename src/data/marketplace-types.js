@@ -44,7 +44,7 @@ function inferProductType(category, tags = []) {
   if (c === 'hire-agent' || c === 'agent-runtime') return 'AGENT';
   if (c === 'gpu-compute') return 'GPU';
   if (c === 'game-server') return 'GAME_SERVER';
-  if (c === 'voice-clone') return 'VOICE';
+  if (c === 'voice-clone' || c === 'voice-preset') return 'VOICE';
   if (c === 'ai-film-series' || c === 'story-book') return 'MEDIA_LICENSE';
   if (c === 'inference') return 'SERVERLESS_ENDPOINT';
   if (c === 'openrouter' || c === 'featherless' || c === 'runpod-public') return 'API_ENDPOINT';

@@ -13,13 +13,15 @@ const {
 } = require('../../src/utils/license-keys');
 
 describe('license categories', () => {
-  test('film, story, skill and dataset issue keys; voice clone does not', () => {
+  test('film, story, skill, dataset and both voice categories issue keys', () => {
     assert.equal(isLicenseCategory('ai-film-series'), true);
     assert.equal(isLicenseCategory('story-book'), true);
     assert.equal(isLicenseCategory('skill-pack'), true);
     assert.equal(isLicenseCategory('dataset'), true);
-    assert.equal(isLicenseCategory('voice-clone'), false);
+    assert.equal(isLicenseCategory('voice-preset'), true);
+    assert.equal(isLicenseCategory('voice-clone'), true);
     assert.equal(isVoiceCategory('voice-clone'), true);
+    assert.equal(isVoiceCategory('voice-preset'), true);
     assert.equal(isWatchContentCategory('ai-film-series'), true);
     assert.equal(isWatchContentCategory('story-book'), true);
     assert.equal(isWatchContentCategory('skill-pack'), false);
@@ -87,17 +89,37 @@ describe('content meta', () => {
     assert.equal(normalizeContentMeta('dataset', { licensePrices: { year: 20 } }).kind, 'dataset');
   });
 
-  test('voice defaults to TTS', () => {
+  test('voice defaults to TTS + STT', () => {
     const meta = normalizeContentMeta('voice-clone', { voiceModes: ['stt'] });
     assert.equal(meta.kind, 'voice');
     assert.deepEqual(meta.voiceModes, ['stt']);
     assert.equal(meta.charactersPerCredit, 1000);
     assert.equal(meta.cloneStatus, 'pending');
+    const both = normalizeContentMeta('voice-clone', {});
+    assert.deepEqual(both.voiceModes, ['tts', 'stt']);
+    assert.ok(both.licensePrices);
   });
 
   test('voice clone meta is ready when sample exists', () => {
-    const meta = normalizeContentMeta('voice-clone', { voiceSampleUrl: 'https://x/a.mp3' });
+    const meta = normalizeContentMeta('voice-clone', {
+      voiceSampleUrl: 'https://x/a.mp3',
+      licensePrices: { day: 1, month: 8, year: 60 },
+    });
     assert.equal(meta.cloneStatus, 'ready');
-    assert.equal(meta.cloneEndpoint, 'chatterbox-turbo');
+    assert.equal(meta.voiceSource, 'clone');
+    assert.equal(meta.cloneEndpoint, 'pnnbao-ump/VieNeu-TTS-v3-Turbo');
+    assert.equal(meta.licensePrices.month, 8);
+  });
+
+  test('voice preset meta keeps license prices and voice name', () => {
+    const meta = normalizeContentMeta('voice-preset', {
+      presetVoiceId: 'ngoc-huyen',
+      presetVoiceName: 'Ngọc Huyền',
+      licensePrices: { day: 1, month: 5, year: 40 },
+    });
+    assert.equal(meta.voiceSource, 'preset');
+    assert.equal(meta.presetVoiceName, 'Ngọc Huyền');
+    assert.equal(meta.licensePrices.month, 5);
+    assert.equal(meta.cloneStatus, 'ready');
   });
 });

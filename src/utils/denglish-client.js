@@ -18,6 +18,12 @@ async function callDenglishInfer(body) {
   if (config.denglishServiceKey) {
     headers['X-Service-Key'] = config.denglishServiceKey;
   }
+  if (body.buyerId) {
+    headers['X-Buyer-Id'] = String(body.buyerId);
+  }
+  if (body.idempotencyKey) {
+    headers['X-Idempotency-Key'] = String(body.idempotencyKey);
+  }
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.denglishTimeoutMs);
@@ -122,7 +128,12 @@ async function quoteInference({ model, input }) {
 function isVoiceInfer(body = {}) {
   const cat = String(body.category || body.product?.category || '');
   const ep = String(body.endpointId || body.model || '');
-  return cat === 'voice-clone' || /tts|voice|speech|audio|whisper/i.test(ep);
+  const action = String(body.input?.action || body.action || '');
+  return (
+    cat === 'voice-clone' ||
+    cat === 'voice-preset' ||
+    /tts|voice|speech|audio|whisper|stt|phowhisper/i.test(`${ep} ${action}`)
+  );
 }
 
 /** Local sandbox when denglish-api is unreachable (dev only). */
@@ -132,6 +143,30 @@ function localSandboxInfer(body = {}) {
   const duration = Number(input?.duration) || 0;
   const ep = endpointId || model || 'sandbox';
   if (isVoiceInfer(body)) {
+    const action = String(input?.action || input?.voice_mode || '').toLowerCase();
+    if (action === 'stt' || action === 'transcribe' || action === 'asr' || input?.stt === true) {
+      const text = '[stt sandbox] xin chào';
+      return {
+        ok: true,
+        provider: provider || 'runpod_serverless',
+        model: 'vinai/PhoWhisper-large',
+        data: {
+          kind: 'text',
+          text,
+          language: input?.language || input?.lang || 'vi',
+          status: 'COMPLETED',
+        },
+        usage: {
+          input_tokens: 0,
+          output_tokens: 0,
+          total_tokens: 0,
+          unit: 'characters',
+          quantity: Math.max(1, text.length),
+        },
+        latency_ms: 40,
+        raw: { sandbox: true, local: true, kind: 'text', stt: true },
+      };
+    }
     const sample =
       String(body.voiceSampleUrl || body.product?.contentMeta?.voiceSampleUrl || '').trim() ||
       'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3';

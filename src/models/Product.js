@@ -50,8 +50,12 @@ const runtimeSchema = new mongoose.Schema(
 const contentMetaSchema = new mongoose.Schema(
   {
     kind: { type: String, enum: ['voice', 'series', 'story', 'skill', 'dataset', ''], default: '' },
+    /** clone = seller MP3; preset = platform VieNeu voice */
+    voiceSource: { type: String, enum: ['', 'clone', 'preset'], default: '' },
     voiceModes: { type: [String], default: [] },
     voiceSampleUrl: { type: String, default: '', maxlength: 500 },
+    presetVoiceId: { type: String, default: '', maxlength: 64 },
+    presetVoiceName: { type: String, default: '', maxlength: 120 },
     cloneStatus: {
       type: String,
       enum: ['', 'pending', 'ready', 'failed'],

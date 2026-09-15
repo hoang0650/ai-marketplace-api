@@ -11,7 +11,7 @@ const { catalogVisibleFilter, isCatalogVisible } = require('../utils/moderation'
 const { assertCanPublishProduct } = require('../utils/seller-compliance');
 const { writeAuditLog } = require('../utils/audit');
 const { normalizeContentMeta, isVoiceCategory } = require('../utils/license-keys');
-const { applyVoiceCloneToProduct } = require('../utils/voice-clone');
+const { applyVoiceProduct } = require('../utils/voice-clone');
 
 const router = express.Router();
 
@@ -22,6 +22,12 @@ const DETAIL_TTL = 300; // s
 function invalidateProductCaches() {
   deleteCachePattern('products:*').catch(() => {});
   deleteCachePattern('creators:*').catch(() => {});
+  deleteCachePattern('home:*').catch(() => {});
+  try {
+    require('./categories').invalidateCategoryCounts();
+  } catch {
+    /* categories route may not export helper in older deploys */
+  }
 }
 
 /** Escape user input before embedding in a RegExp (prevents ReDoS / regex injection). */
@@ -59,11 +65,18 @@ router.get('/', async (req, res, next) => {
 
     const limit = Math.min(Math.max(Number(req.query.limit) || DEFAULT_LIMIT, 1), MAX_LIMIT);
     const offset = Math.max(Number(req.query.offset) || 0, 0);
+    const sortKey = String(req.query.sort || 'featured');
+    const sort =
+      sortKey === 'newest' || sortKey === 'new'
+        ? { publishedAt: -1, createdAt: -1 }
+        : sortKey === 'bestsellers' || sortKey === 'sales'
+          ? { salesCount: -1, rating: -1, publishedAt: -1 }
+          : { featured: -1, publishedAt: -1 };
 
-    const cacheKey = `products:list:${req.query.category || ''}:${req.query.creatorSlug || ''}:${req.query.featured || ''}:${q}:${limit}:${offset}`;
+    const cacheKey = `products:list:${req.query.category || ''}:${req.query.creatorSlug || ''}:${req.query.featured || ''}:${sortKey}:${q}:${limit}:${offset}`;
     const result = await cached(cacheKey, LIST_TTL, async () => {
       const products = await Product.find(filter)
-        .sort({ featured: -1, publishedAt: -1 })
+        .sort(sort)
         .skip(offset)
         .limit(limit)
         .lean();
@@ -181,7 +194,7 @@ router.post('/', authenticate, requireRoles('creator', 'admin'), async (req, res
     });
 
     if (isVoiceCategory(product.category)) {
-      applyVoiceCloneToProduct(product);
+      applyVoiceProduct(product);
       await product.save();
     }
 
@@ -242,7 +255,7 @@ router.put('/:id', authenticate, requireRoles('creator', 'admin'), async (req, r
     }
     if (body.slug) product.slug = slugify(body.slug) || product.slug;
     if (isVoiceCategory(product.category)) {
-      applyVoiceCloneToProduct(product);
+      applyVoiceProduct(product);
     }
     await product.save();
     invalidateProductCaches();

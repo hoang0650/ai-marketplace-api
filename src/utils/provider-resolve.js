@@ -132,20 +132,23 @@ const round6 = (value) => Math.round(Number(value) * 1e6) / 1e6;
  */
 function computeUsageCost(product, usage, input = {}, providerCost = 0) {
   const pricing = product.pricing || {};
-  if (pricing.model !== 'usage') return 0;
+  const voice = isVoiceCategory(product?.category);
+  // Voice listings: per-character even when the catalog also sells day/month/year licenses.
+  if (pricing.model !== 'usage' && !voice) return 0;
 
-  const unit = String(usage?.unit || pricing.usageUnit || 'tokens');
+  const unit = String(usage?.unit || pricing.usageUnit || (voice ? 'characters' : 'tokens'));
   const rate = Number(pricing.usageRate) || 0;
   const quantity = Number(usage?.quantity);
   const totalTokens = Number(usage?.total_tokens) || 0;
 
   if (rate > 0) {
-    if (/char/i.test(unit)) {
+    if (/char/i.test(unit) || voice) {
       const chars =
         Number.isFinite(quantity) && quantity > 0
           ? quantity
           : String(input?.prompt || input?.text || '').length;
-      return round6((Math.max(1, chars) / 1000) * rate);
+      const perCredit = Math.max(1, Number(product?.contentMeta?.charactersPerCredit) || 1000);
+      return round6((Math.max(1, chars) / perCredit) * rate);
     }
     if (unit === 'seconds' || unit === 'images' || unit === 'requests') {
       let qty = Number.isFinite(quantity) && quantity > 0 ? quantity : 0;

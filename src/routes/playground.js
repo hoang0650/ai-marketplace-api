@@ -18,7 +18,15 @@ const {
   getVoiceAudio,
   sendMp3,
 } = require('../utils/voice-audio');
-const { voiceTtsInput } = require('../utils/voice-clone');
+const { voiceInferInput, isVoiceSttRequest } = require('../utils/voice-clone');
+const {
+  isVoiceCloneCategory,
+  isVoicePresetCategory,
+  isVoiceCategory,
+  effectiveLicenseStatus,
+  licenseCoversProduct,
+} = require('../utils/license-keys');
+const LicenseKey = require('../models/LicenseKey');
 
 const router = express.Router();
 
@@ -122,13 +130,20 @@ router.post('/run', authenticate, async (req, res, next) => {
 
     let inferInput = input;
     if (isVoiceProduct(product)) {
-      if (!hasVoiceSample(product)) {
+      const stt = isVoiceSttRequest(input);
+      if (!stt && isVoiceCloneCategory(product.category) && !hasVoiceSample(product)) {
         return res.status(400).json({
           message: 'Seller has not uploaded a voice MP3 yet. Clone is pending.',
           code: 'VOICE_SAMPLE_MISSING',
         });
       }
-      inferInput = voiceTtsInput(product, input);
+      if (!stt && isVoicePresetCategory(product.category) && !String(product.contentMeta?.presetVoiceName || '').trim()) {
+        return res.status(400).json({
+          message: 'Preset voice is not configured on this listing.',
+          code: 'VOICE_PRESET_MISSING',
+        });
+      }
+      inferInput = voiceInferInput(product, input);
     }
 
     const resolved = resolveProviderForProduct(product);
@@ -137,7 +152,26 @@ router.post('/run', authenticate, async (req, res, next) => {
     const model = modelOverride || resolved.model;
 
     const quote = await preflight({ provider, endpointId, model, input: inferInput });
-    const estimatedCost = computeUsageCost(product, quote.usage, inferInput, quote.providerCost);
+    let estimatedCost = computeUsageCost(product, quote.usage, inferInput, quote.providerCost);
+    let licenseCovered = false;
+    if (isVoiceCategory(product.category) && estimatedCost > 0) {
+      const now = new Date();
+      const licenses = await LicenseKey.find({
+        buyer: req.user._id,
+        product: product._id,
+        status: 'active',
+      })
+        .sort({ expiresAt: -1 })
+        .limit(5)
+        .lean();
+      const active = licenses.find(
+        (l) => licenseCoversProduct(l, product._id) && effectiveLicenseStatus(l, now) === 'active',
+      );
+      if (active) {
+        estimatedCost = 0;
+        licenseCovered = true;
+      }
+    }
     if (estimatedCost > 0) {
       const balance = await getBalance(req.user._id);
       // Allow run if balance covers estimate; final charge may differ slightly
@@ -161,6 +195,8 @@ router.post('/run', authenticate, async (req, res, next) => {
       category: product.category,
       voiceSampleUrl: voiceSampleUrl(product),
       product: { category: product.category, contentMeta: product.contentMeta },
+      buyerId: String(req.user._id),
+      idempotencyKey: inferInput.idempotencyKey || inferInput.idempotency_key,
     });
     const latencyMs = Date.now() - started;
 
@@ -184,7 +220,7 @@ router.post('/run', authenticate, async (req, res, next) => {
     // one, otherwise from the formula on the model's docs page.
     const providerCost = Number(data.cost) || quote.providerCost || 0;
     const upstreamCost = Number(data.upstream_cost) || quote.upstreamCost || 0;
-    const cost = computeUsageCost(product, usage, inferInput, providerCost);
+    let cost = licenseCovered ? 0 : computeUsageCost(product, usage, inferInput, providerCost);
 
     const buyerId = req.user._id;
     const sellerId = product.creator;

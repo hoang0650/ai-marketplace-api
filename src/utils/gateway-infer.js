@@ -60,6 +60,8 @@ async function meterAndInfer(req, product, input, action = 'runsync') {
     endpointId,
     input,
     action,
+    buyerId: String(req.user._id),
+    idempotencyKey,
   });
   const usage = ai.usage || { input_tokens: 0, output_tokens: 0, total_tokens: 0, unit: 'tokens' };
   const cost = computeUsageCost(product, usage, input, Number(ai.data?.cost) || 0);

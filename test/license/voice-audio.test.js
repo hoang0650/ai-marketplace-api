@@ -42,7 +42,7 @@ describe('voice clone playground', () => {
     assert.equal(env.VOICE_SAMPLE_URL, 'https://cdn.example/me.mp3');
     const tts = voiceTtsInput(product, { prompt: 'xin chao', id: 'reuse-me', idempotencyKey: 'dup' });
     assert.equal(tts.audio_url, 'https://cdn.example/me.mp3');
-    assert.equal(tts.action, 'tts');
+    assert.equal(tts.action, 'voice_clone');
     assert.equal(tts.prompt, 'xin chao');
     assert.equal(tts.id, undefined);
     assert.equal(tts.idempotencyKey, undefined);
@@ -60,5 +60,45 @@ describe('voice clone playground', () => {
     const row = getVoiceAudio('abc');
     assert.equal(row.contentType, 'audio/mpeg');
     assert.equal(row.buffer.length, 3);
+  });
+
+  test('STT uses PhoWhisper and ignores seller clone MP3', () => {
+    const {
+      isVoiceSttRequest,
+      voiceSttInput,
+      voiceInferInput,
+      STT_MODEL,
+    } = require('../../src/utils/voice-clone');
+    const product = {
+      category: 'voice-clone',
+      contentMeta: { voiceSampleUrl: 'https://cdn.example/me.mp3', voiceSource: 'clone' },
+    };
+    assert.equal(isVoiceSttRequest({ action: 'stt', audio_base64: 'abc' }), true);
+    assert.equal(isVoiceSttRequest({ prompt: 'hello' }), false);
+    const stt = voiceSttInput(product, { action: 'stt', audio_base64: 'abc', audio_url: 'https://cdn.example/me.mp3' });
+    assert.equal(stt.action, 'stt');
+    assert.equal(stt.audio_url, '');
+    assert.equal(stt.stt_model, STT_MODEL);
+    assert.equal(stt.tts, false);
+    const routed = voiceInferInput(product, { action: 'stt', audio_base64: 'abc' });
+    assert.equal(routed.action, 'stt');
+    const sandbox = localSandboxInfer({
+      category: 'voice-preset',
+      input: { action: 'stt', audio_base64: 'abc' },
+    });
+    assert.equal(sandbox.data.kind, 'text');
+    assert.equal(sandbox.usage.unit, 'characters');
+  });
+
+  test('platform preset TTS does not send a clone sample', () => {
+    const { voiceTtsInput } = require('../../src/utils/voice-clone');
+    const tts = voiceTtsInput(
+      { category: 'voice-preset', contentMeta: { presetVoiceName: 'Ngọc Huyền', voiceSource: 'preset' } },
+      { prompt: 'xin chào' },
+    );
+    assert.equal(tts.action, 'tts');
+    assert.equal(tts.voice, 'Ngọc Huyền');
+    assert.equal(tts.voice_mode, 'preset');
+    assert.equal(tts.audio_url, '');
   });
 });

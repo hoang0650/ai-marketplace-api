@@ -37,6 +37,8 @@ router.post('/infer/:slug', authenticate, async (req, res, next) => {
       endpointId,
       input,
       action: req.body?.action || 'runsync',
+      buyerId: String(req.user._id),
+      idempotencyKey: String(req.headers['idempotency-key'] || req.body?.id || '').slice(0, 120) || undefined,
     });
 
     const usage = ai.usage || { input_tokens: 0, output_tokens: 0, total_tokens: 0, unit: 'tokens' };

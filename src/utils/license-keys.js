@@ -1,7 +1,22 @@
 const crypto = require('crypto');
 
-const LICENSE_CATEGORIES = new Set(['ai-film-series', 'story-book', 'skill-pack', 'dataset']);
-const VOICE_CATEGORIES = new Set(['voice-clone']);
+/**
+ * Voice listings (both) sell TTS/STT with character usage + day/month/year AIM-xxxx:
+ * A) voice-preset — AI Markets platform sells VieNeu presets (PLATFORM_DIRECT)
+ * B) voice-clone — seller uploads .mp3 → VieNeu clones that voice (THIRD_PARTY_SELLER)
+ * STT for both uses vinai/PhoWhisper-large on the Denglish worker.
+ */
+const LICENSE_CATEGORIES = new Set([
+  'ai-film-series',
+  'story-book',
+  'skill-pack',
+  'dataset',
+  'voice-preset',
+  'voice-clone',
+]);
+const VOICE_CATEGORIES = new Set(['voice-clone', 'voice-preset']);
+const VOICE_CLONE_CATEGORIES = new Set(['voice-clone']);
+const VOICE_PRESET_CATEGORIES = new Set(['voice-preset']);
 const WATCH_CONTENT_CATEGORIES = new Set(['ai-film-series', 'story-book']);
 const LICENSE_TERMS = ['day', 'month', 'year'];
 
@@ -11,6 +26,14 @@ function isLicenseCategory(category) {
 
 function isVoiceCategory(category) {
   return VOICE_CATEGORIES.has(String(category || ''));
+}
+
+function isVoiceCloneCategory(category) {
+  return VOICE_CLONE_CATEGORIES.has(String(category || ''));
+}
+
+function isVoicePresetCategory(category) {
+  return VOICE_PRESET_CATEGORIES.has(String(category || ''));
 }
 
 function isWatchContentCategory(category) {
@@ -60,16 +83,28 @@ function licenseCoversProduct(doc, productId) {
   return String(doc.product?._id || doc.product) === String(productId);
 }
 
+function normalizeVoiceLicensePrices(src) {
+  const licensePrices = {};
+  for (const t of LICENSE_TERMS) {
+    const n = Number(src.licensePrices?.[t]);
+    if (n > 0) licensePrices[t] = n;
+  }
+  return licensePrices;
+}
+
 function normalizeContentMeta(category, raw = {}) {
   const src = raw && typeof raw === 'object' ? raw : {};
-  if (isVoiceCategory(category)) {
+  if (isVoiceCloneCategory(category)) {
     const modes = Array.isArray(src.voiceModes)
       ? src.voiceModes.filter((m) => m === 'tts' || m === 'stt')
       : [];
     return {
       kind: 'voice',
-      voiceModes: modes.length ? modes : ['tts'],
+      voiceSource: 'clone',
+      voiceModes: modes.length ? modes : ['tts', 'stt'],
       voiceSampleUrl: String(src.voiceSampleUrl || '').slice(0, 500),
+      presetVoiceId: '',
+      presetVoiceName: '',
       creditUnit: src.creditUnit === 'word' ? 'word' : 'character',
       charactersPerCredit: Math.max(1, Number(src.charactersPerCredit) || 1000),
       cloneStatus: ['pending', 'ready', 'failed'].includes(src.cloneStatus)
@@ -77,19 +112,43 @@ function normalizeContentMeta(category, raw = {}) {
         : src.voiceSampleUrl
           ? 'ready'
           : 'pending',
-      cloneProvider: String(src.cloneProvider || 'runpod_public').slice(0, 64),
-      cloneEndpoint: String(src.cloneEndpoint || 'chatterbox-turbo').slice(0, 128),
+      cloneProvider: String(src.cloneProvider || 'runpod_serverless').slice(0, 64),
+      cloneEndpoint: String(src.cloneEndpoint || 'pnnbao-ump/VieNeu-TTS-v3-Turbo').slice(0, 128),
       cloneError: String(src.cloneError || '').slice(0, 500),
       cloneReadyAt: String(src.cloneReadyAt || '').slice(0, 40),
+      licenseTerm: normalizeLicenseTerm(src.licenseTerm, 'month'),
+      licensePrices: normalizeVoiceLicensePrices(src),
+      episodeCount: 0,
+    };
+  }
+  if (isVoicePresetCategory(category)) {
+    const modes = Array.isArray(src.voiceModes)
+      ? src.voiceModes.filter((m) => m === 'tts' || m === 'stt')
+      : [];
+    const term = normalizeLicenseTerm(src.licenseTerm, 'month');
+    const licensePrices = normalizeVoiceLicensePrices(src);
+    return {
+      kind: 'voice',
+      voiceSource: 'preset',
+      voiceModes: modes.length ? modes : ['tts', 'stt'],
+      voiceSampleUrl: '',
+      presetVoiceId: String(src.presetVoiceId || '').slice(0, 64),
+      presetVoiceName: String(src.presetVoiceName || '').slice(0, 120),
+      creditUnit: src.creditUnit === 'word' ? 'word' : 'character',
+      charactersPerCredit: Math.max(1, Number(src.charactersPerCredit) || 1000),
+      cloneStatus: 'ready',
+      cloneProvider: 'runpod_serverless',
+      cloneEndpoint: 'pnnbao-ump/VieNeu-TTS-v3-Turbo',
+      cloneError: '',
+      cloneReadyAt: String(src.cloneReadyAt || new Date().toISOString()).slice(0, 40),
+      licenseTerm: term,
+      licensePrices,
+      episodeCount: 0,
     };
   }
   if (isLicenseCategory(category)) {
     const term = normalizeLicenseTerm(src.licenseTerm, 'month');
-    const licensePrices = {};
-    for (const t of LICENSE_TERMS) {
-      const n = Number(src.licensePrices?.[t]);
-      if (n > 0) licensePrices[t] = n;
-    }
+    const licensePrices = normalizeVoiceLicensePrices(src);
     return {
       kind:
         category === 'story-book'
@@ -113,10 +172,14 @@ function normalizeContentMeta(category, raw = {}) {
 module.exports = {
   LICENSE_CATEGORIES,
   VOICE_CATEGORIES,
+  VOICE_CLONE_CATEGORIES,
+  VOICE_PRESET_CATEGORIES,
   WATCH_CONTENT_CATEGORIES,
   LICENSE_TERMS,
   isLicenseCategory,
   isVoiceCategory,
+  isVoiceCloneCategory,
+  isVoicePresetCategory,
   isWatchContentCategory,
   normalizeLicenseTerm,
   generateLicenseKey,

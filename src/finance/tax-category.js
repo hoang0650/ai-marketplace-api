@@ -40,6 +40,7 @@ const CATEGORY_MAP = {
   'hire-agent': 'AI_AGENT',
   'skill-pack': 'SOFTWARE_LICENSE',
   'voice-clone': 'VOICE',
+  'voice-preset': 'VOICE',
   'ai-film-series': 'MEDIA_LICENSE',
   'story-book': 'MEDIA_LICENSE',
 };

@@ -184,7 +184,7 @@ async function seedHubs() {
   const episodes = await upsertContentHubEpisodes(ContentEpisode, Product);
 
   const counts = await Product.aggregate([
-    { $match: { category: { $in: ['voice-clone', 'ai-film-series', 'story-book'] } } },
+    { $match: { category: { $in: ['voice-clone', 'voice-preset', 'ai-film-series', 'story-book'] } } },
     { $group: { _id: '$category', n: { $sum: 1 } } },
   ]);
   const countMap = Object.fromEntries(counts.map((c) => [c._id, c.n]));
@@ -194,6 +194,7 @@ async function seedHubs() {
   console.log('[seed:hubs] episodes', episodes);
   console.log('[seed:hubs] catalog', {
     'voice-clone': countMap['voice-clone'] || 0,
+    'voice-preset': countMap['voice-preset'] || 0,
     'ai-film-series': countMap['ai-film-series'] || 0,
     'story-book': countMap['story-book'] || 0,
   });
