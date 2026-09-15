@@ -1,6 +1,6 @@
 const express = require('express');
 const crypto = require('crypto');
-const { optionalAuth, authenticate } = require('../middleware/auth');
+const { authenticate } = require('../middleware/auth');
 const SshSession = require('../models/SshSession');
 
 const router = express.Router();
@@ -42,7 +42,8 @@ function slugUser(user) {
 function resolveSshTarget(user, body = {}) {
   const hostTemplate = process.env.OPENCLAW_SSH_HOST_TEMPLATE || process.env.OPENCLAW_SSH_HOST || '';
   const userId = String(user?._id || 'anon');
-  const hostFromBody = String(body.host || body.serverHost || '').trim();
+  const allowCustom = process.env.OPENCLAW_SSH_ALLOW_CUSTOM_HOST === '1';
+  const hostFromBody = allowCustom ? String(body.host || body.serverHost || '').trim() : '';
   const host =
     hostFromBody ||
     (hostTemplate
@@ -66,16 +67,12 @@ function buildSshCommand({ username, host, port, password }) {
   };
 }
 
-router.post('/launch', optionalAuth, async (req, res, next) => {
+router.post('/launch', authenticate, async (req, res, next) => {
   try {
     const aiUrl = String(process.env.AI_URL || process.env.PYTHON_AI_ENDPOINT || '').replace(/\/$/, '');
-    const tenantId = String(process.env.OPENCLAW_TENANT_ID || req.body?.tenantId || '').trim();
-    const userId = String(req.body?.userId || req.user?._id || req.user?.id || '').trim();
-    const serviceToken =
-      process.env.OPENCLAW_BEARER_TOKEN ||
-      process.env.NEST_API_TOKEN ||
-      req.headers.authorization?.replace(/^Bearer\s+/i, '') ||
-      '';
+    const tenantId = String(process.env.OPENCLAW_TENANT_ID || '').trim();
+    const userId = String(req.user?._id || req.user?.id || '').trim();
+    const serviceToken = process.env.OPENCLAW_BEARER_TOKEN || process.env.NEST_API_TOKEN || '';
 
     if (aiUrl && tenantId) {
       try {
@@ -93,8 +90,6 @@ router.post('/launch', optionalAuth, async (req, res, next) => {
           return res.json({
             success: true,
             url: data.url,
-            gatewayUrl: data.gatewayUrl || data.gateway_url,
-            token: data.token,
             message: data.message,
           });
         }
@@ -122,7 +117,7 @@ router.post('/launch', optionalAuth, async (req, res, next) => {
       });
     }
 
-    return res.json({ success: true, url, gatewayUrl, token });
+    return res.json({ success: true, url });
   } catch (err) {
     next(err);
   }

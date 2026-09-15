@@ -4,7 +4,7 @@ const config = require('../config/env');
 const User = require('../models/User');
 const TerminalSession = require('../models/TerminalSession');
 const GpuServer = require('../models/GpuServer');
-const { userIdFromPayload } = require('../middleware/auth');
+const { userIdFromPayload, JWT_VERIFY } = require('../middleware/auth');
 const { MAX_INPUT, SESSION_IDLE_MS, audit } = require('./permission.service');
 const provider = require('../utils/denglish-providers');
 
@@ -28,7 +28,7 @@ function attachTerminalGateway(httpServer) {
     let user = null;
     try {
       if (!token) throw new Error('UNAUTHORIZED');
-      const payload = jwt.verify(token, config.jwtSecret);
+      const payload = jwt.verify(token, config.jwtSecret, JWT_VERIFY);
       user = await User.findById(userIdFromPayload(payload));
       if (!user) throw new Error('UNAUTHORIZED');
     } catch {
@@ -158,7 +158,12 @@ async function sandboxExec(cmd, server) {
     return `${server.gpu || 'NVIDIA GPU'}\n+|    0   RTX  (sandbox)  |  12%   42C  |   1024MiB / 24564MiB  |`;
   }
   if (cmd === 'ls' || cmd === 'ls -la') {
-    return 'game/  checkpoints/  README.md  start-stream.sh';
+    if (server.kind === 'game') return 'game/  start-stream.sh  README.md';
+    return 'checkpoints/  datasets/  models/  train.py  README.md';
+  }
+  if (cmd === 'python --version' || cmd === 'python3 --version') return 'Python 3.11.9';
+  if (cmd === 'python train.py' || cmd === 'python3 train.py' || cmd === 'train') {
+    return 'Epoch 1/3  loss=2.41\nEpoch 2/3  loss=1.88\nEpoch 3/3  loss=1.52\nSaved ./checkpoints/last.ckpt';
   }
   if (cmd === 'date') return new Date().toISOString();
   if (cmd.startsWith('echo ')) return cmd.slice(5);

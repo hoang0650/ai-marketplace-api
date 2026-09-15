@@ -5,6 +5,8 @@
 
 const API_GATEWAY = (process.env.AIMARKETS_API_HOST || 'https://api.aimarkets.vn').replace(/\/$/, '');
 const AI_GATEWAY = (process.env.AIMARKETS_AI_HOST || 'https://ai.aimarkets.vn').replace(/\/$/, '');
+const WEB_HOST = (process.env.AIMARKETS_WEB_HOST || 'https://aimarkets.vn').replace(/\/$/, '');
+const RUNPOD_API = 'https://api.runpod.ai';
 
 const PROVIDER_HOST_RE =
   /(api\.runpod\.ai|proxy\.runpod\.net|api\.featherless\.ai|openrouter\.ai|ai-gateway\.vercel\.sh|openai\.com)/i;
@@ -31,13 +33,44 @@ function extractAimarketsModelId(url) {
   return m ? decodeURIComponent(m[1]) : '';
 }
 
+function catalogSlug(modelId) {
+  return String(modelId || 'model')
+    .replace(/^runpod-/, '')
+    .trim() || 'model';
+}
+
 function publicGatewayUrls({ modelId } = {}) {
-  const id = encodeURIComponent(String(modelId || 'model').replace(/^runpod-/, '') || 'model');
+  const id = encodeURIComponent(catalogSlug(modelId));
   return {
     publicEndpoint: `${API_GATEWAY}/v1/models/${id}/runsync`,
     serverlessEndpoint: `${API_GATEWAY}/v1/models/${id}/run`,
     tokenizeEndpoint: `${API_GATEWAY}/v1/models/${id}/tokenize`,
     gatewayUrl: `${AI_GATEWAY}/v1`,
+    statusUrlTemplate: `${API_GATEWAY}/v1/models/${id}/status/{JOB_ID}`,
+    docsUrl: `${WEB_HOST}/docs/models/${catalogSlug(modelId)}`,
+  };
+}
+
+/** Buyer-facing catalog fields (runsync / run / status / docs / OpenAI). */
+function publicCatalogUrls(slug, { openai = false } = {}) {
+  const g = publicGatewayUrls({ modelId: slug });
+  return {
+    runsyncUrl: g.publicEndpoint,
+    runUrl: g.serverlessEndpoint,
+    statusUrlTemplate: g.statusUrlTemplate,
+    docsUrl: g.docsUrl,
+    openaiBaseUrl: openai ? g.gatewayUrl : null,
+  };
+}
+
+/** Real RunPod hosts — only stored as UPSTREAM_* / never shown in catalog JSON. */
+function upstreamRunpodUrls(endpointId, { openai = false } = {}) {
+  const id = String(endpointId || '').trim();
+  if (!id) return { runsync: '', run: '', gateway: '' };
+  return {
+    runsync: `${RUNPOD_API}/v2/${id}/runsync`,
+    run: `${RUNPOD_API}/v2/${id}/run`,
+    gateway: openai ? `${RUNPOD_API}/v2/${id}/openai/v1` : '',
   };
 }
 
@@ -114,11 +147,15 @@ function withUpstreamEnv(env, { runsync, run, gateway, endpointId, provider }) {
 module.exports = {
   API_GATEWAY,
   AI_GATEWAY,
+  WEB_HOST,
   isProviderUrl,
   isAimarketsUrl,
   extractProviderEndpointId,
   extractAimarketsModelId,
+  catalogSlug,
   publicGatewayUrls,
+  publicCatalogUrls,
+  upstreamRunpodUrls,
   maskRuntimeForPublic,
   upstreamFromEnv,
   withUpstreamEnv,

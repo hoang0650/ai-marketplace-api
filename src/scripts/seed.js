@@ -26,6 +26,7 @@ const {
   buildRunpodUser,
   buildRunpodCreator,
 } = require('../data/runpod-marketplace-products');
+const { publicGatewayUrls } = require('../utils/gateway-urls');
 const {
   buildContentHubProducts,
   buildContentHubReviews,
@@ -169,21 +170,24 @@ async function seed() {
         }
       : isHubCategory(p.category)
         ? {}
-        : {
-            serverlessEndpoint: `https://api.runpod.ai/v2/${slugSafe}/runsync`,
-            publicEndpoint: `https://api.runpod.ai/v2/${slugSafe}/runsync`,
-            tokenizeEndpoint: '',
-            gatewayUrl: p.category === 'hire-agent' ? `wss://gateway.phaimarket.com/${slugSafe}` : '',
-            env: [
-              { key: 'RUNPOD_API_KEY', value: 'seed-replace-me' },
-              { key: 'MODEL_ID', value: p.name },
-            ],
-            skills: (p.tags || []).slice(0, 4),
-            baseModel: p.name,
-            systemPrompt: p.tagline || '',
-            temperature: 0.7,
-            maxTokens: 1024,
-          };
+        : (() => {
+            const g = publicGatewayUrls({ modelId: slugSafe });
+            return {
+              serverlessEndpoint: g.serverlessEndpoint,
+              publicEndpoint: g.publicEndpoint,
+              tokenizeEndpoint: g.tokenizeEndpoint,
+              gatewayUrl: p.category === 'hire-agent' ? `wss://gateway.phaimarket.com/${slugSafe}` : g.gatewayUrl,
+              env: [
+                { key: 'RUNPOD_API_KEY', value: 'seed-replace-me' },
+                { key: 'MODEL_ID', value: p.name },
+              ],
+              skills: (p.tags || []).slice(0, 4),
+              baseModel: p.name,
+              systemPrompt: p.tagline || '',
+              temperature: 0.7,
+              maxTokens: 1024,
+            };
+          })();
     const hub = isHubCategory(p.category) ? hubProductFields(p) : null;
     const productType = hub?.productType || inferProductType(p.category, p.tags);
     const product = await Product.create({

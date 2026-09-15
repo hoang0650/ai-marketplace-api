@@ -54,7 +54,7 @@ async function ensureComputeTestProducts() {
           published: true,
           license: 'Platform managed GPU / game stream access',
           termsSummary:
-            'Demo listing. Sandbox stream until a live GPU node is attached. Usage billed from wallet when pricing.model is usage.',
+            'Demo listing. GPU compute opens a terminal; game-server opens a D-pad stream until a live node is attached. Usage billed from wallet when pricing.model is usage.',
           coverUrl: listing.coverUrl,
           gallery: listing.gallery,
           pricing: listing.pricing,
@@ -91,7 +91,7 @@ async function ensureComputeTestProducts() {
           gpu: node.gpu,
           product: product._id,
           external: true,
-          streamKind: 'sandbox',
+          streamKind: node.kind === 'game' ? 'sandbox' : 'terminal',
           streamHost: '',
           streamPort: 0,
           streamPath: '/',

@@ -57,23 +57,19 @@ function voiceSamplePublicUrl(req, slug) {
 }
 
 async function fetchMp3Buffer(url) {
-  const res = await fetch(url, {
+  const { fetchSafeHttp } = require('./safe-http-url');
+  const { buffer, res } = await fetchSafeHttp(url, {
+    timeoutMs: 20000,
+    maxBytes: 12 * 1024 * 1024,
     headers: { 'User-Agent': 'AI-Markets-Voice/1.0' },
-    redirect: 'follow',
   });
-  if (!res.ok) {
-    const err = new Error(`audio fetch HTTP ${res.status}`);
-    err.status = res.status;
-    throw err;
-  }
-  const buf = Buffer.from(await res.arrayBuffer());
-  if (buf.length < 64) {
+  if (buffer.length < 64) {
     const err = new Error('audio too small');
     err.status = 502;
     throw err;
   }
   const type = String(res.headers.get('content-type') || 'audio/mpeg').split(';')[0].trim();
-  return { buffer: buf, contentType: type.includes('audio') ? type : 'audio/mpeg' };
+  return { buffer, contentType: type.includes('audio') ? type : 'audio/mpeg' };
 }
 
 /** Stream the seller's uploaded voice sample (not generic TTS). */

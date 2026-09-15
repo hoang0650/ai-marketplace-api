@@ -4,7 +4,7 @@
  * upstream provider hosts are kept only in UPSTREAM_* env for server routing.
  */
 const catalog = require('./runpod-public-endpoints.json');
-const { publicGatewayUrls, withUpstreamEnv } = require('../utils/gateway-urls');
+const { publicGatewayUrls, withUpstreamEnv, upstreamRunpodUrls } = require('../utils/gateway-urls');
 
 const CREATOR = {
   mockUserId: 'u-runpod',
@@ -112,9 +112,7 @@ function buildRunpodMarketplaceProducts() {
           tokenizeEndpoint: g.tokenizeEndpoint,
           gatewayUrl: g.gatewayUrl,
           env: withUpstreamEnv([{ key: 'MARKETPLACE_API_KEY', value: '' }], {
-            runsync: ep.runsyncUrl,
-            run: ep.runUrl,
-            gateway: ep.openaiBaseUrl || '',
+            ...upstreamRunpodUrls(ep.endpointId, { openai: !!ep.openaiModel }),
             endpointId: ep.endpointId,
             provider: 'runpod_public',
           }),

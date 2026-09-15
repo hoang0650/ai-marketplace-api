@@ -106,6 +106,11 @@ const config = {
         : process.env.IAP_SKIP_VERIFY !== '0',
 };
 
+if (isProduction && config.denglishApiUrl && !config.denglishServiceKey) {
+  console.error('[config] FATAL: DENGLISH_SERVICE_KEY must be set in production (ai.aimarkets.vn service auth).');
+  process.exit(1);
+}
+
 if (isProduction && !config.resendApiKey) {
   console.warn('[config] RESEND_API_KEY is empty — checkout confirmation emails will not be sent.');
 }

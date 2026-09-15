@@ -39,6 +39,7 @@ const sellerComputeRoutes = require('./routes/seller-compute');
 const providerCatalogRoutes = require('./routes/providers');
 const edgeRoutes = require('./routes/edge');
 const v1GatewayRoutes = require('./routes/v1-gateway');
+const { v1: modelGatewayV1, v2: modelGatewayV2 } = require('./routes/model-gateway');
 const apiKeyRoutes = require('./routes/api-keys');
 const agentTemplateRoutes = require('./routes/agent-templates');
 const trainingJobRoutes = require('./routes/training-jobs');
@@ -145,6 +146,7 @@ function createApp() {
   });
 
   app.use('/v1', apiLimiter);
+  app.use('/v2', apiLimiter);
   app.use('/v1/auth/login', authLimiter);
   app.use('/v1/auth/register', authLimiter);
   app.use('/v1/auth/google/start', authLimiter);
@@ -155,6 +157,12 @@ function createApp() {
   app.use('/v1/runpod', runpodRoutes);
 
   app.use('/v1', (req, res, next) => {
+    if (isDbReady()) return next();
+    return res.status(503).json({
+      message: 'Database is not connected yet. Please try again in a moment.',
+    });
+  });
+  app.use('/v2', (req, res, next) => {
     if (isDbReady()) return next();
     return res.status(503).json({
       message: 'Database is not connected yet. Please try again in a moment.',
@@ -188,6 +196,8 @@ function createApp() {
   app.use('/v1/providers', providerCatalogRoutes);
   app.use('/v1/edge', edgeRoutes);
   app.use('/v1', v1GatewayRoutes);
+  app.use('/v1/models', modelGatewayV1);
+  app.use('/v2', modelGatewayV2);
   app.use('/v1/api-keys', apiKeyRoutes);
   app.use('/v1/agent-templates', agentTemplateRoutes);
   app.use('/v1/training-jobs', trainingJobRoutes);

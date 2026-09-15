@@ -1,14 +1,8 @@
-const crypto = require('crypto');
 const express = require('express');
 const Product = require('../models/Product');
-const UsageEvent = require('../models/UsageEvent');
-const UsageStat = require('../models/UsageStat');
 const { authenticate } = require('../middleware/auth');
 const { authenticateMarketplaceKey } = require('../middleware/marketplace-key');
-const { getBalance } = require('../utils/wallet');
-const { chargeUsage } = require('../finance/charge-usage');
-const { resolveProviderForProduct, computeUsageCost } = require('../utils/provider-resolve');
-const { inferWithFallback } = require('../utils/denglish-client');
+const { meterAndInfer } = require('../utils/gateway-infer');
 
 const router = express.Router();
 
@@ -28,83 +22,11 @@ async function resolveProduct(req) {
   return Product.findOne({ slug });
 }
 
-async function meterAndInfer(req, product, input) {
-  const resolved = resolveProviderForProduct(product);
-  const provider = req.body?.provider || resolved.provider;
-  const model = resolved.model || product.runtime?.baseModel || product.slug;
-  const endpointId = resolved.endpointId;
-  const idempotencyKey = String(req.headers['idempotency-key'] || req.body?.id || '').slice(0, 120) || null;
-
-  if (idempotencyKey) {
-    const dup = await UsageEvent.findOne({ idempotencyKey });
-    if (dup) {
-      return { replay: true, event: dup, ai: { ok: true, data: { replay: true }, usage: dup.rawUsage } };
-    }
-  }
-
-  const ai = await inferWithFallback({
-    provider,
-    model,
-    endpointId,
-    input,
-    action: 'runsync',
-  });
-  const usage = ai.usage || { input_tokens: 0, output_tokens: 0, total_tokens: 0, unit: 'tokens' };
-  const cost = computeUsageCost(product, usage, input, Number(ai.data?.cost) || 0);
-  const buyerId = req.user._id;
-  const sellerId = product.creator;
-  const selfUse = String(buyerId) === String(sellerId);
-  let charged = 0;
-  let sellerNet = 0;
-  let platformFee = 0;
-
-  if (cost > 0 && !selfUse) {
-    const balance = await getBalance(buyerId);
-    if (balance < cost) {
-      const err = new Error('Insufficient wallet balance');
-      err.status = 402;
-      err.body = { cost, balance };
-      throw err;
-    }
-    const billed = await chargeUsage({
-      buyerId,
-      sellerId,
-      product,
-      cost,
-      note: `Gateway: ${product.name}`,
-    });
-    platformFee = billed.platformFee;
-    sellerNet = billed.sellerNet;
-    charged = billed.charged;
-  }
-
-  const event = await UsageEvent.create({
-    deployment: null,
-    product: product._id,
-    buyer: buyerId,
-    seller: sellerId,
-    inputTokens: Number(usage.input_tokens) || 0,
-    outputTokens: Number(usage.output_tokens) || 0,
-    cost: charged,
-    platformFee,
-    sellerNet,
-    provider,
-    unit: usage.unit || 'tokens',
-    quantity: Number(usage.quantity) || Number(usage.total_tokens) || 0,
-    rawUsage: usage,
-    source: 'gateway',
-    usageType: 'API_REQUEST',
-    idempotencyKey: idempotencyKey || `gw_${crypto.randomBytes(8).toString('hex')}`,
-  });
-
-  const day = new Date().toISOString().slice(0, 10);
-  await UsageStat.updateOne(
-    { creator: sellerId, date: day },
-    { $inc: { tokens: (usage.input_tokens || 0) + (usage.output_tokens || 0), requests: 1, revenue: sellerNet } },
-    { upsert: true }
-  ).catch(() => {});
-
-  return { replay: false, event, ai, provider, model, charged };
+function sendGatewayError(res, next, e) {
+  if (e.status === 402) return res.status(402).json({ message: e.message, ...e.body });
+  if (e.status === 403) return res.status(403).json({ message: e.message, ...e.body });
+  if (e.status === 404) return res.status(404).json({ message: e.message, ...e.body });
+  return next(e);
 }
 
 router.get('/models', authStack, async (req, res, next) => {
@@ -161,8 +83,7 @@ router.post('/chat/completions', authStack, async (req, res, next) => {
       marketplace: { cost: out.charged, provider: out.provider },
     });
   } catch (e) {
-    if (e.status === 402) return res.status(402).json({ message: e.message, ...e.body });
-    next(e);
+    sendGatewayError(res, next, e);
   }
 });
 
@@ -174,8 +95,7 @@ router.post('/embeddings', authStack, async (req, res, next) => {
     const out = await meterAndInfer(req, product, input);
     res.json({ object: 'list', data: out.ai?.data || [], model: product.slug, usage: out.ai?.usage });
   } catch (e) {
-    if (e.status === 402) return res.status(402).json({ message: e.message, ...e.body });
-    next(e);
+    sendGatewayError(res, next, e);
   }
 });
 
@@ -187,8 +107,7 @@ router.post('/images', authStack, async (req, res, next) => {
     const out = await meterAndInfer(req, product, input);
     res.json({ data: out.ai?.data || out.ai, model: product.slug, usage: out.ai?.usage });
   } catch (e) {
-    if (e.status === 402) return res.status(402).json({ message: e.message, ...e.body });
-    next(e);
+    sendGatewayError(res, next, e);
   }
 });
 
@@ -200,9 +119,10 @@ router.post('/audio', authStack, async (req, res, next) => {
     const out = await meterAndInfer(req, product, input);
     res.json({ data: out.ai?.data || out.ai, model: product.slug, usage: out.ai?.usage });
   } catch (e) {
-    if (e.status === 402) return res.status(402).json({ message: e.message, ...e.body });
-    next(e);
+    sendGatewayError(res, next, e);
   }
 });
 
 module.exports = router;
+module.exports.authStack = authStack;
+module.exports.sendGatewayError = sendGatewayError;

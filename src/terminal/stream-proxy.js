@@ -5,7 +5,8 @@ const jwt = require('jsonwebtoken');
 const config = require('../config/env');
 const User = require('../models/User');
 const GameSession = require('../models/GameSession');
-const { userIdFromPayload } = require('../middleware/auth');
+const { userIdFromPayload, JWT_VERIFY } = require('../middleware/auth');
+const { assertSafeStreamHost } = require('../utils/safe-http-url');
 
 const DROP_REQ = new Set([
   'connection',
@@ -88,6 +89,11 @@ function proxyToStream(session, req, res) {
   if (!session.streamHost || !session.streamPort) {
     return res.status(409).json({ message: 'SERVER_NOT_READY', code: 'SERVER_NOT_READY' });
   }
+  try {
+    assertSafeStreamHost(session.streamHost);
+  } catch {
+    return res.status(400).json({ message: 'UNSAFE_HOST', code: 'UNSAFE_HOST' });
+  }
   const path = upstreamPath(req, session);
   const lib = session.streamTls ? https : http;
   const proxyReq = lib.request(
@@ -144,11 +150,12 @@ function attachGameStreamProxy(httpServer) {
     (async () => {
       try {
         if (!token) throw new Error('UNAUTHORIZED');
-        const payload = jwt.verify(token, config.jwtSecret);
+        const payload = jwt.verify(token, config.jwtSecret, JWT_VERIFY);
         const user = await User.findById(userIdFromPayload(payload));
         if (!user) throw new Error('UNAUTHORIZED');
         const session = await GameSession.findOne({ sessionId, user: user._id, status: { $in: ['starting', 'live'] } });
         if (!session || !session.streamHost || !session.streamPort) throw new Error('SERVER_NOT_READY');
+        assertSafeStreamHost(session.streamHost);
 
         wss.handleUpgrade(req, socket, head, (client) => {
           const proto = session.streamTls ? 'wss' : 'ws';

@@ -7,6 +7,7 @@ const UsageStat = require('../models/UsageStat');
 const { getBalance } = require('../utils/wallet');
 const { chargeUsage } = require('../finance/charge-usage');
 const provider = require('../utils/denglish-providers');
+const { assertSafeHttpUrl, assertSafeStreamHost } = require('./safe-http-url');
 
 const COMPUTE_CATEGORIES = new Set(['gpu-compute', 'game-server']);
 
@@ -22,6 +23,7 @@ function signWebhook(secret, body) {
 async function callSellerWebhook(server, event, payload) {
   const url = String(server.webhookUrl || '').trim();
   if (!url) return null;
+  await assertSafeHttpUrl(url);
   const body = JSON.stringify({
     event,
     timestamp: new Date().toISOString(),
@@ -49,7 +51,7 @@ async function callSellerWebhook(server, event, payload) {
 function streamFromServer(server) {
   if (server.streamHost && server.streamPort) {
     return {
-      kind: server.streamKind || (server.kind === 'game' ? 'novnc' : 'sandbox'),
+      kind: server.streamKind || (server.kind === 'game' ? 'novnc' : 'terminal'),
       host: server.streamHost,
       port: Number(server.streamPort),
       path: server.streamPath || '/',
@@ -59,7 +61,13 @@ function streamFromServer(server) {
   if (server.iframeUrl) {
     return { kind: 'iframe', host: '', port: 0, path: server.iframeUrl, tls: false };
   }
-  return { kind: 'sandbox', host: '', port: 0, path: '/', tls: false };
+  return {
+    kind: server.kind === 'game' ? 'sandbox' : 'terminal',
+    host: '',
+    port: 0,
+    path: '/',
+    tls: false,
+  };
 }
 
 function streamFromWebhook(data) {
@@ -292,6 +300,12 @@ async function registerExternalNode(user, body) {
   await assertProductOwner(user, product);
   const kind = body?.kind === 'compute' ? 'compute' : 'game';
   const providerServerId = String(body?.nodeId || `ext_${crypto.randomBytes(6).toString('hex')}`).slice(0, 120);
+  const webhookUrl = String(body?.webhookUrl || '').slice(0, 500);
+  const healthUrl = String(body?.healthUrl || '').slice(0, 500);
+  const iframeUrl = String(body?.iframeUrl || '').slice(0, 500);
+  if (webhookUrl) await assertSafeHttpUrl(webhookUrl);
+  if (healthUrl) await assertSafeHttpUrl(healthUrl);
+  if (iframeUrl) await assertSafeHttpUrl(iframeUrl, { httpsOnly: true });
   const doc = await GpuServer.create({
     owner: user._id,
     projectId: String(body?.projectId || 'marketplace'),
@@ -303,15 +317,15 @@ async function registerExternalNode(user, body) {
     gpu: String(body?.gpu || '').slice(0, 120),
     product: product._id,
     external: true,
-    webhookUrl: String(body?.webhookUrl || '').slice(0, 500),
+    webhookUrl,
     webhookSecret: String(body?.webhookSecret || '').slice(0, 256),
     streamKind: String(body?.streamKind || '').slice(0, 40),
-    streamHost: String(body?.streamHost || '').slice(0, 200),
+    streamHost: assertSafeStreamHost(String(body?.streamHost || '').slice(0, 200)),
     streamPort: Number(body?.streamPort || 0),
     streamPath: String(body?.streamPath || '/').slice(0, 200),
     streamTls: !!body?.streamTls,
-    iframeUrl: String(body?.iframeUrl || '').slice(0, 500),
-    healthUrl: String(body?.healthUrl || '').slice(0, 500),
+    iframeUrl,
+    healthUrl,
     region: String(body?.region || '').slice(0, 80),
     maxConcurrent: Math.min(100, Math.max(1, Number(body?.maxConcurrent) || 10)),
   });

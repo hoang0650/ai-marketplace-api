@@ -1,43 +1,41 @@
-const { getRunpodPublicEndpoint } = require('../data/runpod-public-endpoints');
 const { publicGatewayUrls, withUpstreamEnv } = require('./gateway-urls');
 const { isVoiceCategory, normalizeContentMeta } = require('./license-keys');
 
-const VOICE_CLONE_ENDPOINT = 'chatterbox-turbo';
+const VOICE_CLONE_MODEL = 'pnnbao-ump/VieNeu-TTS-v3-Turbo';
 
 function voiceCloneRuntime(sampleUrl) {
-  const ep = getRunpodPublicEndpoint(VOICE_CLONE_ENDPOINT) || {};
-  const g = publicGatewayUrls({ modelId: VOICE_CLONE_ENDPOINT });
+  const g = publicGatewayUrls({ modelId: 'vieneu-tts-v3-turbo' });
   return {
     publicEndpoint: g.publicEndpoint,
     serverlessEndpoint: g.serverlessEndpoint,
     tokenizeEndpoint: g.tokenizeEndpoint,
     gatewayUrl: g.gatewayUrl,
     env: withUpstreamEnv([{ key: 'VOICE_SAMPLE_URL', value: String(sampleUrl || '') }], {
-      runsync: ep.runsyncUrl || `https://api.runpod.ai/v2/${VOICE_CLONE_ENDPOINT}/runsync`,
-      run: ep.runUrl || `https://api.runpod.ai/v2/${VOICE_CLONE_ENDPOINT}/run`,
+      runsync: '',
+      run: '',
       gateway: '',
-      endpointId: VOICE_CLONE_ENDPOINT,
-      provider: 'runpod_public',
+      endpointId: '',
+      provider: 'runpod_serverless',
     }),
     skills: ['tts', 'voice-clone'],
-    baseModel: VOICE_CLONE_ENDPOINT,
+    baseModel: VOICE_CLONE_MODEL,
     systemPrompt: '',
-    temperature: 0.7,
+    temperature: 0.8,
     maxTokens: 1024,
   };
 }
 
 function voiceCloneProvider() {
   return {
-    provider: 'runpod_public',
-    endpointId: VOICE_CLONE_ENDPOINT,
-    model: VOICE_CLONE_ENDPOINT,
+    provider: 'runpod_serverless',
+    endpointId: '',
+    model: VOICE_CLONE_MODEL,
   };
 }
 
 /**
- * Seller uploads an MP3 of their voice. We store it as the reference sample and
- * point the listing at Chatterbox (zero-shot clone at TTS time).
+ * Seller uploads an MP3 of their voice. TTS/clone runs on the Denglish worker
+ * (VieNeu-TTS-v3-Turbo) via RUNPOD_ENDPOINT_ID.
  */
 function applyVoiceCloneToProduct(product) {
   if (!isVoiceCategory(product?.category)) return product;
@@ -47,17 +45,17 @@ function applyVoiceCloneToProduct(product) {
   if (!sample) {
     next.cloneStatus = 'pending';
     next.cloneError = 'Upload an MP3 of the seller voice first.';
-    next.cloneProvider = 'runpod_public';
-    next.cloneEndpoint = VOICE_CLONE_ENDPOINT;
+    next.cloneProvider = 'runpod_serverless';
+    next.cloneEndpoint = VOICE_CLONE_MODEL;
     product.contentMeta = normalizeContentMeta(product.category, next);
     return product;
   }
   product.runtime = voiceCloneRuntime(sample);
-  product.infraProvider = 'runpod_public';
-  product.provider = 'runpod_public';
+  product.infraProvider = 'runpod_serverless';
+  product.provider = 'runpod_serverless';
   next.cloneStatus = 'ready';
-  next.cloneProvider = 'runpod_public';
-  next.cloneEndpoint = VOICE_CLONE_ENDPOINT;
+  next.cloneProvider = 'runpod_serverless';
+  next.cloneEndpoint = VOICE_CLONE_MODEL;
   next.cloneError = '';
   next.cloneReadyAt = new Date().toISOString();
   product.contentMeta = normalizeContentMeta(product.category, next);
@@ -70,14 +68,20 @@ function voiceTtsInput(product, input = {}) {
   const { id: _dropId, idempotencyKey: _dropKey, ...rest } = input && typeof input === 'object' ? input : {};
   return {
     ...rest,
+    action: rest.action || 'tts',
     prompt,
-    audio_url: sample,
+    text: prompt,
+    voice: rest.voice || rest.speaker || '',
+    audio_url: sample || rest.audio_url || '',
+    ref_audio_url: sample || rest.ref_audio_url || rest.audio_url || '',
+    denoise: rest.denoise !== false,
+    tts: true,
     format: rest.format || 'wav',
   };
 }
 
 module.exports = {
-  VOICE_CLONE_ENDPOINT,
+  VOICE_CLONE_MODEL,
   voiceCloneRuntime,
   voiceCloneProvider,
   applyVoiceCloneToProduct,

@@ -18,6 +18,7 @@ const {
   getContentObjectStream,
 } = require('../config/minio');
 const { playableSourceUrl } = require('../data/content-hub-products');
+const { fetchSafeHttp } = require('../utils/safe-http-url');
 
 const router = express.Router();
 
@@ -333,12 +334,12 @@ router.get('/episodes/:id/download', authenticate, async (req, res, next) => {
       for await (const c of stream) chunks.push(c);
       plain = Buffer.concat(chunks);
     } else if (episode.sourceUrl) {
-      const up = await fetch(playableSourceUrl(episode.sourceUrl, episode.index), {
-        redirect: 'follow',
-        headers: { 'User-Agent': 'Mozilla/5.0' },
+      const up = await fetchSafeHttp(playableSourceUrl(episode.sourceUrl, episode.index), {
+        timeoutMs: 30000,
+        maxBytes: 80 * 1024 * 1024,
+        headers: { 'User-Agent': 'AI-Markets-Content/1.0' },
       });
-      if (!up.ok) return res.status(502).json({ message: 'Source media unavailable' });
-      plain = Buffer.from(await up.arrayBuffer());
+      plain = up.buffer;
     } else {
       return res.status(404).json({ message: 'No media' });
     }

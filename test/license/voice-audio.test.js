@@ -2,7 +2,7 @@ const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
 const { localSandboxInfer } = require('../../src/utils/denglish-client');
 const { computeUsageCost, resolveProviderForProduct } = require('../../src/utils/provider-resolve');
-const { applyVoiceCloneToProduct, voiceTtsInput, VOICE_CLONE_ENDPOINT } = require('../../src/utils/voice-clone');
+const { applyVoiceCloneToProduct, voiceTtsInput, VOICE_CLONE_MODEL } = require('../../src/utils/voice-clone');
 const { isVoiceProduct, voiceSampleUrl, putVoiceAudio, getVoiceAudio } = require('../../src/utils/voice-audio');
 
 describe('voice clone playground', () => {
@@ -29,27 +29,27 @@ describe('voice clone playground', () => {
     assert.equal(cost, 0.04);
   });
 
-  test('seller MP3 becomes chatterbox clone runtime', () => {
+  test('seller MP3 becomes VieNeu clone runtime', () => {
     const product = applyVoiceCloneToProduct({
       category: 'voice-clone',
       contentMeta: { voiceSampleUrl: 'https://cdn.example/me.mp3' },
     });
     assert.equal(product.contentMeta.cloneStatus, 'ready');
-    assert.equal(product.contentMeta.cloneEndpoint, VOICE_CLONE_ENDPOINT);
-    assert.equal(product.infraProvider, 'runpod_public');
+    assert.equal(product.contentMeta.cloneEndpoint, VOICE_CLONE_MODEL);
+    assert.equal(product.infraProvider, 'runpod_serverless');
     const env = Object.fromEntries((product.runtime.env || []).map((e) => [e.key, e.value]));
-    assert.equal(env.AI_PROVIDER, 'runpod_public');
-    assert.equal(env.PROVIDER_ENDPOINT_ID, VOICE_CLONE_ENDPOINT);
+    assert.equal(env.AI_PROVIDER, 'runpod_serverless');
     assert.equal(env.VOICE_SAMPLE_URL, 'https://cdn.example/me.mp3');
     const tts = voiceTtsInput(product, { prompt: 'xin chao', id: 'reuse-me', idempotencyKey: 'dup' });
     assert.equal(tts.audio_url, 'https://cdn.example/me.mp3');
+    assert.equal(tts.action, 'tts');
     assert.equal(tts.prompt, 'xin chao');
     assert.equal(tts.id, undefined);
     assert.equal(tts.idempotencyKey, undefined);
     assert.deepEqual(resolveProviderForProduct(product), {
-      provider: 'runpod_public',
-      endpointId: VOICE_CLONE_ENDPOINT,
-      model: VOICE_CLONE_ENDPOINT,
+      provider: 'runpod_serverless',
+      endpointId: '',
+      model: VOICE_CLONE_MODEL,
     });
   });
 

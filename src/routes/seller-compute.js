@@ -2,6 +2,7 @@ const express = require('express');
 const GpuServer = require('../models/GpuServer');
 const Product = require('../models/Product');
 const { authenticate, requireRoles } = require('../middleware/auth');
+const { assertSafeHttpUrl, assertSafeStreamHost } = require('../utils/safe-http-url');
 const {
   resolveProduct,
   findComputeNode,
@@ -66,15 +67,27 @@ router.patch('/nodes/:id', async (req, res, next) => {
       const body = req.body || {};
       if (body.name) node.name = String(body.name).slice(0, 120);
       if (body.status) node.status = body.status === 'offline' ? 'offline' : 'online';
-      if (body.webhookUrl !== undefined) node.webhookUrl = String(body.webhookUrl).slice(0, 500);
+      if (body.webhookUrl !== undefined) {
+        const url = String(body.webhookUrl).slice(0, 500);
+        if (url) await assertSafeHttpUrl(url);
+        node.webhookUrl = url;
+      }
       if (body.webhookSecret !== undefined) node.webhookSecret = String(body.webhookSecret).slice(0, 256);
-      if (body.streamHost !== undefined) node.streamHost = String(body.streamHost).slice(0, 200);
+      if (body.streamHost !== undefined) node.streamHost = assertSafeStreamHost(String(body.streamHost).slice(0, 200));
       if (body.streamPort !== undefined) node.streamPort = Number(body.streamPort) || 0;
       if (body.streamPath !== undefined) node.streamPath = String(body.streamPath).slice(0, 200);
       if (body.streamKind !== undefined) node.streamKind = String(body.streamKind).slice(0, 40);
       if (body.streamTls !== undefined) node.streamTls = !!body.streamTls;
-      if (body.iframeUrl !== undefined) node.iframeUrl = String(body.iframeUrl).slice(0, 500);
-      if (body.healthUrl !== undefined) node.healthUrl = String(body.healthUrl).slice(0, 500);
+      if (body.iframeUrl !== undefined) {
+        const url = String(body.iframeUrl).slice(0, 500);
+        if (url) await assertSafeHttpUrl(url, { httpsOnly: true });
+        node.iframeUrl = url;
+      }
+      if (body.healthUrl !== undefined) {
+        const url = String(body.healthUrl).slice(0, 500);
+        if (url) await assertSafeHttpUrl(url);
+        node.healthUrl = url;
+      }
       if (body.region !== undefined) node.region = String(body.region).slice(0, 80);
       if (body.maxConcurrent !== undefined) {
         node.maxConcurrent = Math.min(100, Math.max(1, Number(body.maxConcurrent) || 10));
@@ -142,7 +155,8 @@ router.post('/nodes/:id/ping', async (req, res, next) => {
 
     const healthUrl = String(node.healthUrl || '').trim();
     if (healthUrl) {
-      const resHealth = await fetch(healthUrl, { signal: AbortSignal.timeout(8000) });
+      await assertSafeHttpUrl(healthUrl);
+      const resHealth = await fetch(healthUrl, { signal: AbortSignal.timeout(8000), redirect: 'manual' });
       return res.json({ ok: resHealth.ok, status: resHealth.status, via: 'health' });
     }
     if (node.webhookUrl) {

@@ -47,15 +47,19 @@ function buildAccessTokenPayload(user) {
   };
 }
 
+const JWT_VERIFY = { algorithms: ['HS256'] };
+
 function signAccessToken(user) {
   return jwt.sign(buildAccessTokenPayload(user), config.jwtSecret, {
     expiresIn: config.jwtExpiresIn,
+    algorithm: 'HS256',
   });
 }
 
 function signRefreshToken(user) {
   return jwt.sign({ userId: String(user._id) }, config.refreshTokenSecret, {
     expiresIn: config.refreshExpiresIn,
+    algorithm: 'HS256',
   });
 }
 
@@ -243,7 +247,7 @@ async function authenticateToken(req, res, next) {
 
     let decoded;
     try {
-      decoded = jwt.verify(token, config.jwtSecret);
+      decoded = jwt.verify(token, config.jwtSecret, JWT_VERIFY);
     } catch (err) {
       return res.status(401).json({
         message: err.name === 'TokenExpiredError' ? 'Token đã hết hạn' : 'Token không hợp lệ',
@@ -295,7 +299,7 @@ const authenticate = authenticateToken;
 function optionalAuth(req, _res, next) {
   const token = extractAccessToken(req);
   if (!token) return next();
-  jwt.verify(token, config.jwtSecret, async (err, payload) => {
+  jwt.verify(token, config.jwtSecret, JWT_VERIFY, async (err, payload) => {
     if (err) return next();
     const userId = userIdFromPayload(payload);
     if (!userId) return next();
@@ -348,4 +352,5 @@ module.exports = {
   optionalAuth,
   requireRoles,
   authorizeRoles,
+  JWT_VERIFY,
 };

@@ -315,12 +315,19 @@ async function agentTurnWithFallback(body) {
   }
 }
 
+function fetchJobStatus(identifier, jobId) {
+  return denglishGet(
+    `/v1/jobs/${encodeURIComponent(identifier)}/${encodeURIComponent(jobId)}`
+  );
+}
+
 module.exports = {
   callDenglishInfer,
   localSandboxInfer,
   inferWithFallback,
   fetchModelCatalog,
   fetchModelSchema,
+  fetchJobStatus,
   quoteInference,
   callDenglishAgentTurn,
   localSandboxAgentTurn,

@@ -1,6 +1,6 @@
 /**
  * Demo GPU compute + game-server listings for hubs /play.
- * Sandbox nodes (no streamHost) serve the in-API canvas player so QA works without RunPod.
+ * Sandbox nodes (no streamHost): GPU listings serve a terminal; game-server listings serve the D-pad canvas.
  */
 const { inferProductType } = require('./marketplace-types');
 const { taxCategoryFromProduct } = require('../finance/tax-category');
@@ -25,7 +25,9 @@ Hosted demo for **aimarkets.vn** / the mobile app. Buyer play goes:
 
 then the player at \`${play}\`.
 
-The attached test node uses **sandbox stream** (no RunPod GPU required). Replace the node with hosting \`aimarkets\` + \`gpuType\` for a real pod on \`ai.aimarkets.vn\`.
+${kind === 'game'
+    ? 'The attached test node uses a **sandbox game stream** (canvas + D-pad).'
+    : 'The attached test node uses a **sandbox GPU terminal** (shell only — no D-pad).'} Replace the node with hosting \`aimarkets\` + \`gpuType\` for a real pod on \`ai.aimarkets.vn\`.
 `;
 }
 
@@ -49,9 +51,9 @@ function buildComputeTestProducts() {
     row({
       slug: 'gpu-sandbox-lab',
       name: 'GPU Sandbox Lab',
-      tagline: 'Free test GPU desktop — stream in-app, no local CUDA.',
+      tagline: 'Free test GPU terminal — train/infer commands, no local CUDA.',
       description:
-        'Listing test cho QA. Máy yếu chỉ xem stream. Node sandbox (canvas + D-pad) cho đến khi seller gắn RunPod.',
+        'Listing test GPU lab. Play mở terminal (nvidia-smi, python train.py). Không có D-pad — D-pad chỉ dành cho game-server.',
       category: 'gpu-compute',
       coverUrl: COVER.gpu,
       gallery: [COVER.gpu, COVER.train],
@@ -74,7 +76,7 @@ function buildComputeTestProducts() {
       name: 'RTX 4090 · GPU by the hour',
       tagline: 'Cloud RTX 4090 for inference, fine-tune, and desktop apps.',
       description:
-        'Thuê GPU theo giờ qua AI Markets. Session trừ ví khi dừng. Phù hợp máy local yếu — compute chạy trên pod.',
+        'Thuê GPU theo giờ qua AI Markets. Play mở terminal trên pod — train/infer, không phải màn hình game. Session trừ ví khi dừng.',
       category: 'gpu-compute',
       coverUrl: COVER.gpu,
       gallery: [COVER.gpu],
@@ -97,7 +99,7 @@ function buildComputeTestProducts() {
       name: 'A100 80GB · Train / fine-tune',
       tagline: 'High-VRAM box for LoRA and full-parameter jobs.',
       description:
-        'GPU train từ xa. Jupyter/noVNC khi node live; listing test dùng sandbox player nếu chưa gắn pod.',
+        'GPU train từ xa. Play là terminal (python train.py). Jupyter khi seller gắn pod; không dùng D-pad.',
       category: 'gpu-compute',
       coverUrl: COVER.train,
       gallery: [COVER.train, COVER.infer],
@@ -119,7 +121,7 @@ function buildComputeTestProducts() {
       slug: 'gpu-l40s-infer',
       name: 'L40S · Inference box',
       tagline: 'Cheaper GPU hour for batch image / LLM infer.',
-      description: 'GPU inference theo giờ. Test catalog — Play mở sandbox nếu node chưa có streamHost.',
+      description: 'GPU inference theo giờ. Play mở terminal lab nếu node chưa có streamHost — không có D-pad.',
       category: 'gpu-compute',
       coverUrl: COVER.infer,
       gallery: [COVER.infer],

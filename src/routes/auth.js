@@ -3,7 +3,7 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const User = require('../models/User');
 const config = require('../config/env');
-const { attachAuthSession, publicUser, authenticate, extractRefreshToken, loadActiveUser, clearRefreshCookie, extractAccessToken, userIdFromPayload, invalidateAuthUserCache, setRefreshCookie, signAccessToken, requireAuthSession, persistAuthCaches } = require('../middleware/auth');
+const { attachAuthSession, publicUser, authenticate, extractRefreshToken, loadActiveUser, clearRefreshCookie, extractAccessToken, userIdFromPayload, invalidateAuthUserCache, setRefreshCookie, signAccessToken, requireAuthSession, persistAuthCaches, JWT_VERIFY } = require('../middleware/auth');
 const { slugify } = require('../utils/serialize');
 const { deleteCachePattern } = require('../utils/cache');
 const {
@@ -200,7 +200,7 @@ router.get('/google/callback', async (req, res, next) => {
     }
     let payload;
     try {
-      payload = jwt.verify(state, config.jwtSecret);
+      payload = jwt.verify(state, config.jwtSecret, JWT_VERIFY);
     } catch {
       return fail(fallback, 'Phiên Google hết hạn, thử lại');
     }
@@ -257,7 +257,7 @@ router.post('/refresh-token', async (req, res, next) => {
     }
     let decoded;
     try {
-      decoded = jwt.verify(refreshToken, config.refreshTokenSecret);
+      decoded = jwt.verify(refreshToken, config.refreshTokenSecret, JWT_VERIFY);
     } catch (err) {
       clearRefreshCookie(res);
       return res.status(401).json({
@@ -297,7 +297,7 @@ router.post('/logout', async (req, res) => {
   const access = extractAccessToken(req);
   if (access) {
     try {
-      const payload = jwt.verify(access, config.jwtSecret);
+      const payload = jwt.verify(access, config.jwtSecret, JWT_VERIFY);
       await invalidateAuthUserCache(userIdFromPayload(payload));
     } catch {
       /* expired access is still a valid logout */
@@ -306,7 +306,7 @@ router.post('/logout', async (req, res) => {
   const refreshToken = extractRefreshToken(req);
   if (refreshToken) {
     try {
-      const payload = jwt.verify(refreshToken, config.refreshTokenSecret);
+      const payload = jwt.verify(refreshToken, config.refreshTokenSecret, JWT_VERIFY);
       await invalidateAuthUserCache(userIdFromPayload(payload));
     } catch {
       /* ignore */
