@@ -11,6 +11,7 @@ const { isDbReady } = require('./config/db');
 const { isReady: isRedisReady } = require('./config/redis');
 const { notFound, errorHandler } = require('./middleware/error');
 const { proxvnIngress, originAllowed } = require('./utils/proxvn');
+const { allowMarketplaceGameFrame } = require('./utils/frame-ancestors');
 
 const authRoutes = require('./routes/auth');
 const productRoutes = require('./routes/products');
@@ -61,14 +62,16 @@ function createApp() {
   app.disable('x-powered-by');
   app.use(proxvnIngress);
 
-  // Security headers — API only, no cross-origin embedding needed.
+  // Security headers. Game player HTML is iframed from aimarkets.vn (different origin).
   app.use(
     helmet({
-      contentSecurityPolicy: false, // JSON API, no HTML served
-      frameguard: false, // game player iframe is served by this API for the marketplace origin
+      contentSecurityPolicy: false,
+      frameguard: false,
       crossOriginResourcePolicy: { policy: 'cross-origin' },
+      crossOriginEmbedderPolicy: false,
     })
   );
+  app.use(allowMarketplaceGameFrame);
 
   app.use(
     cors({

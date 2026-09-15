@@ -17,6 +17,7 @@ const {
   callSellerWebhook,
 } = require('../utils/compute-session');
 const { proxyToStream, setGameCookie } = require('../terminal/stream-proxy');
+const { setPlayerFrameHeaders } = require('../utils/frame-ancestors');
 const { publicHttps } = require('../utils/proxvn');
 
 const router = express.Router();
@@ -39,28 +40,55 @@ function publicGame(doc, req, extra = {}) {
   };
 }
 
+const viewportMeta =
+  '<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"/>';
+
 const sandboxPlayerHtml = (title) => `<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
+${viewportMeta}
+<meta name="mobile-web-app-capable" content="yes"/>
 <title>${title}</title>
 <style>
-  html,body{margin:0;height:100%;background:#05070d;color:#d7ffe3;font-family:ui-sans-serif,system-ui;}
-  canvas{display:block;width:100%;height:100%;}
-  .hud{position:absolute;left:12px;top:12px;font:600 13px/1.4 ui-monospace,monospace;
-    background:rgba(0,0,0,.45);padding:8px 10px;border-radius:8px;border:1px solid #1f3d32}
+  html,body{margin:0;height:100%;background:#05070d;color:#d7ffe3;font-family:ui-sans-serif,system-ui;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none;}
+  canvas{display:block;width:100%;height:100%;touch-action:none;}
+  .hud{position:absolute;left:12px;top:max(8px,env(safe-area-inset-top));font:600 12px/1.35 ui-monospace,monospace;
+    background:rgba(0,0,0,.45);padding:6px 8px;border-radius:8px;border:1px solid #1f3d32;max-width:70vw;pointer-events:none}
+  .pad{position:absolute;left:max(12px,env(safe-area-inset-left));bottom:max(16px,env(safe-area-inset-bottom));
+    display:grid;grid-template-columns:52px 52px 52px;grid-template-rows:52px 52px 52px;gap:6px;z-index:3}
+  .pad b{grid-column:2;width:52px;height:52px;border-radius:14px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.22);display:flex;align-items:center;justify-content:center;font-size:18px;color:#fff}
+  .pad .l{grid-column:1;grid-row:2}.pad .r{grid-column:3;grid-row:2}.pad .u{grid-column:2;grid-row:1}.pad .d{grid-column:2;grid-row:3}
+  .pad b:active{background:rgba(61,255,176,.35)}
 </style></head>
 <body>
-<div class="hud">PH AI Market · GPU game stream (proxied)<br/>WASD / arrows · sandbox until RunPod HTTP port is live</div>
+<div class="hud">AI Markets · GPU stream<br/>Vuốt / D-pad</div>
 <canvas id="c"></canvas>
+<div class="pad" id="pad">
+  <b class="u" data-k="ArrowUp">▲</b>
+  <b class="l" data-k="ArrowLeft">◀</b>
+  <b class="r" data-k="ArrowRight">▶</b>
+  <b class="d" data-k="ArrowDown">▼</b>
+</div>
 <script>
 const c=document.getElementById('c'),x=c.getContext('2d');
 let w,h,t=0,px=120,py=120,vx=0,vy=0;
 const keys={};
-function resize(){w=c.width=innerWidth;h=c.height=innerHeight;}
+function resize(){const d=Math.min(window.devicePixelRatio||1,2);w=innerWidth;h=innerHeight;c.width=w*d;c.height=h*d;c.style.width=w+'px';c.style.height=h+'px';x.setTransform(d,0,0,d,0,0);}
 addEventListener('resize',resize);resize();
 addEventListener('keydown',e=>keys[e.key]=true);
 addEventListener('keyup',e=>keys[e.key]=false);
+function bind(el,code){
+  const on=e=>{e.preventDefault();keys[code]=true}; const off=e=>{e.preventDefault();keys[code]=false};
+  el.addEventListener('pointerdown',on,{passive:false});
+  el.addEventListener('pointerup',off); el.addEventListener('pointercancel',off); el.addEventListener('pointerleave',off);
+}
+document.querySelectorAll('#pad [data-k]').forEach(el=>bind(el,el.getAttribute('data-k')));
+c.addEventListener('pointerdown',e=>{
+  const cx=w/2,cy=h/2;
+  keys.ArrowRight=e.clientX>cx+24; keys.ArrowLeft=e.clientX<cx-24;
+  keys.ArrowDown=e.clientY>cy+24; keys.ArrowUp=e.clientY<cy-24;
+},{passive:true});
+c.addEventListener('pointerup',()=>{keys.ArrowRight=keys.ArrowLeft=keys.ArrowDown=keys.ArrowUp=false});
 function loop(){
   t+=1;
   vx+=(keys.ArrowRight||keys.d||keys.D)?0.6:0; vx+=(keys.ArrowLeft||keys.a||keys.A)?-0.6:0;
@@ -198,38 +226,40 @@ router.delete('/:sessionId', authenticate, async (req, res, next) => {
 function livePlayerHtml(doc) {
   const kind = doc.streamKind || 'novnc';
   const path = String(doc.streamPath || '/').replace(/^\/+/, '/');
-  if (kind === 'iframe' && doc.streamPath) {
-    const src = doc.streamPath.startsWith('http') ? `./proxy/` : `./proxy${path}`;
-    return `<!DOCTYPE html>
-<html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>GPU Stream</title><style>html,body{margin:0;height:100%;background:#000}iframe{border:0;width:100%;height:100%}</style></head>
-<body><iframe id="f" title="Stream" allow="fullscreen; autoplay"></iframe>
-<script>document.getElementById('f').src=${JSON.stringify(doc.streamPath.startsWith('http') ? doc.streamPath : src + (location.search||''))};</script></body></html>`;
-  }
-  return `<!DOCTYPE html>
+  const shell = (bodyInner, boot) => `<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>GPU Game Stream</title>
+${viewportMeta}
+<meta name="mobile-web-app-capable" content="yes"/>
+<title>GPU Stream</title>
 <style>
-  html,body{margin:0;height:100%;background:#05070d;color:#cfe;font-family:ui-sans-serif,system-ui}
-  iframe,video{border:0;width:100%;height:100%;background:#000}
-  .hud{position:absolute;z-index:2;left:12px;top:12px;font:600 12px/1.4 ui-monospace,monospace;
-    background:rgba(0,0,0,.5);padding:8px 10px;border-radius:8px;border:1px solid #244}
+  html,body{margin:0;height:100%;background:#000;overflow:hidden;touch-action:manipulation;-webkit-user-select:none}
+  iframe,video{border:0;width:100%;height:100%;background:#000;display:block}
+  video{object-fit:contain}
+  .hud{position:absolute;z-index:2;left:10px;top:max(6px,env(safe-area-inset-top));font:600 11px/1.3 ui-monospace,monospace;
+    background:rgba(0,0,0,.4);padding:6px 8px;border-radius:8px;pointer-events:none;max-width:62vw}
 </style></head>
-<body>
-<div class="hud">PH AI Market · live ${kind} · proxied (no RunPod host)</div>
-${kind === 'hls'
-    ? '<video id="v" controls autoplay playsinline></video>'
-    : '<iframe id="f" title="GPU stream" allow="fullscreen; autoplay"></iframe>'}
-<script>
-const q = location.search || '';
-const path = ${JSON.stringify(path)};
-const src = './proxy' + (path.startsWith('/') ? path : '/' + path) + q;
-const el = document.getElementById('f') || document.getElementById('v');
-if (el.tagName === 'VIDEO') el.src = src; else el.src = src;
-</script>
-</body></html>`;
+<body>${bodyInner}<script>${boot}</script></body></html>`;
+
+  if (kind === 'iframe' && doc.streamPath) {
+    const src = doc.streamPath.startsWith('http') ? doc.streamPath : `./proxy${path}`;
+    return shell(
+      '<iframe id="f" title="Stream" allow="fullscreen; autoplay; encrypted-media" allowfullscreen></iframe>',
+      `const src=${JSON.stringify(src)};document.getElementById('f').src=src.startsWith('http')?src:src+(location.search||'');`,
+    );
+  }
+  const media =
+    kind === 'hls'
+      ? '<video id="v" controls autoplay playsinline webkit-playsinline muted></video>'
+      : '<iframe id="f" title="GPU stream" allow="fullscreen; autoplay; encrypted-media" allowfullscreen></iframe>';
+  return shell(
+    `<div class="hud">AI Markets · ${kind}</div>${media}`,
+    `const q=location.search||'';
+const path=${JSON.stringify(path)};
+const src='./proxy'+(path.startsWith('/')?path:'/'+path)+q;
+const el=document.getElementById('f')||document.getElementById('v');
+if(el.tagName==='VIDEO'){el.src=src;el.play&&el.play().catch(()=>{});} else el.src=src;`,
+  );
 }
 
 router.get('/:sessionId/player', authenticate, async (req, res, next) => {
@@ -245,6 +275,7 @@ router.get('/:sessionId/player', authenticate, async (req, res, next) => {
     if (token) setGameCookie(res, doc.sessionId, token);
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Cache-Control', 'no-store');
+    setPlayerFrameHeaders(res);
     if (doc.streamKind === 'iframe' && doc.streamPath) {
       return res.send(livePlayerHtml(doc));
     }

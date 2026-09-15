@@ -6,6 +6,7 @@ const { closeRedis } = require('./config/redis');
 const { createApp } = require('./app');
 const { ensureRunpodMarketplaceProducts } = require('./utils/ensure-runpod-products');
 const { ensureAiProviderProducts } = require('./utils/ensure-ai-provider-products');
+const { ensureComputeTestProducts } = require('./utils/ensure-compute-products');
 const { ensureLegalDocuments } = require('./utils/ensure-legal-documents');
 const { ensureCommissionRules } = require('./utils/ensure-commission-rules');
 const { ensureStoreFeeRules } = require('./utils/ensure-store-fee-rules');
@@ -36,6 +37,7 @@ connectDb()
   })
   .then(() => ensureRunpodMarketplaceProducts())
   .then(() => ensureAiProviderProducts())
+  .then(() => ensureComputeTestProducts())
   .then(() => syncSalesCountsFromOrders())
   .then((stats) => {
     if (stats) {

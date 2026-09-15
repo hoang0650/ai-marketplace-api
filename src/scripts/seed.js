@@ -388,6 +388,10 @@ async function seed() {
   const episodeCount = await upsertContentHubEpisodes(ContentEpisode, Product);
   console.log('[seed] hub episodes', episodeCount);
 
+  const { ensureComputeTestProducts } = require('../utils/ensure-compute-products');
+  const compute = await ensureComputeTestProducts();
+  console.log('[seed] compute test', compute);
+
   if (nova) {
     const days = mock.usage || [];
     for (const row of days) {

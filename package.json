@@ -9,6 +9,7 @@
     "dev": "nodemon src/server.js",
     "seed": "node src/scripts/seed.js",
     "seed:hubs": "node src/scripts/seed-content-hubs.js",
+    "seed:compute": "node src/scripts/seed-compute.js",
     "test": "node --test test/**/*.test.js"
   },
   "engines": {

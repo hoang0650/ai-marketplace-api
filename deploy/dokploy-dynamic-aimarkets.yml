@@ -30,10 +30,12 @@ http:
 
     aimarkets-security:
       headers:
-        frameDeny: true
+        # Must stay false: aimarkets.vn iframes /v1/game-sessions/:id/player from api.aimarkets.vn
+        frameDeny: false
         contentTypeNosniff: true
         browserXssFilter: true
         referrerPolicy: "strict-origin-when-cross-origin"
+        contentSecurityPolicy: "frame-ancestors https://aimarkets.vn https://www.aimarkets.vn http://localhost:4200 http://127.0.0.1:4200 'self'"
 
   # Tuỳ chọn: gắn middleware vào router do Dokploy tạo (tên router có thể khác — xem Traefik dashboard).
   # Nếu Dokploy không cho phép sửa router name, bỏ qua block routers bên dưới;

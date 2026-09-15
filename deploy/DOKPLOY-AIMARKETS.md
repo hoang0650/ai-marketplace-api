@@ -70,6 +70,8 @@ curl -s "https://api.aimarkets.vn/v1/products?limit=1"
 2. **`dynamic/middlewares.yml`** — `openclaw/deploy/dokploy-dynamic-middlewares.yml`.
 3. **`dynamic/aimarkets.yml`** — `ai-marketplace-api/deploy/dokploy-dynamic-aimarkets.yml` (CORS/security headers).
 
+**GPU Play iframe:** `aimarkets.vn` nhúng `https://api.aimarkets.vn/v1/game-sessions/:id/player`. Middleware `aimarkets-security` **không** được `frameDeny: true` (Chrome hiện “đã từ chối kết nối”). Nếu gắn middleware trên Domain trong Dokploy UI, tắt **X-Frame-Options DENY**.
+
 Reload Traefik sau khi save (Dokploy thường auto-reload).
 
 ## Frontend (Angular)

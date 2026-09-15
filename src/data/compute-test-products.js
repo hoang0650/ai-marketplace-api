@@ -1,0 +1,211 @@
+/**
+ * Demo GPU compute + game-server listings for hubs /play.
+ * Sandbox nodes (no streamHost) serve the in-API canvas player so QA works without RunPod.
+ */
+const { inferProductType } = require('./marketplace-types');
+const { taxCategoryFromProduct } = require('../finance/tax-category');
+const { CREATOR } = require('./runpod-marketplace-products');
+
+const COVER = {
+  gpu: 'https://images.unsplash.com/photo-1597872200969-2b65d56bd16b?w=1400&q=80',
+  train: 'https://images.unsplash.com/photo-1518770660439-4636190af475?w=1400&q=80',
+  infer: 'https://images.unsplash.com/photo-1550751827-4bd374c3f58b?w=1400&q=80',
+  game: 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=1400&q=80',
+  arcade: 'https://images.unsplash.com/photo-1538481199705-c7403e393d76?w=1400&q=80',
+  indie: 'https://images.unsplash.com/photo-1511512578047-dfb367046420?w=1400&q=80',
+};
+
+function docs(slug, kind) {
+  const play = `https://aimarkets.vn/play/${slug}`;
+  return `## AI Markets ${kind === 'game' ? 'game stream' : 'GPU lab'}
+
+Hosted demo for **aimarkets.vn** / the mobile app. Buyer play goes:
+
+\`POST /v1/game-sessions { "productSlug": "${slug}" }\`
+
+then the player at \`${play}\`.
+
+The attached test node uses **sandbox stream** (no RunPod GPU required). Replace the node with hosting \`aimarkets\` + \`gpuType\` for a real pod on \`ai.aimarkets.vn\`.
+`;
+}
+
+function row(partial) {
+  const productType = inferProductType(partial.category, partial.tags);
+  return {
+    creatorSlug: CREATOR.creatorSlug,
+    creatorName: CREATOR.name,
+    ownershipType: 'PLATFORM_DIRECT',
+    infraProvider: 'runpod',
+    provider: 'runpod',
+    complianceStatus: 'approved',
+    productType,
+    taxCategory: taxCategoryFromProduct({ category: partial.category, productType }),
+    ...partial,
+  };
+}
+
+function buildComputeTestProducts() {
+  return [
+    row({
+      slug: 'gpu-sandbox-lab',
+      name: 'GPU Sandbox Lab',
+      tagline: 'Free test GPU desktop — stream in-app, no local CUDA.',
+      description:
+        'Listing test cho QA. Máy yếu chỉ xem stream. Node sandbox (canvas + D-pad) cho đến khi seller gắn RunPod.',
+      category: 'gpu-compute',
+      coverUrl: COVER.gpu,
+      gallery: [COVER.gpu, COVER.train],
+      pricing: { model: 'free', price: 0, currency: 'USD', usageUnit: 'hour', usageRate: 0 },
+      tags: ['gpu', 'sandbox', 'test', 'rtx'],
+      featured: true,
+      rating: 4.8,
+      reviewCount: 12,
+      changelog: [{ version: '1.0.0', date: '2026-09-15', notes: 'Sandbox GPU lab for Play QA.' }],
+      apiDocsMarkdown: docs('gpu-sandbox-lab', 'compute'),
+      node: {
+        name: 'Sandbox GPU Lab',
+        kind: 'compute',
+        gpu: 'NVIDIA RTX 4090 (sandbox)',
+        providerServerId: 'testnode-gpu-sandbox-lab',
+      },
+    }),
+    row({
+      slug: 'gpu-rtx4090-hour',
+      name: 'RTX 4090 · GPU by the hour',
+      tagline: 'Cloud RTX 4090 for inference, fine-tune, and desktop apps.',
+      description:
+        'Thuê GPU theo giờ qua AI Markets. Session trừ ví khi dừng. Phù hợp máy local yếu — compute chạy trên pod.',
+      category: 'gpu-compute',
+      coverUrl: COVER.gpu,
+      gallery: [COVER.gpu],
+      pricing: { model: 'usage', price: 0, currency: 'USD', usageUnit: 'hour', usageRate: 1.89 },
+      tags: ['gpu', 'rtx-4090', 'usage', 'test'],
+      featured: true,
+      rating: 4.6,
+      reviewCount: 28,
+      changelog: [{ version: '1.0.0', date: '2026-09-15', notes: 'Hourly RTX 4090 test SKU.' }],
+      apiDocsMarkdown: docs('gpu-rtx4090-hour', 'compute'),
+      node: {
+        name: 'RTX 4090 test node',
+        kind: 'compute',
+        gpu: 'NVIDIA GeForce RTX 4090',
+        providerServerId: 'testnode-gpu-rtx4090-hour',
+      },
+    }),
+    row({
+      slug: 'gpu-a100-train',
+      name: 'A100 80GB · Train / fine-tune',
+      tagline: 'High-VRAM box for LoRA and full-parameter jobs.',
+      description:
+        'GPU train từ xa. Jupyter/noVNC khi node live; listing test dùng sandbox player nếu chưa gắn pod.',
+      category: 'gpu-compute',
+      coverUrl: COVER.train,
+      gallery: [COVER.train, COVER.infer],
+      pricing: { model: 'usage', price: 0, currency: 'USD', usageUnit: 'hour', usageRate: 2.49 },
+      tags: ['gpu', 'a100', 'training', 'test'],
+      featured: false,
+      rating: 4.7,
+      reviewCount: 9,
+      changelog: [{ version: '1.0.0', date: '2026-09-15', notes: 'A100 training SKU.' }],
+      apiDocsMarkdown: docs('gpu-a100-train', 'compute'),
+      node: {
+        name: 'A100 train test node',
+        kind: 'compute',
+        gpu: 'NVIDIA A100 80GB',
+        providerServerId: 'testnode-gpu-a100-train',
+      },
+    }),
+    row({
+      slug: 'gpu-l40s-infer',
+      name: 'L40S · Inference box',
+      tagline: 'Cheaper GPU hour for batch image / LLM infer.',
+      description: 'GPU inference theo giờ. Test catalog — Play mở sandbox nếu node chưa có streamHost.',
+      category: 'gpu-compute',
+      coverUrl: COVER.infer,
+      gallery: [COVER.infer],
+      pricing: { model: 'usage', price: 0, currency: 'USD', usageUnit: 'hour', usageRate: 1.19 },
+      tags: ['gpu', 'l40s', 'inference', 'test'],
+      featured: false,
+      rating: 4.4,
+      reviewCount: 6,
+      changelog: [{ version: '1.0.0', date: '2026-09-15', notes: 'L40S inference SKU.' }],
+      apiDocsMarkdown: docs('gpu-l40s-infer', 'compute'),
+      node: {
+        name: 'L40S infer test node',
+        kind: 'compute',
+        gpu: 'NVIDIA L40S',
+        providerServerId: 'testnode-gpu-l40s-infer',
+      },
+    }),
+    row({
+      slug: 'game-sandbox-arcade',
+      name: 'Cloud Arcade (sandbox)',
+      tagline: 'Play on a weak phone — demo stream, D-pad, landscape.',
+      description:
+        'Game server test miễn phí. App/web Play xoay ngang, WebView player, D-pad cảm ứng. Không cần GPU local.',
+      category: 'game-server',
+      coverUrl: COVER.arcade,
+      gallery: [COVER.arcade, COVER.game],
+      pricing: { model: 'free', price: 0, currency: 'USD', usageUnit: 'minute', usageRate: 0 },
+      tags: ['game', 'sandbox', 'mobile', 'test', 'stream'],
+      featured: true,
+      rating: 4.9,
+      reviewCount: 41,
+      changelog: [{ version: '1.0.0', date: '2026-09-15', notes: 'Free arcade sandbox for mobile Play.' }],
+      apiDocsMarkdown: docs('game-sandbox-arcade', 'game'),
+      node: {
+        name: 'Sandbox arcade node',
+        kind: 'game',
+        gpu: 'NVIDIA RTX 4090 (sandbox)',
+        providerServerId: 'testnode-game-sandbox-arcade',
+      },
+    }),
+    row({
+      slug: 'game-cloud-desktop',
+      name: 'Cloud Game Desktop',
+      tagline: 'noVNC game box billed per minute — stream to phone or weak PC.',
+      description:
+        'Máy chơi game trên cloud. Listing test: sandbox stream. Gắn RunPod + noVNC :6080 để chơi game PC thật.',
+      category: 'game-server',
+      coverUrl: COVER.game,
+      gallery: [COVER.game],
+      pricing: { model: 'usage', price: 0, currency: 'USD', usageUnit: 'minute', usageRate: 0.08 },
+      tags: ['game', 'novnc', 'cloud', 'test'],
+      featured: true,
+      rating: 4.5,
+      reviewCount: 17,
+      changelog: [{ version: '1.0.0', date: '2026-09-15', notes: 'Per-minute cloud desktop SKU.' }],
+      apiDocsMarkdown: docs('game-cloud-desktop', 'game'),
+      node: {
+        name: 'Cloud desktop test node',
+        kind: 'game',
+        gpu: 'NVIDIA GeForce RTX 4090',
+        providerServerId: 'testnode-game-cloud-desktop',
+      },
+    }),
+    row({
+      slug: 'game-indie-box',
+      name: 'Indie Game Box',
+      tagline: 'Smaller GPU stream for indie / casual titles.',
+      description: 'Game server casual. Test Play trên điện thoại; billing theo phút khi có số dư ví.',
+      category: 'game-server',
+      coverUrl: COVER.indie,
+      gallery: [COVER.indie],
+      pricing: { model: 'usage', price: 0, currency: 'USD', usageUnit: 'minute', usageRate: 0.04 },
+      tags: ['game', 'indie', 'stream', 'test'],
+      featured: false,
+      rating: 4.3,
+      reviewCount: 8,
+      changelog: [{ version: '1.0.0', date: '2026-09-15', notes: 'Indie game box SKU.' }],
+      apiDocsMarkdown: docs('game-indie-box', 'game'),
+      node: {
+        name: 'Indie box test node',
+        kind: 'game',
+        gpu: 'NVIDIA RTX 4070',
+        providerServerId: 'testnode-game-indie-box',
+      },
+    }),
+  ];
+}
+
+module.exports = { CREATOR, buildComputeTestProducts };
