@@ -4,8 +4,10 @@ const GpuServer = require('../models/GpuServer');
 const TerminalAuditLog = require('../models/TerminalAuditLog');
 
 const MAX_TERMINALS_PER_USER = Number(process.env.TERMINAL_MAX_SESSIONS || 3);
-const MAX_GAMES_PER_USER = Number(process.env.GAME_MAX_SESSIONS || 2);
+const MAX_GAMES_PER_USER = Number(process.env.GAME_MAX_SESSIONS || 4);
 const SESSION_IDLE_MS = Number(process.env.TERMINAL_IDLE_MS || 30 * 60 * 1000);
+/** Abandoned Play tabs (refresh / closed iframe) free the slot after this. */
+const GAME_IDLE_MS = Number(process.env.GAME_IDLE_MS || 5 * 60 * 1000);
 const MAX_INPUT = Number(process.env.TERMINAL_MAX_INPUT || 8192);
 
 function newSessionId(prefix) {
@@ -41,6 +43,7 @@ module.exports = {
   MAX_TERMINALS_PER_USER,
   MAX_GAMES_PER_USER,
   SESSION_IDLE_MS,
+  GAME_IDLE_MS,
   MAX_INPUT,
   newSessionId,
   assertServerOwner,

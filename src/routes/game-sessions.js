@@ -6,6 +6,7 @@ const {
   assertServerOwner,
   newSessionId,
   MAX_GAMES_PER_USER,
+  GAME_IDLE_MS,
   audit,
 } = require('../terminal/permission.service');
 const {
@@ -38,6 +39,60 @@ function publicGame(doc, req, extra = {}) {
     publicUrl: proxied || undefined,
     createdAt: doc.createdAt,
   };
+}
+
+async function stopLiveGameSession(doc) {
+  if (!doc || doc.status === 'stopped') return doc;
+  doc.status = 'stopped';
+  doc.stoppedAt = new Date();
+  await doc.save();
+  const product = doc.product ? await require('../models/Product').findById(doc.product) : null;
+  const server = await require('../models/GpuServer').findById(doc.server);
+  if (server?.webhookUrl) {
+    callSellerWebhook(server, 'session.stop', {
+      sessionId: doc.sessionId,
+      buyerId: String(doc.user),
+      minutes: doc.billedMinutes,
+    }).catch(() => {});
+  }
+  if (product) await finalizeSessionBilling(doc, product);
+  return doc;
+}
+
+async function expireIdleGameSessions(userId) {
+  const cutoff = new Date(Date.now() - GAME_IDLE_MS);
+  const idle = await GameSession.find({
+    user: userId,
+    status: { $in: ['starting', 'live'] },
+    lastActivityAt: { $lt: cutoff },
+  });
+  for (const doc of idle) {
+    await stopLiveGameSession(doc);
+  }
+}
+
+async function reuseLiveSession(userId, productId, serverId) {
+  const q = {
+    user: userId,
+    status: { $in: ['starting', 'live'] },
+  };
+  if (productId) q.product = productId;
+  else if (serverId) q.server = serverId;
+  else return null;
+  const existing = await GameSession.findOne(q).sort({ lastActivityAt: -1 });
+  if (!existing) return null;
+  existing.lastActivityAt = new Date();
+  existing.status = 'live';
+  await existing.save();
+  return existing;
+}
+
+async function freeOldestGameSlot(userId) {
+  const oldest = await GameSession.findOne({
+    user: userId,
+    status: { $in: ['starting', 'live'] },
+  }).sort({ lastActivityAt: 1, createdAt: 1 });
+  if (oldest) await stopLiveGameSession(oldest);
 }
 
 const viewportMeta =
@@ -142,12 +197,29 @@ router.post('/', authenticate, requireRoles('creator', 'admin', 'buyer'), async 
       server = await assertServerOwner(req.user, serverId);
     }
 
-    const open = await GameSession.countDocuments({
+    await expireIdleGameSessions(req.user._id);
+
+    const reused = await reuseLiveSession(req.user._id, product?._id, server._id);
+    if (reused) {
+      return res.json(publicGame(reused, req, { productSlug: product?.slug, hosting: hosting || undefined }));
+    }
+
+    let open = await GameSession.countDocuments({
       user: req.user._id,
       status: { $in: ['starting', 'live'] },
     });
     if (open >= MAX_GAMES_PER_USER) {
-      return res.status(429).json({ message: 'Too many live streams', code: 'FORBIDDEN' });
+      await freeOldestGameSlot(req.user._id);
+      open = await GameSession.countDocuments({
+        user: req.user._id,
+        status: { $in: ['starting', 'live'] },
+      });
+    }
+    if (open >= MAX_GAMES_PER_USER) {
+      return res.status(429).json({
+        message: 'Too many live streams. Stop another session and retry.',
+        code: 'TOO_MANY_STREAMS',
+      });
     }
 
     const sessionId = newSessionId('gs');
@@ -204,19 +276,7 @@ router.delete('/:sessionId', authenticate, async (req, res, next) => {
   try {
     const doc = await GameSession.findOne({ sessionId: req.params.sessionId, user: req.user._id });
     if (!doc) return res.status(404).json({ message: 'SESSION_EXPIRED', code: 'SESSION_EXPIRED' });
-    doc.status = 'stopped';
-    doc.stoppedAt = new Date();
-    await doc.save();
-    const product = doc.product ? await require('../models/Product').findById(doc.product) : null;
-    const server = await require('../models/GpuServer').findById(doc.server);
-    if (server?.webhookUrl) {
-      callSellerWebhook(server, 'session.stop', {
-        sessionId: doc.sessionId,
-        buyerId: String(doc.user),
-        minutes: doc.billedMinutes,
-      }).catch(() => {});
-    }
-    if (product) await finalizeSessionBilling(doc, product);
+    await stopLiveGameSession(doc);
     res.json({ ok: true, billedCost: doc.billedCost || 0 });
   } catch (e) {
     next(e);
