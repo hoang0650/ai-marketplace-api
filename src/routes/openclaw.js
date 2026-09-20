@@ -449,6 +449,15 @@ router.post('/usage', async (req, res, next) => {
       amount: cost,
       currency: 'USD',
       note: `OpenClaw ${model || 'llm'} (+${Math.round(markup * 100)}% provider markup) in=${inputTokens} out=${outputTokens}`,
+      meta: {
+        channel: 'openclaw',
+        audience: 'aimarkets',
+        model: model || '',
+        inputTokens,
+        outputTokens,
+        markup,
+        providerCost: markup > 0 ? Math.round((cost / (1 + markup)) * 1e6) / 1e6 : cost,
+      },
     });
     return res.json({
       success: true,

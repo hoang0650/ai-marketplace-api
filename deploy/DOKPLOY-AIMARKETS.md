@@ -12,6 +12,8 @@ VPS Hostinger `72.62.72.165` · Dokploy `deploy.phgrouptechs.com` · DNS **Mắt
 | `ai` | A | `72.62.72.165` |
 | `openclaw` | A | `72.62.72.165` → `openclaw.aimarkets.vn` |
 | `*.openclaw` | A | `72.62.72.165` → `{userId}.openclaw.aimarkets.vn` |
+| `hermes` | A | `72.62.72.165` → `hermes.aimarkets.vn` |
+| `*.hermes` | A | `72.62.72.165` → `{userId}.hermes.aimarkets.vn` |
 
 ## API (`aimarketplace-api`)
 
@@ -43,7 +45,9 @@ FRONTEND_URL=https://aimarkets.vn
 AI_URL=https://ai.aimarkets.vn
 OPENCLAW_AIMARKETS_PUBLIC_URL_TEMPLATE=https://{userId}.openclaw.aimarkets.vn
 OPENCLAW_SSH_HOST_TEMPLATE={userId}.openclaw.aimarkets.vn
-AIMARKETS_SERVICE_SECRET=<shared with OpenClaw aimarkets-usage plugin>
+HERMES_AIMARKETS_PUBLIC_URL_TEMPLATE=https://{userId}.hermes.aimarkets.vn
+HERMES_SSH_HOST_TEMPLATE={userId}.hermes.aimarkets.vn
+AIMARKETS_SERVICE_SECRET=<shared with OpenClaw/Hermes aimarkets-usage plugins>
 OPENCLAW_AIMARKETS_MARKUP=0.25
 ```
 
@@ -77,8 +81,11 @@ curl -s "https://api.aimarkets.vn/v1/products?limit=1"
 2. **`dynamic/middlewares.yml`** — `openclaw/deploy/dokploy-dynamic-middlewares.yml`.
 3. **`dynamic/aimarkets.yml`** — `ai-marketplace-api/deploy/dokploy-dynamic-aimarkets.yml` (CORS/security headers).
 4. **`dynamic/openclaw-aimarkets-wildcard.yml`** — `openclaw/deploy/dokploy-dynamic-openclaw-aimarkets-wildcard.yml` (**thêm**, không thay file `{hotelId}.phhotel.vn`).
+5. **`dynamic/hermes-aimarkets-wildcard.yml`** — `hermes-agent/deploy/dokploy-dynamic-hermes-aimarkets-wildcard.yml` (dashboard port **9119**).
 
 **OpenClaw AI Markets:** Control UI `https://{userId}.openclaw.aimarkets.vn` (userId = Mongo ObjectId 24 hex). DNS `openclaw` + `*.openclaw` A → `72.62.72.165`. Session `market-{userId}`, `audience=aimarkets`. Luồng PHHotel `{hotelId}.phhotel.vn` giữ nguyên.
+
+**Hermes AI Markets:** Dashboard `https://{userId}.hermes.aimarkets.vn` (cùng userId). DNS `hermes` + `*.hermes` A → `72.62.72.165`. Session `market-{userId}`, `audience=aimarkets`. API: `/v1/hermes/launch|ssh|usage`.
 
 **GPU Play iframe:** `aimarkets.vn` nhúng `https://api.aimarkets.vn/v1/game-sessions/:id/player`. Middleware `aimarkets-security` **không** được `frameDeny: true` (Chrome hiện “đã từ chối kết nối”). Nếu gắn middleware trên Domain trong Dokploy UI, tắt **X-Frame-Options DENY**.
 

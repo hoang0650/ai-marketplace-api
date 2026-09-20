@@ -22,10 +22,13 @@ const walletTxSchema = new mongoose.Schema(
     reviewedAt: { type: Date, default: null },
     reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     reviewNote: { type: String, default: '', maxlength: 500 },
+    /** Structured usage / billing metadata (e.g. OpenClaw tokens). */
+    meta: { type: mongoose.Schema.Types.Mixed, default: null },
   },
   { timestamps: { createdAt: true, updatedAt: false } }
 );
 walletTxSchema.index({ type: 1, status: 1, createdAt: -1 });
+walletTxSchema.index({ user: 1, 'meta.channel': 1, createdAt: -1 });
 walletTxSchema.index({ iapTransactionId: 1 }, { unique: true, sparse: true });
 
 walletTxSchema.virtual('id').get(function idVirtual() {
