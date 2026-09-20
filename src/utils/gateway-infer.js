@@ -2,7 +2,7 @@ const crypto = require('crypto');
 const Product = require('../models/Product');
 const UsageEvent = require('../models/UsageEvent');
 const UsageStat = require('../models/UsageStat');
-const { getBalance } = require('./wallet');
+const { requireAvailableFunds } = require('./wallet');
 const { chargeUsage } = require('../finance/charge-usage');
 const { resolveProviderForProduct, computeUsageCost } = require('./provider-resolve');
 const { inferWithFallback, fetchJobStatus } = require('./denglish-client');
@@ -73,11 +73,13 @@ async function meterAndInfer(req, product, input, action = 'runsync') {
   let platformFee = 0;
 
   if (cost > 0 && !selfUse) {
-    const balance = await getBalance(buyerId);
-    if (balance < cost) {
-      const err = new Error('Insufficient wallet balance');
-      err.status = 402;
-      err.body = { cost, balance };
+    try {
+      await requireAvailableFunds(buyerId, cost);
+    } catch (err) {
+      if (err.status === 402) {
+        err.body = { cost, ...(err.body || {}) };
+        throw err;
+      }
       throw err;
     }
     const billed = await chargeUsage({

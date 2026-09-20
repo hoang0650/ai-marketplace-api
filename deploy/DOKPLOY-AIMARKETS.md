@@ -10,6 +10,8 @@ VPS Hostinger `72.62.72.165` · Dokploy `deploy.phgrouptechs.com` · DNS **Mắt
 | `www` | CNAME | Vercel / frontend |
 | `api` | A | `72.62.72.165` |
 | `ai` | A | `72.62.72.165` |
+| `openclaw` | A | `72.62.72.165` → `openclaw.aimarkets.vn` |
+| `*.openclaw` | A | `72.62.72.165` → `{userId}.openclaw.aimarkets.vn` |
 
 ## API (`aimarketplace-api`)
 
@@ -38,6 +40,9 @@ GOOGLE_CLIENT_SECRET=GOCSPX-...
 AIMARKETS_API_HOST=https://api.aimarkets.vn
 AIMARKETS_AI_HOST=https://ai.aimarkets.vn
 FRONTEND_URL=https://aimarkets.vn
+AI_URL=https://ai.aimarkets.vn
+OPENCLAW_AIMARKETS_PUBLIC_URL_TEMPLATE=https://{userId}.openclaw.aimarkets.vn
+OPENCLAW_SSH_HOST_TEMPLATE={userId}.openclaw.aimarkets.vn
 ```
 
 Deploy từ GitHub: `hoang0650/ai-marketplace-api` branch `master`.
@@ -69,6 +74,9 @@ curl -s "https://api.aimarkets.vn/v1/products?limit=1"
 1. **`traefik.yml`** — giữ `openclaw/deploy/dokploy-traefik.yml` (HTTP→HTTPS + Let's Encrypt HTTP-01).
 2. **`dynamic/middlewares.yml`** — `openclaw/deploy/dokploy-dynamic-middlewares.yml`.
 3. **`dynamic/aimarkets.yml`** — `ai-marketplace-api/deploy/dokploy-dynamic-aimarkets.yml` (CORS/security headers).
+4. **`dynamic/openclaw-aimarkets-wildcard.yml`** — `openclaw/deploy/dokploy-dynamic-openclaw-aimarkets-wildcard.yml` (**thêm**, không thay file `{hotelId}.phhotel.vn`).
+
+**OpenClaw AI Markets:** Control UI `https://{userId}.openclaw.aimarkets.vn` (userId = Mongo ObjectId 24 hex). DNS `openclaw` + `*.openclaw` A → `72.62.72.165`. Session `market-{userId}`, `audience=aimarkets`. Luồng PHHotel `{hotelId}.phhotel.vn` giữ nguyên.
 
 **GPU Play iframe:** `aimarkets.vn` nhúng `https://api.aimarkets.vn/v1/game-sessions/:id/player`. Middleware `aimarkets-security` **không** được `frameDeny: true` (Chrome hiện “đã từ chối kết nối”). Nếu gắn middleware trên Domain trong Dokploy UI, tắt **X-Frame-Options DENY**.
 

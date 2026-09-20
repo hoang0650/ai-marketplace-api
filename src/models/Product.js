@@ -9,6 +9,8 @@ const pricingSchema = new mongoose.Schema(
     interval: { type: String, enum: ['day', 'month', 'year', null], default: null },
     usageUnit: { type: String },
     usageRate: { type: Number },
+    /** List price before sale. When > price, listing shows as discounted. */
+    compareAtPrice: { type: Number, default: 0, min: 0 },
   },
   { _id: false }
 );

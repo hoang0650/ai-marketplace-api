@@ -10,7 +10,16 @@ router.get('/', async (req, res, next) => {
   try {
     const filter = {};
     if (req.query.productId) filter.product = req.query.productId;
-    const reviews = await Review.find(filter).sort({ createdAt: -1 }).lean();
+    if (req.query.creatorSlug) {
+      const slug = String(req.query.creatorSlug).toLowerCase();
+      const products = await Product.find({ creatorSlug: slug }).select('_id').lean();
+      filter.product = { $in: products.map((p) => p._id) };
+    }
+    const reviews = await Review.find(filter)
+      .populate('product', 'name slug')
+      .sort({ createdAt: -1 })
+      .limit(80)
+      .lean();
     res.json(reviews.map(mapReview));
   } catch (err) {
     next(err);

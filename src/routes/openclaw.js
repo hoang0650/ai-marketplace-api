@@ -2,11 +2,28 @@ const express = require('express');
 const crypto = require('crypto');
 const { authenticate } = require('../middleware/auth');
 const SshSession = require('../models/SshSession');
+const { AI_GATEWAY } = require('../utils/gateway-urls');
 
 const router = express.Router();
 const SSH_TTL_MS = 60 * 60 * 1000; // 60 minutes
+const USER_ID_RE = /^[a-f0-9]{24}$/i;
+const AIMARKETS_PUBLIC_TEMPLATE =
+  process.env.OPENCLAW_AIMARKETS_PUBLIC_URL_TEMPLATE || 'https://{userId}.openclaw.aimarkets.vn';
 
-function buildHashUrl({ uiBaseUrl, gatewayUrl, token, password, session }) {
+function isMongoUserId(id) {
+  return USER_ID_RE.test(String(id || '').trim());
+}
+
+function aimarketsPublicBase(userId) {
+  const id = String(userId || '').trim().toLowerCase();
+  if (!isMongoUserId(id)) return '';
+  return String(AIMARKETS_PUBLIC_TEMPLATE)
+    .replace(/\{userId\}/gi, id)
+    .replace(/\{tenant\}/gi, id)
+    .replace(/\/$/, '');
+}
+
+function buildHashUrl({ uiBaseUrl, gatewayUrl, token, password, session, userId }) {
   const base = String(uiBaseUrl || gatewayUrl || '')
     .replace(/^wss:/i, 'https:')
     .replace(/^ws:/i, 'http:')
@@ -20,7 +37,9 @@ function buildHashUrl({ uiBaseUrl, gatewayUrl, token, password, session }) {
     autoConnect: 'true',
     autoApprove: 'true',
     session: session || 'main',
+    audience: 'aimarkets',
   });
+  if (userId) hash.set('userId', String(userId));
   return `${base}/#${hash.toString()}`;
 }
 
@@ -40,7 +59,10 @@ function slugUser(user) {
 }
 
 function resolveSshTarget(user, body = {}) {
-  const hostTemplate = process.env.OPENCLAW_SSH_HOST_TEMPLATE || process.env.OPENCLAW_SSH_HOST || '';
+  const hostTemplate =
+    process.env.OPENCLAW_SSH_HOST_TEMPLATE ||
+    process.env.OPENCLAW_SSH_HOST ||
+    '{userId}.openclaw.aimarkets.vn';
   const userId = String(user?._id || 'anon');
   const allowCustom = process.env.OPENCLAW_SSH_ALLOW_CUSTOM_HOST === '1';
   const hostFromBody = allowCustom ? String(body.host || body.serverHost || '').trim() : '';
@@ -67,57 +89,107 @@ function buildSshCommand({ username, host, port, password }) {
   };
 }
 
+function aiAdminHeaders(req) {
+  const serviceToken = process.env.OPENCLAW_BEARER_TOKEN || process.env.NEST_API_TOKEN || '';
+  const incoming = String(req.headers?.authorization || '').trim();
+  const headers = { Accept: 'application/json' };
+  if (incoming.toLowerCase().startsWith('bearer ')) headers.Authorization = incoming;
+  else if (serviceToken) headers.Authorization = `Bearer ${serviceToken}`;
+  const secret = process.env.PYTHON_AI_SHARED_SECRET || process.env.NEST_SERVICE_AUTH_SECRET || '';
+  if (secret) headers['X-Service-Secret'] = secret;
+  return headers;
+}
+
+function aiBaseUrl() {
+  return String(process.env.AI_URL || process.env.PYTHON_AI_ENDPOINT || AI_GATEWAY || '')
+    .replace(/\/$/, '');
+}
+
 router.post('/launch', authenticate, async (req, res, next) => {
   try {
-    const aiUrl = String(process.env.AI_URL || process.env.PYTHON_AI_ENDPOINT || '').replace(/\/$/, '');
-    const tenantId = String(process.env.OPENCLAW_TENANT_ID || '').trim();
     const userId = String(req.user?._id || req.user?.id || '').trim();
-    const serviceToken = process.env.OPENCLAW_BEARER_TOKEN || process.env.NEST_API_TOKEN || '';
+    if (!isMongoUserId(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'OpenClaw AI Markets needs a signed-in marketplace user id.',
+      });
+    }
 
-    if (aiUrl && tenantId) {
+    const aiUrl = aiBaseUrl();
+    if (aiUrl) {
       try {
         const qs = new URLSearchParams({
-          tenant_id: tenantId,
-          current_hotel_id: tenantId,
-          selected_hotel_id: tenantId,
+          audience: 'aimarkets',
+          user_id: userId,
         });
-        if (userId) qs.set('user_id', userId);
         const upstream = await fetch(`${aiUrl}/admin/openclaw/direct-url?${qs}`, {
-          headers: serviceToken ? { Authorization: `Bearer ${serviceToken}` } : {},
+          headers: aiAdminHeaders(req),
         });
         const data = await upstream.json().catch(() => ({}));
         if (upstream.ok && data?.success && data?.url) {
           return res.json({
             success: true,
             url: data.url,
+            audience: 'aimarkets',
+            userId,
             message: data.message,
           });
         }
       } catch (err) {
-        console.warn('[openclaw/launch] direct-url failed', err?.message || err);
+        console.warn('[openclaw/launch] aimarkets direct-url failed', err?.message || err);
       }
     }
 
-    const gatewayUrl = process.env.OPENCLAW_GATEWAY_URL || process.env.OPENCLAW_PUBLIC_GATEWAY_URL || '';
+    const uiBase = aimarketsPublicBase(userId);
+    const gatewayUrl = uiBase.replace(/^https:/i, 'wss:').replace(/^http:/i, 'ws:');
     const token = process.env.OPENCLAW_GATEWAY_TOKEN || '';
-    const uiBaseUrl = process.env.OPENCLAW_UI_BASE_URL || '';
     const url = buildHashUrl({
-      uiBaseUrl,
+      uiBaseUrl: uiBase,
       gatewayUrl,
       token,
-      password: process.env.OPENCLAW_GATEWAY_PASSWORD || '',
-      session: userId ? `market-${userId}` : 'main',
+      password: process.env.OPENCLAW_GATEWAY_PASSWORD || token,
+      session: `market-${userId}`,
+      userId,
     });
 
     if (!url) {
       return res.status(503).json({
         success: false,
         message:
-          'OpenClaw not configured. Set AI_URL+OPENCLAW_TENANT_ID+OPENCLAW_BEARER_TOKEN or OPENCLAW_GATEWAY_URL+OPENCLAW_GATEWAY_TOKEN+OPENCLAW_UI_BASE_URL.',
+          'OpenClaw AI Markets is not configured. Set AI_URL or OPENCLAW_GATEWAY_TOKEN plus OPENCLAW_AIMARKETS_PUBLIC_URL_TEMPLATE.',
       });
     }
 
-    return res.json({ success: true, url });
+    return res.json({ success: true, url, audience: 'aimarkets', userId });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/device-pairings/approve', authenticate, async (req, res, next) => {
+  try {
+    const userId = String(req.user?._id || req.user?.id || '').trim();
+    const aiUrl = aiBaseUrl();
+    if (!aiUrl) {
+      return res.status(503).json({ success: false, message: 'AI_URL is not configured.' });
+    }
+    const qs = new URLSearchParams({ audience: 'aimarkets', user_id: userId });
+    const body = {
+      ...(req.body || {}),
+      role: req.body?.role || 'operator',
+      scopes: req.body?.scopes || ['operator.read', 'operator.write', 'operator.admin', 'operator.pairing'],
+      user_id: userId,
+    };
+    const upstream = await fetch(`${aiUrl}/admin/openclaw/device-pairings/approve?${qs}`, {
+      method: 'POST',
+      headers: { ...aiAdminHeaders(req), 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await upstream.json().catch(() => ({}));
+    return res.status(upstream.status === 404 ? 200 : upstream.status).json({
+      success: data?.success !== false,
+      message: data?.message,
+    });
   } catch (err) {
     next(err);
   }

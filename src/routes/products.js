@@ -49,7 +49,7 @@ router.get('/', async (req, res, next) => {
       filter.category = { $in: PRODUCT_CATEGORIES };
     }
     Object.assign(filter, catalogVisibleFilter());
-    if (req.query.creatorSlug) filter.creatorSlug = String(req.query.creatorSlug);
+    if (req.query.creatorSlug) filter.creatorSlug = String(req.query.creatorSlug).toLowerCase();
     if (req.query.featured === 'true') filter.featured = true;
 
     const q = String(req.query.q || '').trim().slice(0, 100);

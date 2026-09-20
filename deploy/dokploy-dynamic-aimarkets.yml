@@ -3,6 +3,10 @@
 # DNS (Mắt Bão): api + ai → A → 72.62.72.165
 # App domains (api.aimarkets.vn port 4100) vẫn cấu hình trong Dokploy UI → Domains.
 # File này chỉ bổ sung middleware (CORS, security headers) — không tạo router trùng UI.
+#
+# Nếu Dokploy UI đã gắn middleware `aimarkets-security` trên router API:
+#   frameDeny PHẢI là false (aimarkets.vn iframe /v1/game-sessions/:id/player).
+#   KHÔNG dán Host(`api.aimarkets.vn`) vào file OpenClaw wildcard.
 
 http:
   middlewares:

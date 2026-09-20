@@ -48,7 +48,7 @@ Sàn cung cấp listing, đặt hàng, ghi nhận hợp đồng/order, tích h�
 Các bên không được yêu cầu thanh toán ngoài hệ thống cho giao dịch phát sinh trên sàn.
 
 ## 6. Phí
-Phí sàn (commission, mặc định 20% third-party) tách khỏi phí cửa hàng Google Play / App Store khi thanh toán IAP. Phí cửa hàng do Google/Apple thu, không phải doanh thu sàn.
+Phí sàn (commission, mặc định 20% third-party) tách khỏi thuế khấu trừ (mặc định 10% trên 80% doanh thu seller = 8% đơn) và phí cửa hàng Google Play / App Store khi thanh toán IAP. Phí cửa hàng do Google/Apple thu, không phải doanh thu sàn.
 
 ## 7. Luật áp dụng
 Pháp luật Việt Nam; Nghị định về thương mại điện tử và bảo vệ dữ liệu cá nhân áp dụng khi có hiệu lực.`,
@@ -70,7 +70,8 @@ Pháp luật Việt Nam; Nghị định về thương mại điện tử và b�
 
 ## Hoa hồng sàn (platform commission)
 Phí sàn mặc định **20%** trên giá trị giao dịch third-party, **không phải thuế seller**.
-Khách hàng thanh toán giá niêm yết; Seller chịu phí sàn trừ khi có rule khác.
+Ngoài phí sàn, sàn khấu trừ **thuế 10% trên 80% doanh thu seller** (tương đương **8%** giá trị đơn). Seller thực nhận mặc định **72%** trước phí cửa hàng / phí thanh toán / hoàn.
+Khách hàng thanh toán giá niêm yết; Seller chịu phí sàn và thuế khấu trừ trừ khi có rule khác.
 Sản phẩm **Platform Direct** không chia 80/20 — toàn bộ doanh thu thuộc nền tảng (sau phí cửa hàng nếu có IAP).
 Mọi order lưu **snapshot** commissionRate / commissionAmount tại thời điểm giao dịch.
 
@@ -96,7 +97,7 @@ Bằng việc chấp thuận, Seller đồng ý:
 3. Không dùng Provider hạ tầng làm danh tính Seller.
 4. Chấp nhận kiểm duyệt sản phẩm, tạm ngưng, gỡ listing khi vi phạm.
 5. Thanh toán/đối soát qua kênh được sàn chỉ định; không thu tiền ngoài sàn cho đơn trên sàn.
-6. Chịu phí sàn (mặc định 20%) và phí cửa hàng Google Play / App Store khi giao dịch IAP, theo snapshot đơn.
+6. Chịu phí sàn (mặc định 20%), thuế khấu trừ (mặc định 10% trên 80% doanh thu seller) và phí cửa hàng Google Play / App Store khi giao dịch IAP, theo snapshot đơn.
 7. Chịu trách nhiệm pháp lý đối với sản phẩm THIRD_PARTY_SELLER của mình.`,
   },
   {
@@ -124,9 +125,9 @@ Buyer → Cổng thanh toán được cấp phép / phương thức được ph�
 ## Ledger
 Số dư hiển thị (nếu có) là **quyền lợi đối soát nội bộ**, không phải tiền gửi ngân hàng.
 
-## Phí sàn 20%
-Platform commission được ghi **PLATFORM_REVENUE**, tách khỏi thuế khấu trừ (**TAX_PAYABLE**) và seller payable.
-Không đồng nhất “còn 80%” với nghĩa vụ thuế.
+## Phí sàn 20% + thuế 8%
+Platform commission (20%) được ghi **PLATFORM_REVENUE**. Thuế khấu trừ mặc định **10% trên phần 80% của seller** (= **8%** đơn) ghi **TAX_PAYABLE**, không gộp vào hoa hồng sàn.
+Seller payable mặc định = gộp − 20% phí sàn − 8% thuế − phí cửa hàng − phí thanh toán − hoàn/chargeback.
 
 ## Phí CHPlay / App Store (IAP)
 Thanh toán In-App Purchase qua Google Play hoặc App Store chịu phí cửa hàng do Google/Apple thu (mặc định snapshot **15% CHPlay**, **30% App Store**). Ghi **STORE_FEE**, không ghi vào doanh thu sàn. Seller net = gộp − phí sàn − phí cửa hàng − thuế − phí thanh toán − hoàn/chargeback.`,
@@ -185,11 +186,14 @@ Tuân thủ pháp luật bảo vệ dữ liệu cá nhân Việt Nam. Dữ liệ
   {
     documentType: 'tax-policy',
     title: 'Chính sách thuế AI Markets',
-    summary: 'Phí sàn 20% không phải thuế; khấu trừ và kê khai theo hồ sơ Seller và Tax Engine.',
+    summary: 'Phí sàn 20% không phải thuế; khấu trừ thêm 10% trên 80% doanh thu seller (8% đơn).',
     content: `# Chính sách thuế
 
 ## Phí sàn không phải thuế
 Marketplace thu **platform commission** (mặc định 20% đối với seller bên thứ ba). Đây **không** phải thuế thu nhập / VAT của seller.
+
+## Thuế khấu trừ trên phần seller
+Sau phí sàn, seller còn **80%** doanh thu gộp. Sàn khấu trừ **10% thuế** trên phần 80% đó — tương đương **8%** giá trị đơn — và ghi **TAX_PAYABLE**. Tổng khấu trừ mặc định: **20% phí sàn + 8% thuế**.
 
 ## Phí CHPlay / App Store không phải thuế
 Phí Google Play (mặc định 15%) và App Store (mặc định 30%) trên IAP là hoa hồng/phí dịch vụ của cửa hàng ứng dụng, **không phải thuế**, không phải phí sàn. Sàn khấu trừ snapshot khi tính payout.
@@ -198,7 +202,7 @@ Phí Google Play (mặc định 15%) và App Store (mặc định 30%) trên IAP
 Seller chịu trách nhiệm kê khai, nộp thuế theo loại hình (cá nhân, hộ kinh doanh, doanh nghiệp, seller nước ngoài) và pháp luật áp dụng.
 
 ## Khấu trừ
-Khi pháp luật / Tax Rule yêu cầu, sàn có thể **khấu trừ** tại nguồn. Tỷ lệ **không** hard-code trong điều khoản vì có thể thay đổi theo pháp luật và hồ sơ thuế đã xác minh.
+Sàn khấu trừ tại nguồn theo Tax Rule. Mặc định: **10% trên 80% doanh thu seller** (8% đơn). Rule cụ thể theo hồ sơ / pháp luật có thể thay thế tỷ lệ này cho giao dịch mới.
 
 ## Hóa đơn
 Hóa đơn sàn (phí dịch vụ marketplace) khác hóa đơn hàng hóa/dịch vụ của Seller tới Buyer khi giao dịch third-party.
@@ -225,8 +229,8 @@ Chi tiết xuất hóa đơn theo hồ sơ thuế đã xác minh và quy định
 ];
 
 async function ensureLegalDocuments() {
-  const version = '2026.09.08';
-  const effectiveAt = new Date('2026-09-08T00:00:00.000Z');
+  const version = '2026.09.20';
+  const effectiveAt = new Date('2026-09-20T00:00:00.000Z');
   let created = 0;
   let skipped = 0;
 

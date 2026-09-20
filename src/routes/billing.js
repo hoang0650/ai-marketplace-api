@@ -8,7 +8,7 @@ const LegalDocument = require('../models/LegalDocument');
 const { authenticate } = require('../middleware/auth');
 const { deleteCachePattern } = require('../utils/cache');
 const { clampQty } = require('../utils/sales');
-const { getBalance } = require('../utils/wallet');
+const { getBalance, requireAvailableFunds } = require('../utils/wallet');
 const { HOLD_MS } = require('../utils/payout-hold');
 const { recordOrderLedger } = require('../finance/ledger-service');
 const { settleSaleFromDb } = require('../finance/settlement-service');
@@ -21,6 +21,8 @@ const { isLicenseCategory, resolveLicensePrice } = require('../utils/license-key
 const { issueLicenseForOrder, mapLicense } = require('../utils/issue-license');
 const { findActiveLicense } = require('../utils/content-drm');
 const { sendCheckoutSuccessEmail } = require('../utils/send-checkout-email');
+const { previewCoupon, consumeCoupon } = require('../utils/coupon');
+const { roundMoney } = require('../finance/constants');
 
 const router = express.Router();
 
@@ -86,8 +88,31 @@ router.post('/checkout', authenticate, async (req, res, next) => {
 
     const salesChannel = normalizeSalesChannel(req.body?.salesChannel);
     const checkoutQty = licensePick ? 1 : quantity;
+    const subtotal = roundMoney(unit * checkoutQty);
+    let couponDiscount = 0;
+    let couponCode = '';
+    let couponDoc = null;
+    const requestedCode = String(req.body?.couponCode || req.body?.coupon || '').trim();
+    if (requestedCode) {
+      try {
+        const preview = await previewCoupon({
+          code: requestedCode,
+          product,
+          buyerId: req.user._id,
+          subtotal,
+        });
+        couponDiscount = preview.discount;
+        couponCode = preview.code;
+        couponDoc = preview.coupon;
+      } catch (err) {
+        if (err.code) return res.status(err.status || 400).json({ message: err.message, code: err.code });
+        throw err;
+      }
+    }
+    const payableSubtotal = roundMoney(Math.max(0, subtotal - couponDiscount));
+    const discountedUnit = checkoutQty > 0 ? roundMoney(payableSubtotal / checkoutQty) : 0;
     const settlement = await settleSaleFromDb({
-      unitPrice: unit,
+      unitPrice: discountedUnit,
       quantity: checkoutQty,
       ownershipType,
       seller: { _id: product.creator, sellerType: undefined },
@@ -103,15 +128,19 @@ router.post('/checkout', authenticate, async (req, res, next) => {
     const amount = settlement.grossAmount;
 
     if (amount > 0) {
-      const balance = await getBalance(req.user._id);
-      if (balance < amount) {
-        return res.status(402).json({
-          message: `Insufficient internal ledger entitlement (need ${amount.toFixed(2)} ${currency}, have ${balance.toFixed(2)}). Top up via licensed payment rails when available.`,
-          code: 'INSUFFICIENT_WALLET',
-          amount,
-          balance,
-          currency,
-        });
+      try {
+        await requireAvailableFunds(req.user._id, amount, { currency });
+      } catch (err) {
+        if (err.status === 402) {
+          return res.status(402).json({
+            message: err.message,
+            code: err.code || 'INSUFFICIENT_WALLET',
+            amount,
+            currency,
+            ...(err.body || {}),
+          });
+        }
+        throw err;
       }
     }
 
@@ -143,6 +172,10 @@ router.post('/checkout', authenticate, async (req, res, next) => {
       amount,
       currency,
       unitPrice: settlement.unitPrice,
+      listUnitPrice: unit,
+      couponCode,
+      couponDiscount,
+      couponId: couponDoc ? couponDoc._id : null,
       grossAmount: settlement.grossAmount,
       commissionRate: settlement.commissionRate,
       commissionAmount: settlement.commissionAmount,
@@ -190,6 +223,16 @@ router.post('/checkout', authenticate, async (req, res, next) => {
         licenseTerm: licensePick?.term || '',
       },
     });
+
+    if (couponDoc) {
+      await consumeCoupon({
+        coupon: couponDoc,
+        buyerId: req.user._id,
+        orderId: order._id,
+        productId: product._id,
+        discount: couponDiscount,
+      }).catch((err) => console.error('[coupon]', err.message));
+    }
 
     if (amount > 0) {
       await WalletTx.create({
@@ -294,6 +337,9 @@ router.post('/checkout', authenticate, async (req, res, next) => {
       quantity: checkoutQty,
       amount,
       currency,
+      couponCode: couponCode || undefined,
+      couponDiscount: couponDiscount || undefined,
+      listUnitPrice: unit,
       commissionRate: settlement.commissionRate,
       commissionAmount: settlement.commissionAmount,
       taxAmount: settlement.taxAmount,

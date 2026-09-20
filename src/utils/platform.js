@@ -1,4 +1,4 @@
-const { PLATFORM_COMMISSION_RATE, PLATFORM_FEE_RATE, roundMoney } = require('../finance/constants');
+const { PLATFORM_COMMISSION_RATE, PLATFORM_FEE_RATE, SELLER_TAX_RATE, roundMoney } = require('../finance/constants');
 const { settleSale } = require('../finance/settlement-engine');
 
 /**
@@ -27,4 +27,4 @@ function splitRevenue(gross, { ownershipType = 'THIRD_PARTY_SELLER', taxRules = 
   };
 }
 
-module.exports = { PLATFORM_FEE_RATE, PLATFORM_COMMISSION_RATE, splitRevenue, roundMoney };
+module.exports = { PLATFORM_FEE_RATE, PLATFORM_COMMISSION_RATE, SELLER_TAX_RATE, splitRevenue, roundMoney };

@@ -91,20 +91,29 @@ ${viewportMeta}
 <title>${t}</title>
 <style>
   html,body{margin:0;height:100%;background:#070b12;color:#c8f5d8;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow:hidden;}
-  #term{position:absolute;inset:0 0 48px 0;padding:12px 14px;overflow:auto;white-space:pre-wrap;word-break:break-word;font-size:13px;line-height:1.45;}
+  #term{position:absolute;inset:0 0 56px 0;padding:12px 14px;overflow:auto;white-space:pre-wrap;word-break:break-word;font-size:13px;line-height:1.45;}
   #bar{position:absolute;left:0;right:0;bottom:0;display:flex;gap:8px;align-items:center;padding:8px 10px calc(8px + env(safe-area-inset-bottom));background:#0c121c;border-top:1px solid #1c2a3a;}
+  #bar form{display:flex;flex:1;min-width:0;gap:8px;align-items:center;margin:0}
   #bar span{color:#3dffb0;font-size:12px;flex:none}
-  #cmd{flex:1;min-width:0;background:transparent;border:0;outline:0;color:#e8fff2;font:inherit;font-size:14px;}
+  #cmd{flex:1;min-width:0;background:transparent;border:0;outline:0;color:#e8fff2;font:inherit;font-size:16px;}
+  #go{flex:none;background:#3dffb0;color:#071018;border:0;border-radius:8px;padding:8px 12px;font-weight:800;font-size:12px;}
   .dim{color:#6f8b7c}
 </style></head>
 <body>
 <div id="term"></div>
-<div id="bar"><span>$</span><input id="cmd" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="enter" placeholder="nvidia-smi · python train.py · help"/></div>
+<div id="bar">
+  <span>$</span>
+  <form id="cmdForm" action="#" autocomplete="off">
+    <input id="cmd" type="text" inputmode="text" enterkeyhint="send" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" placeholder="nvidia-smi · python train.py · help"/>
+    <button id="go" type="submit">Send</button>
+  </form>
+</div>
 <script>
 const gpu=${gpuJ};
 const host=${hostJ};
 const term=document.getElementById('term');
 const input=document.getElementById('cmd');
+const form=document.getElementById('cmdForm');
 const hist=[]; let hi=-1;
 function print(s){term.textContent+=s;term.scrollTop=term.scrollHeight;}
 print('AI Markets GPU lab  ·  '+host+'\\n'+gpu+'\\nSandbox shell — no D-pad. Type help.\\n\\n');
@@ -137,10 +146,20 @@ function run(raw){
   if(cmd.startsWith('echo ')){print(cmd.slice(5)+'\\n');return;}
   print('sandbox: command not found: '+cmd+'\\n');
 }
+window.__gpuRun=function(raw){ run(raw); };
+function submitCmd(){
+  const v=input.value;
+  input.value='';
+  run(v);
+}
+form.addEventListener('submit',function(e){ e.preventDefault(); submitCmd(); });
 input.addEventListener('keydown',e=>{
-  if(e.key==='Enter'){e.preventDefault();run(input.value);input.value='';return;}
+  if(e.key==='Enter'||e.keyCode===13){e.preventDefault();submitCmd();return;}
   if(e.key==='ArrowUp'){e.preventDefault();if(!hist.length)return;hi=Math.max(0,hi-1);input.value=hist[hi]||'';return;}
   if(e.key==='ArrowDown'){e.preventDefault();hi=Math.min(hist.length,hi+1);input.value=hist[hi]||'';}
+});
+input.addEventListener('keyup',e=>{
+  if(e.key==='Enter'||e.keyCode===13){e.preventDefault();}
 });
 term.addEventListener('click',()=>input.focus());
 document.addEventListener('keydown',e=>{ if(e.target!==input && e.key.length===1) input.focus(); });

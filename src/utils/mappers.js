@@ -47,9 +47,12 @@ function mapProduct(doc, { includeSecrets = false } = {}) {
 
 function mapReview(doc) {
   const o = typeof doc.toObject === 'function' ? doc.toObject({ virtuals: true }) : { ...doc };
+  const product = o.product && typeof o.product === 'object' ? o.product : null;
   return {
     id: String(o._id || o.id),
-    productId: String(o.product?._id || o.product),
+    productId: String(product?._id || o.product || ''),
+    productName: o.productName || product?.name || '',
+    productSlug: o.productSlug || product?.slug || '',
     userId: String(o.user?._id || o.user),
     userName: o.userName,
     rating: o.rating,
@@ -74,6 +77,9 @@ function mapOrder(doc, { viewerId, viewerRole } = {}) {
     quantity: Math.max(1, Number(o.quantity) || 1),
     amount: o.amount,
     unitPrice: o.unitPrice,
+    listUnitPrice: o.listUnitPrice,
+    couponCode: o.couponCode || '',
+    couponDiscount: roundMoney(o.couponDiscount),
     grossAmount: o.grossAmount ?? o.amount,
     commissionRate: o.commissionRate,
     commissionAmount: roundMoney(o.commissionAmount),
@@ -150,7 +156,7 @@ function mapNotification(doc) {
 }
 
 async function mapCreator(user, Product) {
-  const products = await Product.find({ creator: user._id }).select('rating salesCount').lean();
+  const products = await Product.find({ creator: user._id }).select('rating salesCount reviewCount').lean();
   const productCount = products.length;
   const rating =
     productCount === 0
@@ -159,6 +165,7 @@ async function mapCreator(user, Product) {
           (products.reduce((s, p) => s + (Number(p.rating) || 0), 0) / productCount) * 10
         ) / 10;
   const totalSales = products.reduce((s, p) => s + (Number(p.salesCount) || 0), 0);
+  const reviewCount = products.reduce((s, p) => s + (Number(p.reviewCount) || 0), 0);
   return {
     id: user._id.toString(),
     slug: user.creatorSlug,
@@ -170,6 +177,8 @@ async function mapCreator(user, Product) {
     productCount,
     rating,
     totalSales,
+    reviewCount,
+    joinedAt: user.createdAt ? new Date(user.createdAt).toISOString() : '',
   };
 }
 

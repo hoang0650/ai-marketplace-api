@@ -3,7 +3,7 @@ const Product = require('../models/Product');
 const UsageEvent = require('../models/UsageEvent');
 const UsageStat = require('../models/UsageStat');
 const { authenticate } = require('../middleware/auth');
-const { getBalance } = require('../utils/wallet');
+const { getAvailableBalance } = require('../utils/wallet');
 const { chargeUsage } = require('../finance/charge-usage');
 const { resolveProviderForProduct, computeUsageCost } = require('../utils/provider-resolve');
 const { inferWithFallback, quoteInference } = require('../utils/denglish-client');
@@ -173,13 +173,14 @@ router.post('/run', authenticate, async (req, res, next) => {
       }
     }
     if (estimatedCost > 0) {
-      const balance = await getBalance(req.user._id);
-      // Allow run if balance covers estimate; final charge may differ slightly
-      if (balance < estimatedCost * 0.5 && balance < 0.001) {
+      const { available, balance, held } = await getAvailableBalance(req.user._id);
+      if (available < estimatedCost * 0.5 && available < 0.001) {
         return res.status(402).json({
-          message: `Insufficient wallet balance (est. $${estimatedCost.toFixed(4)}). Please top up.`,
+          message: `Insufficient available wallet balance (est. $${estimatedCost.toFixed(4)}). Please top up.`,
           estimatedCost,
           balance,
+          available,
+          held,
           warnings: quote.warnings.length ? quote.warnings : undefined,
         });
       }
@@ -231,12 +232,14 @@ router.post('/run', authenticate, async (req, res, next) => {
     let platformFee = 0;
 
     if (cost > 0 && !selfUse) {
-      const balance = await getBalance(buyerId);
-      if (balance < cost) {
+      const { available, balance, held } = await getAvailableBalance(buyerId);
+      if (available < cost) {
         return res.status(402).json({
-          message: `Insufficient wallet balance (need $${cost.toFixed(4)}, have $${balance.toFixed(4)}).`,
+          message: `Insufficient available wallet balance (need $${cost.toFixed(4)}, have $${available.toFixed(4)}).`,
           cost,
           balance,
+          available,
+          held,
           usage,
         });
       }

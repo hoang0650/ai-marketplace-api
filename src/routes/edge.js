@@ -3,7 +3,7 @@ const Product = require('../models/Product');
 const UsageEvent = require('../models/UsageEvent');
 const UsageStat = require('../models/UsageStat');
 const { authenticate } = require('../middleware/auth');
-const { getBalance } = require('../utils/wallet');
+const { requireAvailableFunds } = require('../utils/wallet');
 const { chargeUsage } = require('../finance/charge-usage');
 const { resolveProviderForProduct, computeUsageCost } = require('../utils/provider-resolve');
 const { inferWithFallback } = require('../utils/denglish-client');
@@ -52,9 +52,13 @@ router.post('/infer/:slug', authenticate, async (req, res, next) => {
     let platformFee = 0;
 
     if (cost > 0 && !selfUse) {
-      const balance = await getBalance(buyerId);
-      if (balance < cost) {
-        return res.status(402).json({ message: 'Insufficient wallet balance', cost, balance });
+      try {
+        await requireAvailableFunds(buyerId, cost);
+      } catch (err) {
+        if (err.status === 402) {
+          return res.status(402).json({ message: err.message, cost, ...(err.body || {}) });
+        }
+        throw err;
       }
       const billed = await chargeUsage({
         buyerId,

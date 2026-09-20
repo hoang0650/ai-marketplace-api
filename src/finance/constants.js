@@ -4,6 +4,12 @@ const PLATFORM_COMMISSION_RATE = 0.2;
 const PLATFORM_FEE_RATE = PLATFORM_COMMISSION_RATE;
 
 /**
+ * Default withholding on the seller share after platform commission.
+ * 10% of the remaining 80% = 8% of order gross.
+ */
+const SELLER_TAX_RATE = 0.1;
+
+/**
  * Default IAP store commissions (seller-borne, not platform revenue, not tax).
  * Google Play: 15% standard service fee (first $1M / most subscriptions).
  * App Store: 30% standard Apple commission (15% may apply under Apple programs).
@@ -20,6 +26,7 @@ function roundMoney(n, digits = 2) {
 module.exports = {
   PLATFORM_COMMISSION_RATE,
   PLATFORM_FEE_RATE,
+  SELLER_TAX_RATE,
   GOOGLE_PLAY_STORE_FEE_RATE,
   APP_STORE_STORE_FEE_RATE,
   roundMoney,

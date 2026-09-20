@@ -1,4 +1,4 @@
-const { roundMoney } = require('./constants');
+const { roundMoney, SELLER_TAX_RATE } = require('./constants');
 const { calculateCommission } = require('./commission-engine');
 const { calculateTax } = require('./tax-engine');
 const { calculatePaymentFee } = require('./payment-fee-engine');
@@ -51,18 +51,40 @@ function settleSale({
     digits,
   });
 
-  const tax = calculateTax({
+  const sellerShareAmount = roundMoney(Math.max(0, grossAmount - commission.commissionAmount), digits);
+  let tax = calculateTax({
     seller,
     buyer,
     product,
     jurisdiction,
     transactionDate,
     taxCategory,
-    taxableAmount: grossAmount,
+    taxableAmount: sellerShareAmount,
     rules: taxRules,
     sellerTaxProfile,
     digits,
   });
+
+  if (ownershipType !== 'PLATFORM_DIRECT' && sellerType !== 'PLATFORM' && !tax.taxApplicable) {
+    const amount = roundMoney(sellerShareAmount * SELLER_TAX_RATE, digits);
+    tax = {
+      taxApplicable: amount > 0,
+      taxes: amount
+        ? [
+            {
+              type: 'SELLER_WITHHOLDING',
+              rate: SELLER_TAX_RATE,
+              amount,
+              ruleId: null,
+              name: 'DEFAULT_SELLER_TAX_ON_SHARE',
+            },
+          ]
+        : [],
+      totalTaxAmount: amount,
+      withholdingRequired: true,
+      reason: 'DEFAULT_SELLER_TAX_ON_SHARE',
+    };
+  }
 
   const paymentFee = calculatePaymentFee({
     grossAmount,
@@ -122,6 +144,7 @@ function settleSale({
     commissionAmount,
     commissionRuleId: commission.ruleId,
     commissionRuleName: commission.ruleName,
+    taxableAmount: sellerShareAmount,
     taxAmount: tax.totalTaxAmount,
     taxBreakdown: tax.taxes,
     taxApplicable: tax.taxApplicable,

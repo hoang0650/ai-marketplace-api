@@ -4,7 +4,7 @@ const Product = require('../models/Product');
 const GpuServer = require('../models/GpuServer');
 const UsageEvent = require('../models/UsageEvent');
 const UsageStat = require('../models/UsageStat');
-const { getBalance } = require('../utils/wallet');
+const { getAvailableBalance, requireAvailableFunds } = require('../utils/wallet');
 const { chargeUsage } = require('../finance/charge-usage');
 const provider = require('../utils/denglish-providers');
 const { assertSafeHttpUrl, assertSafeStreamHost } = require('./safe-http-url');
@@ -184,12 +184,12 @@ async function assertBuyerAccess(user, product) {
   if (pricing.model === 'usage') {
     const min = Number(pricing.usageRate) > 0 ? Math.max(pricing.usageRate / 60, 0.01) : 0;
     if (min > 0) {
-      const balance = await getBalance(user._id);
-      if (balance < min) {
-        const err = new Error('Insufficient wallet balance for compute session');
+      const { available, balance, held } = await getAvailableBalance(user._id);
+      if (available < min) {
+        const err = new Error('Insufficient available wallet balance for compute session');
         err.status = 402;
-        err.code = 'INSUFFICIENT_BALANCE';
-        err.body = { balance, minimum: min };
+        err.code = held > 0 ? 'PAYOUT_HELD' : 'INSUFFICIENT_BALANCE';
+        err.body = { balance, available, held, minimum: min };
         throw err;
       }
     }
@@ -245,11 +245,15 @@ async function finalizeSessionBilling(session, product) {
     await session.save();
     return 0;
   }
-  const balance = await getBalance(buyerId);
-  if (balance < cost) {
-    session.billedCost = cost;
-    await session.save();
-    return cost;
+  try {
+    await requireAvailableFunds(buyerId, cost);
+  } catch (err) {
+    if (err.status === 402) {
+      session.billedCost = cost;
+      await session.save();
+      return cost;
+    }
+    throw err;
   }
   const billed = await chargeUsage({
     buyerId,

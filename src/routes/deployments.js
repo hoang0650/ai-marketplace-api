@@ -5,7 +5,7 @@ const UsageEvent = require('../models/UsageEvent');
 const Product = require('../models/Product');
 const UsageStat = require('../models/UsageStat');
 const { authenticate, requireRoles } = require('../middleware/auth');
-const { getBalance } = require('../utils/wallet');
+const { requireAvailableFunds } = require('../utils/wallet');
 const { chargeUsage } = require('../finance/charge-usage');
 const { slugify } = require('../utils/serialize');
 const { normalizeRuntime, normalizeRuntimeForStorage, publicRuntime, mergeRuntime } = require('../utils/runtime');
@@ -298,11 +298,17 @@ router.post('/:id/invoke', authenticate, async (req, res, next) => {
     let platformFee = 0;
 
     if (cost > 0 && !selfUse) {
-      const balance = await getBalance(buyerId);
-      if (balance < cost) {
-        return res.status(402).json({
-          message: `Insufficient wallet balance (need ${cost.toFixed(4)}, have ${balance.toFixed(4)}). Please top up.`,
-        });
+      try {
+        await requireAvailableFunds(buyerId, cost);
+      } catch (err) {
+        if (err.status === 402) {
+          return res.status(402).json({
+            message: err.message,
+            code: err.code,
+            ...(err.body || {}),
+          });
+        }
+        throw err;
       }
       const billed = await chargeUsage({
         buyerId,

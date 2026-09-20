@@ -9,6 +9,7 @@ const { ensureAiProviderProducts } = require('./utils/ensure-ai-provider-product
 const { ensureComputeTestProducts } = require('./utils/ensure-compute-products');
 const { ensureLegalDocuments } = require('./utils/ensure-legal-documents');
 const { ensureCommissionRules } = require('./utils/ensure-commission-rules');
+const { ensureTaxRules } = require('./utils/ensure-tax-rules');
 const { ensureStoreFeeRules } = require('./utils/ensure-store-fee-rules');
 const { syncSalesCountsFromOrders } = require('./utils/sales');
 const { attachTerminalGateway } = require('./terminal/gateway');
@@ -27,6 +28,12 @@ connectDb()
   .then((commission) => {
     if (commission) {
       console.log(`[finance] commission rule ensured rate=${commission.rate} created=${commission.created}`);
+    }
+  })
+  .then(() => ensureTaxRules())
+  .then((tax) => {
+    if (tax) {
+      console.log(`[finance] tax rule ensured rate=${tax.rate} created=${tax.created} updated=${tax.updated}`);
     }
   })
   .then(() => ensureStoreFeeRules())

@@ -62,4 +62,27 @@ async function getAvailableBalance(userId) {
   return { balance, held, available, holds };
 }
 
-module.exports = { MAX_TX_AMOUNT, normalizeAmount, getBalance, getAvailableBalance };
+/** Spend / checkout must use available funds so 48h hold stays reserved for buyer disputes. */
+async function requireAvailableFunds(userId, amount, { currency = 'USD' } = {}) {
+  const need = Number(amount) || 0;
+  const summary = await getAvailableBalance(userId);
+  if (need <= 0) return summary;
+  if (summary.available + 1e-9 >= need) return summary;
+  const err = new Error(
+    summary.held > 0
+      ? `Insufficient available balance. Ledger ${summary.balance.toFixed(2)}, held ${summary.held.toFixed(2)} (48h protection or open dispute), available ${summary.available.toFixed(2)}.`
+      : `Insufficient internal ledger entitlement (need ${need.toFixed(2)} ${currency}, have ${summary.available.toFixed(2)}).`,
+  );
+  err.status = 402;
+  err.code = summary.held > 0 ? 'PAYOUT_HELD' : 'INSUFFICIENT_WALLET';
+  err.body = { ...summary, amount: need, currency };
+  throw err;
+}
+
+module.exports = {
+  MAX_TX_AMOUNT,
+  normalizeAmount,
+  getBalance,
+  getAvailableBalance,
+  requireAvailableFunds,
+};

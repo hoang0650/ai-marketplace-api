@@ -42,8 +42,9 @@ describe('Case 1 – individual seller', () => {
     assert.equal(s.grossAmount, 1_000_000);
     assert.equal(s.commissionRate, 0.2);
     assert.equal(s.commissionAmount, 200_000);
-    assert.equal(s.taxAmount, 15_000);
-    assert.equal(s.sellerNetAmount, 785_000);
+    assert.equal(s.taxableAmount, 800_000);
+    assert.equal(s.taxAmount, 12_000);
+    assert.equal(s.sellerNetAmount, 788_000);
     assert.notEqual(s.sellerNetAmount, 800_000);
   });
 });
@@ -164,11 +165,11 @@ describe('Case 8 – tax rule change does not rewrite snapshot', () => {
     const later = calculateTax({
       sellerTaxProfile: { sellerType: 'INDIVIDUAL', country: 'VN' },
       product: { taxCategory: 'AI_API' },
-      taxableAmount: 1_000_000,
+      taxableAmount: 800_000,
       rules: [{ ...VN_INDIVIDUAL_PIT, rate: 0.02 }],
     });
-    assert.equal(snapshot.taxAmount, 15_000);
-    assert.equal(later.totalTaxAmount, 20_000);
+    assert.equal(snapshot.taxAmount, 12_000);
+    assert.equal(later.totalTaxAmount, 16_000);
   });
 });
 
@@ -195,15 +196,17 @@ describe('Case 10 – foreign seller does not match VN-only rule', () => {
   });
 });
 
-test('no matching tax rule means zero tax (rates not hardcoded)', () => {
+test('default 10% tax on seller 80% share is 8% of order', () => {
   const s = settleSale({
     unitPrice: 1_000_000,
     ownershipType: 'THIRD_PARTY_SELLER',
     commissionRules: [{ rate: 0.2, status: 'ACTIVE' }],
     taxRules: [],
   });
-  assert.equal(s.taxAmount, 0);
-  assert.equal(s.sellerNetAmount, 800_000);
+  assert.equal(s.commissionAmount, 200_000);
+  assert.equal(s.taxableAmount, 800_000);
+  assert.equal(s.taxAmount, 80_000);
+  assert.equal(s.sellerNetAmount, 720_000);
   assert.equal(s.storeFeeAmount, 0);
   assert.equal(s.salesChannel, 'WEB');
 });
@@ -221,8 +224,8 @@ describe('Case 11 – Google Play / CHPlay store fee on top of 20% commission', 
     assert.equal(s.storeFeeRate, 0.15);
     assert.equal(s.storeFeeAmount, 150_000);
     assert.equal(s.commissionAmount, 200_000);
-    assert.equal(s.taxAmount, 0);
-    assert.equal(s.sellerNetAmount, 650_000);
+    assert.equal(s.taxAmount, 80_000);
+    assert.equal(s.sellerNetAmount, 570_000);
     assert.equal(s.platformRevenueAmount, 200_000);
   });
 });
@@ -240,7 +243,8 @@ describe('Case 12 – App Store fee on top of 20% commission', () => {
     assert.equal(s.storeFeeRate, 0.3);
     assert.equal(s.storeFeeAmount, 300_000);
     assert.equal(s.commissionAmount, 200_000);
-    assert.equal(s.sellerNetAmount, 500_000);
+    assert.equal(s.taxAmount, 80_000);
+    assert.equal(s.sellerNetAmount, 420_000);
   });
 });
 

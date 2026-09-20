@@ -5,6 +5,7 @@ const LegalAcceptance = require('../models/LegalAcceptance');
 const { authenticate, requireRoles } = require('../middleware/auth');
 const { getOrCreateSellerProfile } = require('../utils/seller-compliance');
 const { writeAuditLog } = require('../utils/audit');
+const { PLATFORM_COMMISSION_RATE, SELLER_TAX_RATE } = require('../finance/constants');
 
 const router = express.Router();
 
@@ -239,7 +240,8 @@ router.get('/me/earnings', authenticate, async (req, res, next) => {
     res.json({
       grossSales,
       platformFee,
-      platformCommissionRate: 0.2,
+      platformCommissionRate: PLATFORM_COMMISSION_RATE,
+      sellerTaxRate: SELLER_TAX_RATE,
       taxWithholding,
       paymentFees,
       storeFees,

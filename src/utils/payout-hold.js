@@ -1,4 +1,6 @@
+const mongoose = require('mongoose');
 const Order = require('../models/Order');
+const UsageEvent = require('../models/UsageEvent');
 
 const HOLD_HOURS = Math.max(1, Number(process.env.PAYOUT_HOLD_HOURS || 48));
 const HOLD_MS = HOLD_HOURS * 60 * 60 * 1000;
@@ -54,6 +56,52 @@ function canOpenDispute(order, now = new Date()) {
   return now < holdUntil(order);
 }
 
+function sellerQueryId(sellerId) {
+  if (sellerId && mongoose.Types.ObjectId.isValid(String(sellerId))) {
+    return new mongoose.Types.ObjectId(String(sellerId));
+  }
+  return sellerId;
+}
+
+async function getUsageHolds(sellerId, now = new Date()) {
+  const since = new Date(now.getTime() - HOLD_MS);
+  const [row] = await UsageEvent.aggregate([
+    {
+      $match: {
+        seller: sellerQueryId(sellerId),
+        createdAt: { $gte: since },
+        sellerNet: { $gt: 0 },
+      },
+    },
+    {
+      $group: {
+        _id: null,
+        held: { $sum: '$sellerNet' },
+        newest: { $max: '$createdAt' },
+        currency: { $first: '$currency' },
+      },
+    },
+  ]);
+  const held = roundMoney(row?.held || 0);
+  if (held <= 0) return { held: 0, holds: [] };
+  const newest = row.newest ? new Date(row.newest) : now;
+  return {
+    held,
+    holds: [
+      {
+        orderId: 'usage-hold',
+        productName: 'Usage (giữ 48h)',
+        amount: held,
+        currency: row.currency || 'USD',
+        kind: 'protection_window',
+        holdUntil: new Date(newest.getTime() + HOLD_MS).toISOString(),
+        disputeStatus: 'none',
+        disputeReason: '',
+      },
+    ],
+  };
+}
+
 async function getSellerHolds(sellerId) {
   const orders = await Order.find({
     seller: sellerId,
@@ -80,6 +128,9 @@ async function getSellerHolds(sellerId) {
       disputeReason: o.disputeReason || '',
     });
   }
+  const usage = await getUsageHolds(sellerId, now);
+  held += usage.held;
+  holds.push(...usage.holds);
   return { held: roundMoney(held), holds };
 }
 
@@ -93,4 +144,5 @@ module.exports = {
   holdKind,
   canOpenDispute,
   getSellerHolds,
+  getUsageHolds,
 };
