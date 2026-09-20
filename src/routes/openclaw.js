@@ -1,8 +1,16 @@
 const express = require('express');
 const crypto = require('crypto');
+const mongoose = require('mongoose');
 const { authenticate } = require('../middleware/auth');
 const SshSession = require('../models/SshSession');
+const WalletTx = require('../models/WalletTx');
 const { AI_GATEWAY } = require('../utils/gateway-urls');
+const { getAvailableBalance } = require('../utils/wallet');
+const {
+  AIMARKETS_PROVIDER_MARKUP,
+  computeOpenClawSellCost,
+  isPhhotelModelId,
+} = require('../utils/openclaw-pricing');
 
 const router = express.Router();
 const SSH_TTL_MS = 60 * 60 * 1000; // 60 minutes
@@ -311,6 +319,159 @@ router.post('/ssh/revoke', authenticate, async (req, res, next) => {
       { $set: { revokedAt: new Date() } }
     );
     return res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+function serviceSecretOk(req) {
+  const expected = String(
+    process.env.AIMARKETS_SERVICE_SECRET ||
+      process.env.NEST_SERVICE_AUTH_SECRET ||
+      process.env.PYTHON_AI_SHARED_SECRET ||
+      ''
+  ).trim();
+  if (!expected) return false;
+  const got = String(req.headers['x-service-secret'] || '').trim();
+  return got && got === expected;
+}
+
+function readOpenClawUserId(req) {
+  return String(
+    req.body?.user_id ||
+      req.body?.userId ||
+      req.query?.user_id ||
+      req.query?.userId ||
+      req.user?._id ||
+      req.user?.id ||
+      ''
+  )
+    .trim()
+    .toLowerCase();
+}
+
+/**
+ * Gateway plugin: check wallet before OpenClaw agent run (aimarkets only).
+ * Auth: X-Service-Secret or buyer JWT.
+ */
+router.get('/usage/check', async (req, res, next) => {
+  try {
+    const viaSecret = serviceSecretOk(req);
+    let userId = readOpenClawUserId(req);
+    if (!viaSecret) {
+      return authenticate(req, res, async () => {
+        try {
+          const uid = String(req.user._id);
+          const { available, balance, held } = await getAvailableBalance(req.user._id);
+          return res.json({
+            allowed: available >= 0,
+            available,
+            balance,
+            held,
+            userId: uid,
+            markup: AIMARKETS_PROVIDER_MARKUP,
+          });
+        } catch (e) {
+          next(e);
+        }
+      });
+    }
+    if (!USER_ID_RE.test(userId)) {
+      return res.status(400).json({ allowed: false, message: 'user_id required' });
+    }
+    const { available, balance, held } = await getAvailableBalance(new mongoose.Types.ObjectId(userId));
+    return res.json({
+      allowed: true,
+      available,
+      balance,
+      held,
+      userId,
+      markup: AIMARKETS_PROVIDER_MARKUP,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Gateway plugin: charge wallet after LLM output (provider COGS + 25%).
+ * Rejects PHHotel Nest stack model ids on the aimarkets surface.
+ */
+router.post('/usage', async (req, res, next) => {
+  const runCharge = async (userId) => {
+    if (!USER_ID_RE.test(userId)) {
+      return res.status(400).json({ success: false, message: 'user_id required' });
+    }
+    const model = String(req.body?.model || '').trim();
+    if (model && isPhhotelModelId(model)) {
+      return res.status(403).json({
+        success: false,
+        message: 'PHHotel models cannot be billed on AI Markets OpenClaw.',
+        model,
+      });
+    }
+    const inputTokens = Math.max(0, Math.floor(Number(req.body?.inputTokens) || 0));
+    const outputTokens = Math.max(0, Math.floor(Number(req.body?.outputTokens) || 0));
+    const markup =
+      Number.isFinite(Number(req.body?.markup)) && Number(req.body.markup) >= 0
+        ? Number(req.body.markup)
+        : AIMARKETS_PROVIDER_MARKUP;
+    let cost = Number(req.body?.cost);
+    if (!Number.isFinite(cost) || cost < 0) {
+      cost = computeOpenClawSellCost({ model, inputTokens, outputTokens, markup });
+    }
+    cost = Math.round(cost * 1e6) / 1e6;
+    if (!(cost > 0)) {
+      return res.json({
+        success: true,
+        charged: 0,
+        skipped: true,
+        reason: 'zero_cost',
+        model,
+        inputTokens,
+        outputTokens,
+        markup,
+      });
+    }
+    const oid = new mongoose.Types.ObjectId(userId);
+    const { available } = await getAvailableBalance(oid);
+    if (available + 1e-9 < cost) {
+      return res.status(402).json({
+        success: false,
+        message: `Insufficient wallet (need $${cost.toFixed(6)}, available $${available.toFixed(4)}).`,
+        cost,
+        available,
+      });
+    }
+    await WalletTx.create({
+      user: oid,
+      type: 'debit',
+      amount: cost,
+      currency: 'USD',
+      note: `OpenClaw ${model || 'llm'} (+${Math.round(markup * 100)}% provider markup) in=${inputTokens} out=${outputTokens}`,
+    });
+    return res.json({
+      success: true,
+      charged: cost,
+      model,
+      inputTokens,
+      outputTokens,
+      markup,
+      userId,
+    });
+  };
+
+  try {
+    if (serviceSecretOk(req)) {
+      return runCharge(readOpenClawUserId(req));
+    }
+    return authenticate(req, res, async () => {
+      try {
+        await runCharge(String(req.user._id));
+      } catch (e) {
+        next(e);
+      }
+    });
   } catch (err) {
     next(err);
   }

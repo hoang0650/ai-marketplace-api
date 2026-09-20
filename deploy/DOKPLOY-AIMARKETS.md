@@ -43,6 +43,8 @@ FRONTEND_URL=https://aimarkets.vn
 AI_URL=https://ai.aimarkets.vn
 OPENCLAW_AIMARKETS_PUBLIC_URL_TEMPLATE=https://{userId}.openclaw.aimarkets.vn
 OPENCLAW_SSH_HOST_TEMPLATE={userId}.openclaw.aimarkets.vn
+AIMARKETS_SERVICE_SECRET=<shared with OpenClaw aimarkets-usage plugin>
+OPENCLAW_AIMARKETS_MARKUP=0.25
 ```
 
 Deploy từ GitHub: `hoang0650/ai-marketplace-api` branch `master`.
