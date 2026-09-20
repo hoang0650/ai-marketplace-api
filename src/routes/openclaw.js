@@ -65,7 +65,16 @@ function resolveSshTarget(user, body = {}) {
     '{userId}.openclaw.aimarkets.vn';
   const userId = String(user?._id || 'anon');
   const allowCustom = process.env.OPENCLAW_SSH_ALLOW_CUSTOM_HOST === '1';
-  const hostFromBody = allowCustom ? String(body.host || body.serverHost || '').trim() : '';
+  const rawHost = String(body.host || body.serverHost || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/\/$/, '');
+  // Never accept leftover PHHotel sandbox hosts from old UI placeholders.
+  const isPhhotelHost = /(^|\.)phhotel\.vn$/i.test(rawHost);
+  const isAimarketsHost = /(^|\.)openclaw\.aimarkets\.vn$/i.test(rawHost) || /(^|\.)aimarkets\.vn$/i.test(rawHost);
+  const hostFromBody =
+    rawHost && !isPhhotelHost && (allowCustom || isAimarketsHost) ? rawHost : '';
   const host =
     hostFromBody ||
     (hostTemplate
