@@ -160,7 +160,7 @@ router.post('/launch', authenticate, async (req, res, next) => {
     const uiBase = aimarketsPublicBase(userId);
     const gatewayUrl = uiBase.replace(/^https:/i, 'wss:').replace(/^http:/i, 'ws:');
     const token = process.env.OPENCLAW_GATEWAY_TOKEN || '';
-    const url = buildHashUrl({
+    let url = buildHashUrl({
       uiBaseUrl: uiBase,
       gatewayUrl,
       token,
@@ -169,15 +169,32 @@ router.post('/launch', authenticate, async (req, res, next) => {
       userId,
     });
 
+    // No gateway token yet — still open the public Control UI host so Launch is usable.
+    if (!url && uiBase) {
+      const qs = new URLSearchParams({
+        userId,
+        audience: 'aimarkets',
+        session: `market-${userId}`,
+        autoConnect: 'true',
+      });
+      url = `${uiBase}/#${qs.toString()}`;
+    }
+
     if (!url) {
       return res.status(503).json({
         success: false,
         message:
-          'OpenClaw AI Markets is not configured. Set AI_URL or OPENCLAW_GATEWAY_TOKEN plus OPENCLAW_AIMARKETS_PUBLIC_URL_TEMPLATE.',
+          'OpenClaw AI Markets is not configured. Set OPENCLAW_AIMARKETS_PUBLIC_URL_TEMPLATE (and ideally OPENCLAW_GATEWAY_TOKEN).',
       });
     }
 
-    return res.json({ success: true, url, audience: 'aimarkets', userId });
+    return res.json({
+      success: true,
+      url,
+      audience: 'aimarkets',
+      userId,
+      autoLogin: Boolean(token),
+    });
   } catch (err) {
     next(err);
   }
