@@ -15,16 +15,24 @@ const router = express.Router();
 const SSH_TTL_MS = 60 * 60 * 1000;
 const USER_ID_RE = /^[a-f0-9]{24}$/i;
 const AIMARKETS_PUBLIC_TEMPLATE =
-  process.env.NANOCLAW_AIMARKETS_PUBLIC_URL_TEMPLATE || 'https://{userId}.nanoclaw.aimarkets.vn';
+  process.env.NANOCLAW_AIMARKETS_PUBLIC_URL_TEMPLATE ||
+  process.env.NANOCLAW_PROXVN_URL_TEMPLATE ||
+  'https://{userId}.bacsycay.click';
 
 function isMongoUserId(id) {
   return USER_ID_RE.test(String(id || '').trim());
 }
 
 function aimarketsPublicBase(userId) {
+  const template = String(AIMARKETS_PUBLIC_TEMPLATE).trim();
+  if (!template) return '';
+  // Shared ProxVN tunnel (no {userId} placeholder): one public URL for all buyers.
+  if (!/\{userId\}/i.test(template) && !/\{tenant\}/i.test(template)) {
+    return template.replace(/\/$/, '');
+  }
   const id = String(userId || '').trim().toLowerCase();
   if (!isMongoUserId(id)) return '';
-  return String(AIMARKETS_PUBLIC_TEMPLATE)
+  return template
     .replace(/\{userId\}/gi, id)
     .replace(/\{tenant\}/gi, id)
     .replace(/\/$/, '');
@@ -55,27 +63,41 @@ function resolveDashboardToken() {
 }
 
 /**
- * Hermes-style deep-link: /login autofills Bearer token then opens dashboard.
- * aimarkets-proxy (nanoclaw/deploy) reads token + autoLogin.
+ * Launch URL on ProxVN public edge (https://proxvn.phgrouptechs.com / *.bacsycay.click).
+ *
+ * Default: open /dashboard with session context (tunnel already HTTPS via ProxVN).
+ * Optional NANOCLAW_USE_LOGIN_PROXY=1: Hermes-style /login?token&autoLogin when
+ * aimarkets-proxy is what you tunnel (Bearer cookie bridge).
  */
-function buildLoginUrl({ uiBaseUrl, userId, token }) {
+function buildLaunchUrl({ uiBaseUrl, userId, token }) {
   const base = String(uiBaseUrl || '')
     .replace(/^wss:/i, 'https:')
     .replace(/^ws:/i, 'http:')
     .replace(/\/$/, '');
-  if (!base || !userId || !token) return null;
+  if (!base || !userId) return null;
 
-  const nextQs = new URLSearchParams({
+  const dashQs = new URLSearchParams({
     userId: String(userId),
     audience: 'aimarkets',
     session: `market-${userId}`,
     autoConnect: 'true',
   });
-  const loginQs = new URLSearchParams();
-  loginQs.set('token', String(token));
-  loginQs.set('autoLogin', 'true');
-  loginQs.set('next', `/dashboard?${nextQs.toString()}`);
-  return `${base}/login?${loginQs.toString()}`;
+
+  const useLoginProxy = String(process.env.NANOCLAW_USE_LOGIN_PROXY || '').trim() === '1';
+  if (useLoginProxy && token) {
+    const loginQs = new URLSearchParams();
+    loginQs.set('token', String(token));
+    loginQs.set('autoLogin', 'true');
+    loginQs.set('next', `/dashboard?${dashQs.toString()}`);
+    return `${base}/login?${loginQs.toString()}`;
+  }
+
+  // Direct dashboard on ProxVN tunnel. Token in hash (not query) to avoid access logs.
+  if (token) {
+    dashQs.set('autoLogin', 'true');
+    return `${base}/dashboard?${dashQs.toString()}#token=${encodeURIComponent(token)}`;
+  }
+  return `${base}/dashboard?${dashQs.toString()}`;
 }
 
 function randomPassword(bytes = 18) {
@@ -166,21 +188,14 @@ router.post('/launch', authenticate, async (req, res, next) => {
     }
 
     const token = resolveDashboardToken();
-    if (!token) {
-      return res.status(503).json({
-        success: false,
-        message:
-          'NanoClaw dashboard secret missing. Set NANOCLAW_DASHBOARD_SECRET on aimarketplace-api AND the NanoClaw dashboard (same value as DASHBOARD_SECRET).',
-      });
-    }
-
+    // Token optional when dashboard has no DASHBOARD_SECRET (open tunnel via ProxVN).
     const uiBase = aimarketsPublicBase(userId);
-    const url = buildLoginUrl({ uiBaseUrl: uiBase, userId, token });
+    const url = buildLaunchUrl({ uiBaseUrl: uiBase, userId, token });
     if (!url) {
       return res.status(503).json({
         success: false,
         message:
-          'NanoClaw AI Markets is not configured. Set NANOCLAW_AIMARKETS_PUBLIC_URL_TEMPLATE.',
+          'NanoClaw AI Markets is not configured. Set NANOCLAW_AIMARKETS_PUBLIC_URL_TEMPLATE (ProxVN URL, e.g. https://{userId}.bacsycay.click or a shared https://nanoclaw.bacsycay.click).',
       });
     }
 
@@ -190,8 +205,8 @@ router.post('/launch', authenticate, async (req, res, next) => {
       audience: 'aimarkets',
       userId,
       autoLogin: true,
-      token,
-      gatewayToken: token,
+      edge: 'proxvn',
+      ...(token ? { token, gatewayToken: token } : {}),
     });
   } catch (err) {
     next(err);
