@@ -244,7 +244,7 @@ router.post('/device-pairings/approve', authenticate, async (req, res, next) => 
     });
     const data = await upstream.json().catch(() => ({}));
     return res.status(upstream.status === 404 ? 200 : upstream.status).json({
-      success: data?.success !== false,
+      success: Boolean(data?.success),
       message: data?.message,
     });
   } catch (err) {
