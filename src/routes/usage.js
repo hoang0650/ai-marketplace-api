@@ -52,7 +52,7 @@ router.get('/me', authenticate, async (req, res, next) => {
         type: 'debit',
         status: { $nin: ['failed', 'cancelled'] },
         $or: [
-          { 'meta.channel': { $in: ['openclaw', 'hermes'] } },
+          { 'meta.channel': { $in: ['openclaw', 'hermes', 'nanoclaw'] } },
           { note: { $regex: /^(OpenClaw|Hermes)\b/i } },
         ],
       })

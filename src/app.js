@@ -30,6 +30,7 @@ const billingRoutes = require('./routes/billing');
 const adminRoutes = require('./routes/admin');
 const openclawRoutes = require('./routes/openclaw');
 const hermesRoutes = require('./routes/hermes');
+const nanoclawRoutes = require('./routes/nanoclaw');
 const deploymentRoutes = require('./routes/deployments');
 const runpodRoutes = require('./routes/runpod');
 const playgroundRoutes = require('./routes/playground');
@@ -192,6 +193,7 @@ function createApp() {
   app.use('/v1/payments', paymentRoutes);
   app.use('/v1/openclaw', openclawRoutes);
   app.use('/v1/hermes', hermesRoutes);
+  app.use('/v1/nanoclaw', nanoclawRoutes);
   app.use('/v1/deployments', deploymentRoutes);
   app.use('/v1/playground', playgroundRoutes);
   app.use('/v1/agents', agentsRoutes);
