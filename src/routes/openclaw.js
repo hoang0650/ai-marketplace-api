@@ -32,12 +32,13 @@ function aimarketsPublicBase(userId) {
 }
 
 /**
- * Same token resolution as hotelapp / PHGroup-AI:
- * 1) OPENCLAW_GATEWAY_TOKEN (shared gateway)
- * 2) SHA256 seed (OPENCLAW_GATEWAY_TOKEN_SEED → shared secrets)[:48]
- * 3) HMAC(userId) fallback so Launch still embeds a token
+ * Shared OpenClaw gateway token — same algorithm as hotelapp / PHGroup-AI /
+ * openclaw `deriveStableGatewayTokenFromEnv`. Aimarkets uses ONE gateway for
+ * all buyers, so never HMAC(userId) (that cannot match gateway.auth.token).
+ * 1) OPENCLAW_GATEWAY_TOKEN
+ * 2) SHA256(`phhotel-openclaw-gateway:${seed}`)[:48]
  */
-function resolveGatewayToken(userId) {
+function resolveGatewayToken(_userId) {
   const explicit = String(process.env.OPENCLAW_GATEWAY_TOKEN || '').trim();
   if (explicit) return explicit;
 
@@ -47,22 +48,12 @@ function resolveGatewayToken(userId) {
       process.env.PYTHON_AI_SHARED_SECRET ||
       '',
   ).trim();
-  if (seed) {
-    return crypto
-      .createHash('sha256')
-      .update(`phhotel-openclaw-gateway:${seed}`, 'utf8')
-      .digest('hex')
-      .slice(0, 48);
-  }
-
-  const master = String(
-    process.env.PYTHON_AI_SHARED_SECRET ||
-      process.env.NEST_SERVICE_AUTH_SECRET ||
-      'phhotel_openclaw_secret',
-  );
-  const id = String(userId || '').trim();
-  if (!id) return '';
-  return crypto.createHmac('sha256', master).update(id, 'utf8').digest('base64url').replace(/=+$/, '');
+  if (!seed) return '';
+  return crypto
+    .createHash('sha256')
+    .update(`phhotel-openclaw-gateway:${seed}`, 'utf8')
+    .digest('hex')
+    .slice(0, 48);
 }
 
 function buildHashUrl({ uiBaseUrl, gatewayUrl, token, password, session, userId }) {
@@ -194,6 +185,13 @@ router.post('/launch', authenticate, async (req, res, next) => {
     const uiBase = aimarketsPublicBase(userId);
     const gatewayUrl = uiBase.replace(/^https:/i, 'wss:').replace(/^http:/i, 'ws:');
     const token = resolveGatewayToken(userId);
+    if (!token) {
+      return res.status(503).json({
+        success: false,
+        message:
+          'OpenClaw gateway token missing. Set OPENCLAW_GATEWAY_TOKEN on aimarketplace-api AND the OpenClaw gateway (same value as hotelapp).',
+      });
+    }
     const password = String(process.env.OPENCLAW_GATEWAY_PASSWORD || token).trim() || token;
     const url = buildHashUrl({
       uiBaseUrl: uiBase,
@@ -208,7 +206,7 @@ router.post('/launch', authenticate, async (req, res, next) => {
       return res.status(503).json({
         success: false,
         message:
-          'OpenClaw AI Markets is not configured. Set OPENCLAW_AIMARKETS_PUBLIC_URL_TEMPLATE and OPENCLAW_GATEWAY_TOKEN (or shared secret seed).',
+          'OpenClaw AI Markets is not configured. Set OPENCLAW_AIMARKETS_PUBLIC_URL_TEMPLATE and OPENCLAW_GATEWAY_TOKEN.',
       });
     }
 

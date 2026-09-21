@@ -45,11 +45,15 @@ FRONTEND_URL=https://aimarkets.vn
 AI_URL=https://ai.aimarkets.vn
 OPENCLAW_AIMARKETS_PUBLIC_URL_TEMPLATE=https://{userId}.openclaw.aimarkets.vn
 OPENCLAW_SSH_HOST_TEMPLATE={userId}.openclaw.aimarkets.vn
+# Bắt buộc — cùng giá trị trên service OpenClaw (hotelapp auto-login / auto-approve)
+OPENCLAW_GATEWAY_TOKEN=<shared-secret-min-24-chars>
 HERMES_AIMARKETS_PUBLIC_URL_TEMPLATE=https://{userId}.hermes.aimarkets.vn
 HERMES_SSH_HOST_TEMPLATE={userId}.hermes.aimarkets.vn
 AIMARKETS_SERVICE_SECRET=<shared with OpenClaw/Hermes aimarkets-usage plugins>
 OPENCLAW_AIMARKETS_MARKUP=0.25
 ```
+
+**OpenClaw auto-login / auto-approve:** Launch trả URL hash `#gatewayUrl&token&autoConnect` (giống hotelapp). Gateway + API + PHGroup-AI phải cùng `OPENCLAW_GATEWAY_TOKEN`. Thiếu/sai token → Control UI `unauthorized` / `token_mismatch`, không tới bước device pairing approve.
 
 Deploy từ GitHub: `hoang0650/ai-marketplace-api` branch `master`.
 

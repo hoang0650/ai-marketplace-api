@@ -48,6 +48,7 @@ function buildDashboardUrl({ uiBaseUrl, userId, username, password, provider = '
     userId: String(userId),
     audience: 'aimarkets',
     session: `market-${userId}`,
+    profile: `market-${userId}`,
     autoConnect: 'true',
   });
   // Encode next as a single value so nested & does not eat username/password.
