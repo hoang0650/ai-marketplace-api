@@ -80,12 +80,20 @@ curl -s "https://api.aimarkets.vn/v1/products?limit=1"
 1. **`traefik.yml`** — giữ `openclaw/deploy/dokploy-traefik.yml` (HTTP→HTTPS + Let's Encrypt HTTP-01).
 2. **`dynamic/middlewares.yml`** — `openclaw/deploy/dokploy-dynamic-middlewares.yml`.
 3. **`dynamic/aimarkets.yml`** — `ai-marketplace-api/deploy/dokploy-dynamic-aimarkets.yml` (CORS/security headers).
-4. **`dynamic/openclaw-aimarkets-wildcard.yml`** — `openclaw/deploy/dokploy-dynamic-openclaw-aimarkets-wildcard.yml` (**thêm**, không thay file `{hotelId}.phhotel.vn`).
-5. **`dynamic/hermes-aimarkets-wildcard.yml`** — `hermes-agent/deploy/dokploy-dynamic-hermes-aimarkets-wildcard.yml` (dashboard port **9119**).
+4. **`dynamic/openclaw-aimarkets-wildcard.yml`** — `openclaw/deploy/dokploy-dynamic-openclaw-aimarkets-wildcard.yml` (**thêm**, không thay file `{hotelId}.phhotel.vn`). File **phải có** `services.openclaw-aimarkets-svc` → upstream `:8080`.
+5. **`dynamic/hermes-aimarkets-wildcard.yml`** — `hermes-agent/deploy/dokploy-dynamic-hermes-aimarkets-wildcard.yml` (dashboard port **9119** + `services.hermes-aimarkets-svc`).
 
 **OpenClaw AI Markets:** Control UI `https://{userId}.openclaw.aimarkets.vn` (userId = Mongo ObjectId 24 hex). DNS `openclaw` + `*.openclaw` A → `72.62.72.165`. Session `market-{userId}`, `audience=aimarkets`. Luồng PHHotel `{hotelId}.phhotel.vn` giữ nguyên.
 
 **Hermes AI Markets:** Dashboard `https://{userId}.hermes.aimarkets.vn` (cùng userId). DNS `hermes` + `*.hermes` A → `72.62.72.165`. Session `market-{userId}`, `audience=aimarkets`. API: `/v1/hermes/launch|ssh|usage`.
+
+### Launch → 404 + “Không bảo mật”
+
+Launch client đã đúng (mở URL). Lỗi nằm ở Traefik/TLS/upstream:
+
+1. **404** (chữ trắng trên nền trống) = Traefik không có router/service khớp Host. Paste lại 2 file wildcard **có block `services:`**, sửa URL container (`docker ps | grep -iE 'openclaw|hermes'`), reload Traefik.
+2. **Không bảo mật** = thiếu cert cho subdomain. `letsencrypt` HTTP-01 **không** cấp `*.openclaw` / `*.hermes`. Cần DNS-01 (API Mắt Bão/Cloudflare) hoặc cert thủ công SAN `*.openclaw.aimarkets.vn` + `*.hermes.aimarkets.vn`. File yml đã khai `tls.domains` + `sans` sẵn cho khi bật DNS challenge.
+3. Hermes còn cần container sống: Command `dashboard --host 0.0.0.0 --port 9119 --no-open` + `HERMES_DASHBOARD_BASIC_AUTH_*`.
 
 **GPU Play iframe:** `aimarkets.vn` nhúng `https://api.aimarkets.vn/v1/game-sessions/:id/player`. Middleware `aimarkets-security` **không** được `frameDeny: true` (Chrome hiện “đã từ chối kết nối”). Nếu gắn middleware trên Domain trong Dokploy UI, tắt **X-Frame-Options DENY**.
 
