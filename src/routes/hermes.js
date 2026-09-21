@@ -50,15 +50,16 @@ function buildDashboardUrl({ uiBaseUrl, userId, username, password, provider = '
     session: `market-${userId}`,
     autoConnect: 'true',
   });
+  // Encode next as a single value so nested & does not eat username/password.
   const nextPath = `/?${nextQs.toString()}`;
 
-  const loginQs = new URLSearchParams({
-    autoLogin: 'true',
-    provider: String(provider || 'aimarkets'),
-    next: nextPath,
-  });
-  if (username) loginQs.set('username', username);
-  if (password) loginQs.set('password', password);
+  // Credentials FIRST so a mis-decoded next= cannot drop them from the query.
+  const loginQs = new URLSearchParams();
+  if (username) loginQs.set('username', String(username));
+  if (password) loginQs.set('password', String(password));
+  loginQs.set('autoLogin', 'true');
+  loginQs.set('provider', String(provider || 'aimarkets'));
+  loginQs.set('next', nextPath);
   return `${base}/login?${loginQs.toString()}`;
 }
 
