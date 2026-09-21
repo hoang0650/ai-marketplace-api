@@ -17,7 +17,7 @@ const USER_ID_RE = /^[a-f0-9]{24}$/i;
 const AIMARKETS_PUBLIC_TEMPLATE =
   process.env.NANOCLAW_AIMARKETS_PUBLIC_URL_TEMPLATE ||
   process.env.NANOCLAW_PROXVN_URL_TEMPLATE ||
-  'https://{userId}.bacsycay.click';
+  'https://proxvn.phgrouptechs.com';
 
 function isMongoUserId(id) {
   return USER_ID_RE.test(String(id || '').trim());
@@ -63,11 +63,11 @@ function resolveDashboardToken() {
 }
 
 /**
- * Launch URL on ProxVN public edge (https://proxvn.phgrouptechs.com / *.bacsycay.click).
+ * Launch URL on ProxVN public edge (https://proxvn.phgrouptechs.com).
  *
- * Default: open /dashboard with session context (tunnel already HTTPS via ProxVN).
+ * Default: open /dashboard with session context (HTTPS via ProxVN host).
  * Optional NANOCLAW_USE_LOGIN_PROXY=1: Hermes-style /login?token&autoLogin when
- * aimarkets-proxy is what you tunnel (Bearer cookie bridge).
+ * aimarkets-proxy is what you expose behind that host.
  */
 function buildLaunchUrl({ uiBaseUrl, userId, token }) {
   const base = String(uiBaseUrl || '')
@@ -195,7 +195,7 @@ router.post('/launch', authenticate, async (req, res, next) => {
       return res.status(503).json({
         success: false,
         message:
-          'NanoClaw AI Markets is not configured. Set NANOCLAW_AIMARKETS_PUBLIC_URL_TEMPLATE (ProxVN URL, e.g. https://{userId}.bacsycay.click or a shared https://nanoclaw.bacsycay.click).',
+          'NanoClaw AI Markets is not configured. Set NANOCLAW_AIMARKETS_PUBLIC_URL_TEMPLATE (default https://proxvn.phgrouptechs.com).',
       });
     }
 
