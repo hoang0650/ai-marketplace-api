@@ -51,7 +51,7 @@ OPENCLAW_SSH_HOST_TEMPLATE={userId}.openclaw.aimarkets.vn
 OPENCLAW_GATEWAY_TOKEN=<shared-secret-min-24-chars>
 HERMES_AIMARKETS_PUBLIC_URL_TEMPLATE=https://{userId}.hermes.aimarkets.vn
 HERMES_SSH_HOST_TEMPLATE={userId}.hermes.aimarkets.vn
-NANOCLAW_AIMARKETS_PUBLIC_URL_TEMPLATE=https://proxvn.phgrouptechs.com
+NANOCLAW_AIMARKETS_PUBLIC_URL_TEMPLATE=https://nanoclaw.aimarkets.vn
 NANOCLAW_SSH_HOST_TEMPLATE={userId}.nanoclaw.aimarkets.vn
 # Optional — same as NanoClaw DASHBOARD_SECRET when auth is enabled
 NANOCLAW_DASHBOARD_SECRET=<shared-secret-min-24-chars>
@@ -63,7 +63,7 @@ OPENCLAW_AIMARKETS_MARKUP=0.25
 
 **OpenClaw auto-login / auto-approve:** Launch trả URL hash `#gatewayUrl&token&autoConnect` (giống hotelapp). Gateway + API + PHGroup-AI phải cùng `OPENCLAW_GATEWAY_TOKEN`. Thiếu/sai token → Control UI `unauthorized` / `token_mismatch`, không tới bước device pairing approve.
 
-**NanoClaw Launch (ProxVN):** `POST /v1/nanoclaw/launch` → `https://proxvn.phgrouptechs.com/dashboard?…`. Chi tiết: `nanoclaw/deploy/DOKPLOY-AIMARKETS.md`.
+**NanoClaw Launch:** `POST /v1/nanoclaw/launch` → `https://nanoclaw.aimarkets.vn/dashboard?…`. Chi tiết: `nanoclaw/deploy/DOKPLOY-AIMARKETS.md`.
 
 Deploy từ GitHub: `hoang0650/ai-marketplace-api` branch `master`.
 
@@ -96,13 +96,14 @@ curl -s "https://api.aimarkets.vn/v1/products?limit=1"
 3. **`dynamic/aimarkets.yml`** — `ai-marketplace-api/deploy/dokploy-dynamic-aimarkets.yml` (CORS/security headers).
 4. **`dynamic/openclaw-aimarkets-wildcard.yml`** — `openclaw/deploy/dokploy-dynamic-openclaw-aimarkets-wildcard.yml` (**thêm**, không thay file `{hotelId}.phhotel.vn`). File **phải có** `services.openclaw-aimarkets-svc` → upstream `:8080`.
 5. **`dynamic/hermes-aimarkets-wildcard.yml`** — `hermes-agent/deploy/dokploy-dynamic-hermes-aimarkets-wildcard.yml` (dashboard port **9119** + `services.hermes-aimarkets-svc`).
-6. **`dynamic/nanoclaw-aimarkets-wildcard.yml`** — *tuỳ chọn*; khuyến nghị NanoClaw qua **[https://proxvn.phgrouptechs.com](https://proxvn.phgrouptechs.com/)** thay vì Traefik `*.nanoclaw`.
+6. **`dynamic/nanoclaw-aimarkets-wildcard.yml`** — `nanoclaw.aimarkets.vn` + `*.nanoclaw.aimarkets.vn` → NanoClaw `:3100`.
+7. **`dynamic/aimarkets-user-certs.yml`** — exact `Host()` + `domains.main` per buyer (same LE HTTP-01 as denglish `ai.aimarkets.vn`). Template: `dokploy-dynamic-aimarkets-user-certs.yml`. VPS: `python3 openclaw/deploy/_apply-aimarkets-user-certs.py <userId>`. Without this, `{userId}.hermes|nanoclaw|openclaw` stays on **TRAEFIK DEFAULT CERT**.
 
 **OpenClaw AI Markets:** Control UI `https://{userId}.openclaw.aimarkets.vn` (userId = Mongo ObjectId 24 hex). DNS `openclaw` + `*.openclaw` A → `72.62.72.165`. Session `market-{userId}`, `audience=aimarkets`. Luồng PHHotel `{hotelId}.phhotel.vn` giữ nguyên.
 
 **Hermes AI Markets:** Dashboard `https://{userId}.hermes.aimarkets.vn` (cùng userId). DNS `hermes` + `*.hermes` A → `72.62.72.165`. Session `market-{userId}`, `audience=aimarkets`. API: `/v1/hermes/launch|ssh|usage`.
 
-**NanoClaw AI Markets:** `https://proxvn.phgrouptechs.com` (ProxVN). API: `/v1/nanoclaw/launch|ssh|usage`. Xem `nanoclaw/deploy/DOKPLOY-AIMARKETS.md`.
+**NanoClaw AI Markets:** `https://nanoclaw.aimarkets.vn` · `*.nanoclaw.aimarkets.vn`. API: `/v1/nanoclaw/launch|ssh|usage`. Xem `nanoclaw/deploy/DOKPLOY-AIMARKETS.md`.
 
 ### Launch → 404 + “Không bảo mật”
 

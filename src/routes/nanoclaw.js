@@ -17,7 +17,7 @@ const USER_ID_RE = /^[a-f0-9]{24}$/i;
 const AIMARKETS_PUBLIC_TEMPLATE =
   process.env.NANOCLAW_AIMARKETS_PUBLIC_URL_TEMPLATE ||
   process.env.NANOCLAW_PROXVN_URL_TEMPLATE ||
-  'https://proxvn.phgrouptechs.com';
+  'https://nanoclaw.aimarkets.vn';
 
 function isMongoUserId(id) {
   return USER_ID_RE.test(String(id || '').trim());
@@ -63,7 +63,7 @@ function resolveDashboardToken() {
 }
 
 /**
- * Launch URL on ProxVN public edge (https://proxvn.phgrouptechs.com).
+ * Launch URL on NanoClaw public edge (https://nanoclaw.aimarkets.vn).
  *
  * Default: open /dashboard with session context (HTTPS via ProxVN host).
  * Optional NANOCLAW_USE_LOGIN_PROXY=1: Hermes-style /login?token&autoLogin when
@@ -195,7 +195,7 @@ router.post('/launch', authenticate, async (req, res, next) => {
       return res.status(503).json({
         success: false,
         message:
-          'NanoClaw AI Markets is not configured. Set NANOCLAW_AIMARKETS_PUBLIC_URL_TEMPLATE (default https://proxvn.phgrouptechs.com).',
+          'NanoClaw AI Markets is not configured. Set NANOCLAW_AIMARKETS_PUBLIC_URL_TEMPLATE (default https://nanoclaw.aimarkets.vn).',
       });
     }
 
