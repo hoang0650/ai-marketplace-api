@@ -60,10 +60,15 @@ function buildHashUrl({ uiBaseUrl, gatewayUrl, token, password, session, userId 
   const base = String(uiBaseUrl || gatewayUrl || '')
     .replace(/^wss:/i, 'https:')
     .replace(/^ws:/i, 'http:')
+    .replace(/^http:\/\//i, 'https://')
     .replace(/\/$/, '');
   if (!base || !gatewayUrl || !token) return null;
+  if (!/^https:\/\//i.test(base)) return null;
+  const gw = String(gatewayUrl)
+    .replace(/^http:\/\//i, 'https://')
+    .replace(/^ws:/i, 'wss:');
   const hash = new URLSearchParams({
-    gatewayUrl,
+    gatewayUrl: gw,
     token,
     gatewayToken: token,
     password: password || token,

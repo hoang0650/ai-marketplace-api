@@ -51,7 +51,7 @@ OPENCLAW_SSH_HOST_TEMPLATE={userId}.openclaw.aimarkets.vn
 OPENCLAW_GATEWAY_TOKEN=<shared-secret-min-24-chars>
 HERMES_AIMARKETS_PUBLIC_URL_TEMPLATE=https://{userId}.hermes.aimarkets.vn
 HERMES_SSH_HOST_TEMPLATE={userId}.hermes.aimarkets.vn
-NANOCLAW_AIMARKETS_PUBLIC_URL_TEMPLATE=https://nanoclaw.aimarkets.vn
+NANOCLAW_AIMARKETS_PUBLIC_URL_TEMPLATE=https://{userId}.nanoclaw.aimarkets.vn
 NANOCLAW_SSH_HOST_TEMPLATE={userId}.nanoclaw.aimarkets.vn
 # Optional — same as NanoClaw DASHBOARD_SECRET when auth is enabled
 NANOCLAW_DASHBOARD_SECRET=<shared-secret-min-24-chars>
@@ -63,7 +63,7 @@ OPENCLAW_AIMARKETS_MARKUP=0.25
 
 **OpenClaw auto-login / auto-approve:** Launch trả URL hash `#gatewayUrl&token&autoConnect` (giống hotelapp). Gateway + API + PHGroup-AI phải cùng `OPENCLAW_GATEWAY_TOKEN`. Thiếu/sai token → Control UI `unauthorized` / `token_mismatch`, không tới bước device pairing approve.
 
-**NanoClaw Launch:** `POST /v1/nanoclaw/launch` → `https://nanoclaw.aimarkets.vn/dashboard?…`. Chi tiết: `nanoclaw/deploy/DOKPLOY-AIMARKETS.md`.
+**NanoClaw Launch:** `POST /v1/nanoclaw/launch` → `https://{userId}.nanoclaw.aimarkets.vn/dashboard?…`. Chi tiết: `nanoclaw/deploy/DOKPLOY-AIMARKETS.md`.
 
 Deploy từ GitHub: `hoang0650/ai-marketplace-api` branch `master`.
 
@@ -103,7 +103,7 @@ curl -s "https://api.aimarkets.vn/v1/products?limit=1"
 
 **Hermes AI Markets:** Dashboard `https://{userId}.hermes.aimarkets.vn` (cùng userId). DNS `hermes` + `*.hermes` A → `72.62.72.165`. Session `market-{userId}`, `audience=aimarkets`. API: `/v1/hermes/launch|ssh|usage`.
 
-**NanoClaw AI Markets:** `https://nanoclaw.aimarkets.vn` · `*.nanoclaw.aimarkets.vn`. API: `/v1/nanoclaw/launch|ssh|usage`. Xem `nanoclaw/deploy/DOKPLOY-AIMARKETS.md`.
+**NanoClaw AI Markets:** `https://{userId}.nanoclaw.aimarkets.vn` (cùng pattern Hermes/OpenClaw). API: `/v1/nanoclaw/launch|ssh|usage`. Xem `nanoclaw/deploy/DOKPLOY-AIMARKETS.md`.
 
 ### Launch → 404 + “Không bảo mật”
 

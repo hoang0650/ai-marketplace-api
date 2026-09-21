@@ -41,8 +41,12 @@ function buildDashboardUrl({ uiBaseUrl, userId, username, password, provider = '
   const base = String(uiBaseUrl || '')
     .replace(/^wss:/i, 'https:')
     .replace(/^ws:/i, 'http:')
+    .replace(/^http:\/\//i, 'https://')
     .replace(/\/$/, '');
   if (!base || !userId) return null;
+  if (!/^https:\/\//i.test(base)) {
+    return null;
+  }
 
   const nextQs = new URLSearchParams({
     userId: String(userId),

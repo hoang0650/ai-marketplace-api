@@ -17,7 +17,7 @@ const USER_ID_RE = /^[a-f0-9]{24}$/i;
 const AIMARKETS_PUBLIC_TEMPLATE =
   process.env.NANOCLAW_AIMARKETS_PUBLIC_URL_TEMPLATE ||
   process.env.NANOCLAW_PROXVN_URL_TEMPLATE ||
-  'https://nanoclaw.aimarkets.vn';
+  'https://{userId}.nanoclaw.aimarkets.vn';
 
 function isMongoUserId(id) {
   return USER_ID_RE.test(String(id || '').trim());
@@ -26,7 +26,7 @@ function isMongoUserId(id) {
 function aimarketsPublicBase(userId) {
   const template = String(AIMARKETS_PUBLIC_TEMPLATE).trim();
   if (!template) return '';
-  // Shared ProxVN tunnel (no {userId} placeholder): one public URL for all buyers.
+  // Shared apex / legacy ProxVN (no {userId}): one URL for all buyers.
   if (!/\{userId\}/i.test(template) && !/\{tenant\}/i.test(template)) {
     return template.replace(/\/$/, '');
   }
@@ -63,11 +63,11 @@ function resolveDashboardToken() {
 }
 
 /**
- * Launch URL on NanoClaw public edge (https://nanoclaw.aimarkets.vn).
+ * Launch URL on per-buyer host (https://{userId}.nanoclaw.aimarkets.vn).
  *
- * Default: open /dashboard with session context (HTTPS via ProxVN host).
+ * Default: /dashboard?session=market-{userId}… (same pattern as Hermes/OpenClaw).
  * Optional NANOCLAW_USE_LOGIN_PROXY=1: Hermes-style /login?token&autoLogin when
- * aimarkets-proxy is what you expose behind that host.
+ * aimarkets-proxy is exposed on that host.
  */
 function buildLaunchUrl({ uiBaseUrl, userId, token }) {
   const base = String(uiBaseUrl || '')
@@ -92,7 +92,7 @@ function buildLaunchUrl({ uiBaseUrl, userId, token }) {
     return `${base}/login?${loginQs.toString()}`;
   }
 
-  // Direct dashboard on ProxVN tunnel. Token in hash (not query) to avoid access logs.
+  // Token in hash (not query) to avoid access logs.
   if (token) {
     dashQs.set('autoLogin', 'true');
     return `${base}/dashboard?${dashQs.toString()}#token=${encodeURIComponent(token)}`;
@@ -195,7 +195,7 @@ router.post('/launch', authenticate, async (req, res, next) => {
       return res.status(503).json({
         success: false,
         message:
-          'NanoClaw AI Markets is not configured. Set NANOCLAW_AIMARKETS_PUBLIC_URL_TEMPLATE (default https://nanoclaw.aimarkets.vn).',
+          'NanoClaw AI Markets is not configured. Set NANOCLAW_AIMARKETS_PUBLIC_URL_TEMPLATE (default https://{userId}.nanoclaw.aimarkets.vn).',
       });
     }
 

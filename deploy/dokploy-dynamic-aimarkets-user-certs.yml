@@ -3,59 +3,58 @@
 # Same TLS pattern as denglish `ai.aimarkets.vn`:
 #   Host(`exact`) + web/websecure + certResolver: letsencrypt + domains.main
 #
-# HostRegexp alone → TRAEFIK DEFAULT CERT (ACME HTTP-01 needs an exact Host).
-# Add one exact Host pair per buyer {userId} (24-hex). Or run on VPS:
+# HostRegexp alone → TRAEFIK DEFAULT CERT. Or on VPS:
 #   python3 openclaw/deploy/_apply-aimarkets-user-certs.py <userId> [...]
 
 http:
   routers:
-    hermes-user-6a69f224e6037a3f00de977f-http:
-      rule: "Host(`6a69f224e6037a3f00de977f.hermes.aimarkets.vn`)"
+    hermes-user-6a69f224e6032a3f00de977f-http:
+      rule: "Host(`6a69f224e6032a3f00de977f.hermes.aimarkets.vn`)"
       entryPoints: [web]
       middlewares: [redirect-to-https]
       service: hermes-aimarkets-svc
       priority: 300
 
-    hermes-user-6a69f224e6037a3f00de977f-https:
-      rule: "Host(`6a69f224e6037a3f00de977f.hermes.aimarkets.vn`)"
+    hermes-user-6a69f224e6032a3f00de977f-https:
+      rule: "Host(`6a69f224e6032a3f00de977f.hermes.aimarkets.vn`)"
       entryPoints: [websecure]
       service: hermes-aimarkets-svc
       priority: 300
       tls:
         certResolver: letsencrypt
         domains:
-          - main: "6a69f224e6037a3f00de977f.hermes.aimarkets.vn"
+          - main: "6a69f224e6032a3f00de977f.hermes.aimarkets.vn"
 
-    nanoclaw-user-6a69f224e6037a3f00de977f-http:
-      rule: "Host(`6a69f224e6037a3f00de977f.nanoclaw.aimarkets.vn`)"
+    nanoclaw-user-6a69f224e6032a3f00de977f-http:
+      rule: "Host(`6a69f224e6032a3f00de977f.nanoclaw.aimarkets.vn`)"
       entryPoints: [web]
       middlewares: [redirect-to-https]
       service: nanoclaw-aimarkets-svc
       priority: 300
 
-    nanoclaw-user-6a69f224e6037a3f00de977f-https:
-      rule: "Host(`6a69f224e6037a3f00de977f.nanoclaw.aimarkets.vn`)"
+    nanoclaw-user-6a69f224e6032a3f00de977f-https:
+      rule: "Host(`6a69f224e6032a3f00de977f.nanoclaw.aimarkets.vn`)"
       entryPoints: [websecure]
       service: nanoclaw-aimarkets-svc
       priority: 300
       tls:
         certResolver: letsencrypt
         domains:
-          - main: "6a69f224e6037a3f00de977f.nanoclaw.aimarkets.vn"
+          - main: "6a69f224e6032a3f00de977f.nanoclaw.aimarkets.vn"
 
-    openclaw-user-6a69f224e6037a3f00de977f-http:
-      rule: "Host(`6a69f224e6037a3f00de977f.openclaw.aimarkets.vn`)"
+    openclaw-user-6a69f224e6032a3f00de977f-http:
+      rule: "Host(`6a69f224e6032a3f00de977f.openclaw.aimarkets.vn`)"
       entryPoints: [web]
       middlewares: [redirect-to-https]
       service: openclaw-aimarkets-svc
       priority: 300
 
-    openclaw-user-6a69f224e6037a3f00de977f-https:
-      rule: "Host(`6a69f224e6037a3f00de977f.openclaw.aimarkets.vn`)"
+    openclaw-user-6a69f224e6032a3f00de977f-https:
+      rule: "Host(`6a69f224e6032a3f00de977f.openclaw.aimarkets.vn`)"
       entryPoints: [websecure]
       service: openclaw-aimarkets-svc
       priority: 300
       tls:
         certResolver: letsencrypt
         domains:
-          - main: "6a69f224e6037a3f00de977f.openclaw.aimarkets.vn"
+          - main: "6a69f224e6032a3f00de977f.openclaw.aimarkets.vn"
