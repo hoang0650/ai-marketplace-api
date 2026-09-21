@@ -31,6 +31,40 @@ function aimarketsPublicBase(userId) {
     .replace(/\/$/, '');
 }
 
+/**
+ * Same token resolution as hotelapp / PHGroup-AI:
+ * 1) OPENCLAW_GATEWAY_TOKEN (shared gateway)
+ * 2) SHA256 seed (OPENCLAW_GATEWAY_TOKEN_SEED → shared secrets)[:48]
+ * 3) HMAC(userId) fallback so Launch still embeds a token
+ */
+function resolveGatewayToken(userId) {
+  const explicit = String(process.env.OPENCLAW_GATEWAY_TOKEN || '').trim();
+  if (explicit) return explicit;
+
+  const seed = String(
+    process.env.OPENCLAW_GATEWAY_TOKEN_SEED ||
+      process.env.NEST_SERVICE_AUTH_SECRET ||
+      process.env.PYTHON_AI_SHARED_SECRET ||
+      '',
+  ).trim();
+  if (seed) {
+    return crypto
+      .createHash('sha256')
+      .update(`phhotel-openclaw-gateway:${seed}`, 'utf8')
+      .digest('hex')
+      .slice(0, 48);
+  }
+
+  const master = String(
+    process.env.PYTHON_AI_SHARED_SECRET ||
+      process.env.NEST_SERVICE_AUTH_SECRET ||
+      'phhotel_openclaw_secret',
+  );
+  const id = String(userId || '').trim();
+  if (!id) return '';
+  return crypto.createHmac('sha256', master).update(id, 'utf8').digest('base64url').replace(/=+$/, '');
+}
+
 function buildHashUrl({ uiBaseUrl, gatewayUrl, token, password, session, userId }) {
   const base = String(uiBaseUrl || gatewayUrl || '')
     .replace(/^wss:/i, 'https:')
@@ -41,7 +75,7 @@ function buildHashUrl({ uiBaseUrl, gatewayUrl, token, password, session, userId 
     gatewayUrl,
     token,
     gatewayToken: token,
-    password: password || '',
+    password: password || token,
     autoConnect: 'true',
     autoApprove: 'true',
     session: session || 'main',
@@ -159,32 +193,22 @@ router.post('/launch', authenticate, async (req, res, next) => {
 
     const uiBase = aimarketsPublicBase(userId);
     const gatewayUrl = uiBase.replace(/^https:/i, 'wss:').replace(/^http:/i, 'ws:');
-    const token = process.env.OPENCLAW_GATEWAY_TOKEN || '';
-    let url = buildHashUrl({
+    const token = resolveGatewayToken(userId);
+    const password = String(process.env.OPENCLAW_GATEWAY_PASSWORD || token).trim() || token;
+    const url = buildHashUrl({
       uiBaseUrl: uiBase,
       gatewayUrl,
       token,
-      password: process.env.OPENCLAW_GATEWAY_PASSWORD || token,
+      password,
       session: `market-${userId}`,
       userId,
     });
-
-    // No gateway token yet — still open the public Control UI host so Launch is usable.
-    if (!url && uiBase) {
-      const qs = new URLSearchParams({
-        userId,
-        audience: 'aimarkets',
-        session: `market-${userId}`,
-        autoConnect: 'true',
-      });
-      url = `${uiBase}/#${qs.toString()}`;
-    }
 
     if (!url) {
       return res.status(503).json({
         success: false,
         message:
-          'OpenClaw AI Markets is not configured. Set OPENCLAW_AIMARKETS_PUBLIC_URL_TEMPLATE (and ideally OPENCLAW_GATEWAY_TOKEN).',
+          'OpenClaw AI Markets is not configured. Set OPENCLAW_AIMARKETS_PUBLIC_URL_TEMPLATE and OPENCLAW_GATEWAY_TOKEN (or shared secret seed).',
       });
     }
 
@@ -193,7 +217,8 @@ router.post('/launch', authenticate, async (req, res, next) => {
       url,
       audience: 'aimarkets',
       userId,
-      autoLogin: Boolean(token),
+      autoLogin: true,
+      gatewayToken: token,
     });
   } catch (err) {
     next(err);

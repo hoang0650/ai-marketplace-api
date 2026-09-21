@@ -11,6 +11,7 @@ const {
   computeOpenClawSellCost,
   isPhhotelModelId,
 } = require('../utils/openclaw-pricing');
+const { ensureHermesAccount, verifyHermesCredentials } = require('../services/hermesAccounts');
 
 const router = express.Router();
 const SSH_TTL_MS = 60 * 60 * 1000;
@@ -31,22 +32,34 @@ function aimarketsPublicBase(userId) {
     .replace(/\/$/, '');
 }
 
-/** Hermes dashboard deep-link (parallel to OpenClaw hash auto-login). */
-function buildDashboardUrl({ uiBaseUrl, userId, token, password }) {
+/**
+ * Deep-link straight to /login so credentials are not stripped by the
+ * auth gate redirect. Hermes login_page autofills + auto-submits.
+ * Uses per-buyer Aimarkets auth provider (not shared admin basic auth).
+ */
+function buildDashboardUrl({ uiBaseUrl, userId, username, password, provider = 'aimarkets' }) {
   const base = String(uiBaseUrl || '')
     .replace(/^wss:/i, 'https:')
     .replace(/^ws:/i, 'http:')
     .replace(/\/$/, '');
   if (!base || !userId) return null;
-  const qs = new URLSearchParams({
+
+  const nextQs = new URLSearchParams({
     userId: String(userId),
     audience: 'aimarkets',
     session: `market-${userId}`,
     autoConnect: 'true',
   });
-  if (token) qs.set('token', token);
-  if (password) qs.set('password', password);
-  return `${base}/?${qs.toString()}`;
+  const nextPath = `/?${nextQs.toString()}`;
+
+  const loginQs = new URLSearchParams({
+    autoLogin: 'true',
+    provider: String(provider || 'aimarkets'),
+    next: nextPath,
+  });
+  if (username) loginQs.set('username', username);
+  if (password) loginQs.set('password', password);
+  return `${base}/login?${loginQs.toString()}`;
 }
 
 function randomPassword(bytes = 18) {
@@ -158,48 +171,60 @@ router.post('/launch', authenticate, async (req, res, next) => {
       });
     }
 
-    const aiUrl = aiBaseUrl();
-    if (aiUrl) {
-      try {
-        const qs = new URLSearchParams({ audience: 'aimarkets', user_id: userId });
-        const upstream = await fetch(`${aiUrl}/admin/hermes/direct-url?${qs}`, {
-          headers: aiAdminHeaders(req),
-        });
-        const data = await upstream.json().catch(() => ({}));
-        if (upstream.ok && data?.success && data?.url) {
-          return res.json({
-            success: true,
-            url: data.url,
-            audience: 'aimarkets',
-            userId,
-            message: data.message,
-          });
-        }
-      } catch (err) {
-        console.warn('[hermes/launch] aimarkets direct-url failed', err?.message || err);
-      }
-    }
-
+    const account = await ensureHermesAccount(req.user);
     const uiBase = aimarketsPublicBase(userId);
-    const token = process.env.HERMES_GATEWAY_TOKEN || process.env.HERMES_DASHBOARD_TOKEN || '';
-    const password =
-      process.env.HERMES_DASHBOARD_PASSWORD || process.env.HERMES_GATEWAY_PASSWORD || token;
     const url = buildDashboardUrl({
       uiBaseUrl: uiBase,
       userId,
-      token,
-      password,
+      username: account.username,
+      password: account.password,
+      provider: 'aimarkets',
     });
 
     if (!url) {
       return res.status(503).json({
         success: false,
         message:
-          'Hermes AI Markets is not configured. Set AI_URL or HERMES_AIMARKETS_PUBLIC_URL_TEMPLATE.',
+          'Hermes AI Markets is not configured. Set HERMES_AIMARKETS_PUBLIC_URL_TEMPLATE.',
       });
     }
 
-    return res.json({ success: true, url, audience: 'aimarkets', userId });
+    return res.json({
+      success: true,
+      url,
+      audience: 'aimarkets',
+      userId,
+      autoLogin: true,
+      username: account.username,
+      password: account.password,
+      profile: account.profile,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Hermes AimarketsAuthProvider calls this to verify buyer credentials.
+ * Auth: X-Service-Secret === AIMARKETS_SERVICE_SECRET
+ */
+router.post('/auth/verify', async (req, res, next) => {
+  try {
+    if (!serviceSecretOk(req)) {
+      return res.status(401).json({ ok: false, message: 'Unauthorized' });
+    }
+    const username = String(req.body?.username || '').trim();
+    const password = String(req.body?.password || '');
+    const verified = await verifyHermesCredentials(username, password);
+    if (!verified) {
+      return res.status(401).json({ ok: false, message: 'Invalid credentials' });
+    }
+    return res.json({
+      ok: true,
+      userId: verified.userId,
+      username: verified.username,
+      profile: verified.profile,
+    });
   } catch (err) {
     next(err);
   }
