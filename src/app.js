@@ -16,6 +16,7 @@ const { allowMarketplaceGameFrame } = require('./utils/frame-ancestors');
 const authRoutes = require('./routes/auth');
 const productRoutes = require('./routes/products');
 const homeRoutes = require('./routes/home');
+const bannerRoutes = require('./routes/banners');
 const creatorRoutes = require('./routes/creators');
 const categoryRoutes = require('./routes/categories');
 const reviewRoutes = require('./routes/reviews');
@@ -177,6 +178,7 @@ function createApp() {
   app.use('/v1/auth', authRoutes);
   app.use('/v1/products', productRoutes);
   app.use('/v1/home', homeRoutes);
+  app.use('/v1/banners', bannerRoutes);
   app.use('/v1/creators', creatorRoutes);
   app.use('/v1/categories', categoryRoutes);
   app.use('/v1/reviews', reviewRoutes);

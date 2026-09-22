@@ -1,6 +1,7 @@
 const express = require('express');
 const JobPosting = require('../models/JobPosting');
 const TalentProfile = require('../models/TalentProfile');
+const JobApplication = require('../models/JobApplication');
 const { authenticate } = require('../middleware/auth');
 const { slugify } = require('../utils/serialize');
 const { WORK_FIELDS } = require('../data/work-fields');
@@ -27,11 +28,34 @@ function mapJob(doc) {
     salaryPeriod: j.salaryPeriod,
     salaryNegotiable: j.salaryNegotiable,
     status: j.status,
-    postedBy: j.postedBy?.toString?.() || j.postedBy,
+    postedBy: j.postedBy?.toString?.() || j.postedBy || '',
     postedByName: j.postedByName || '',
     applicationsCount: j.applicationsCount || 0,
     createdAt: j.createdAt,
     updatedAt: j.updatedAt,
+  };
+}
+
+function mapApplication(doc, { meId, employerId } = {}) {
+  const a = doc.toJSON ? doc.toJSON() : doc;
+  const applicantId = String(a.applicant?._id || a.applicant || '');
+  const isMine = meId && applicantId === String(meId);
+  const isEmployer = meId && employerId && String(meId) === String(employerId);
+  return {
+    id: String(a.id || a._id),
+    jobId: String(a.job?._id || a.job || ''),
+    applicantId,
+    applicantName: a.applicantName || a.applicant?.name || 'Ứng viên',
+    applicantAvatar: a.applicantAvatar || a.applicant?.avatarUrl || '',
+    proposedAmount: Number(a.proposedAmount) || 0,
+    proposedCurrency: a.proposedCurrency || 'VND',
+    proposedPeriod: a.proposedPeriod || 'project',
+    coverLetter: isMine || isEmployer ? a.coverLetter || '' : '',
+    status: a.status || 'pending',
+    conversationId: isMine || isEmployer ? String(a.conversation || '') || undefined : undefined,
+    createdAt: a.createdAt,
+    updatedAt: a.updatedAt,
+    mine: !!isMine,
   };
 }
 
@@ -245,6 +269,150 @@ router.get('/jobs/:slug', async (req, res, next) => {
     const doc = await JobPosting.findOne({ slug: String(req.params.slug).toLowerCase() });
     if (!doc) return res.status(404).json({ message: 'Job not found' });
     res.json(mapJob(doc));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Public competing bids on a job (freelance-style price board). */
+router.get('/jobs/:slug/applications', authenticate, async (req, res, next) => {
+  try {
+    const job = await JobPosting.findOne({ slug: String(req.params.slug).toLowerCase() });
+    if (!job) return res.status(404).json({ message: 'Job not found' });
+    const employerId = job.postedBy?.toString?.() || job.postedBy || '';
+    const rows = await JobApplication.find({ job: job._id, status: { $ne: 'withdrawn' } })
+      .populate('applicant', 'name avatarUrl')
+      .sort({ proposedAmount: 1, createdAt: 1 })
+      .limit(100)
+      .lean({ virtuals: true });
+    res.json(rows.map((r) => mapApplication(r, { meId: req.user._id, employerId })));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Guest-readable bid board (amounts only — for competition). Auth optional enrich. */
+router.get('/jobs/:slug/bids', async (req, res, next) => {
+  try {
+    const job = await JobPosting.findOne({ slug: String(req.params.slug).toLowerCase() });
+    if (!job) return res.status(404).json({ message: 'Job not found' });
+    const rows = await JobApplication.find({ job: job._id, status: { $in: ['pending', 'accepted'] } })
+      .sort({ proposedAmount: 1, createdAt: 1 })
+      .limit(100)
+      .lean({ virtuals: true });
+    res.json(
+      rows.map((r) => ({
+        id: String(r._id),
+        applicantName: r.applicantName || 'Ứng viên',
+        applicantAvatar: r.applicantAvatar || '',
+        proposedAmount: Number(r.proposedAmount) || 0,
+        proposedCurrency: r.proposedCurrency || 'VND',
+        proposedPeriod: r.proposedPeriod || 'project',
+        status: r.status,
+        createdAt: r.createdAt,
+      })),
+    );
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/jobs/:slug/applications', authenticate, async (req, res, next) => {
+  try {
+    const job = await JobPosting.findOne({ slug: String(req.params.slug).toLowerCase() });
+    if (!job) return res.status(404).json({ message: 'Job not found' });
+    if (job.status !== 'open') return res.status(400).json({ message: 'Job is closed' });
+    const employerId = job.postedBy?.toString?.() || job.postedBy;
+    if (!employerId) {
+      return res.status(400).json({ message: 'Job has no employer account to negotiate with' });
+    }
+    if (String(employerId) === String(req.user._id)) {
+      return res.status(400).json({ message: 'You cannot apply to your own job' });
+    }
+
+    const body = req.body || {};
+    const proposedAmount = Number(body.proposedAmount);
+    if (!Number.isFinite(proposedAmount) || proposedAmount <= 0) {
+      return res.status(400).json({ message: 'proposedAmount is required' });
+    }
+    const proposedCurrency = String(body.proposedCurrency || job.salaryCurrency || 'VND').trim().slice(0, 8);
+    const proposedPeriod = ['hour', 'day', 'week', 'month', 'project'].includes(body.proposedPeriod)
+      ? body.proposedPeriod
+      : job.salaryPeriod || 'project';
+    const coverLetter = String(body.coverLetter || '').trim().slice(0, 2000);
+
+    let app;
+    try {
+      app = await JobApplication.create({
+        job: job._id,
+        applicant: req.user._id,
+        applicantName: req.user.name || '',
+        applicantAvatar: req.user.avatarUrl || '',
+        proposedAmount,
+        proposedCurrency,
+        proposedPeriod,
+        coverLetter,
+        status: 'pending',
+      });
+      await JobPosting.updateOne({ _id: job._id }, { $inc: { applicationsCount: 1 } });
+    } catch (err) {
+      if (err.code !== 11000) throw err;
+      app = await JobApplication.findOneAndUpdate(
+        { job: job._id, applicant: req.user._id },
+        {
+          $set: {
+            proposedAmount,
+            proposedCurrency,
+            proposedPeriod,
+            coverLetter,
+            applicantName: req.user.name || '',
+            applicantAvatar: req.user.avatarUrl || '',
+            status: 'pending',
+          },
+        },
+        { new: true },
+      );
+    }
+
+    res.status(201).json(mapApplication(app, { meId: req.user._id, employerId }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/applications/mine', authenticate, async (req, res, next) => {
+  try {
+    const rows = await JobApplication.find({ applicant: req.user._id })
+      .sort({ createdAt: -1 })
+      .limit(100)
+      .lean({ virtuals: true });
+    res.json(rows.map((r) => mapApplication(r, { meId: req.user._id })));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.patch('/applications/:id', authenticate, async (req, res, next) => {
+  try {
+    const app = await JobApplication.findById(req.params.id);
+    if (!app) return res.status(404).json({ message: 'Application not found' });
+    const job = await JobPosting.findById(app.job);
+    if (!job) return res.status(404).json({ message: 'Job not found' });
+    const employerId = String(job.postedBy || '');
+    const isEmployer = employerId === String(req.user._id);
+    const isApplicant = String(app.applicant) === String(req.user._id);
+    const status = String(req.body?.status || '').trim();
+    if (isApplicant && status === 'withdrawn') {
+      app.status = 'withdrawn';
+      await app.save();
+      return res.json(mapApplication(app, { meId: req.user._id, employerId }));
+    }
+    if (isEmployer && (status === 'accepted' || status === 'rejected')) {
+      app.status = status;
+      await app.save();
+      return res.json(mapApplication(app, { meId: req.user._id, employerId }));
+    }
+    return res.status(403).json({ message: 'Forbidden' });
   } catch (err) {
     next(err);
   }

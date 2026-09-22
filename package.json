@@ -10,6 +10,7 @@
     "seed": "node src/scripts/seed.js",
     "seed:hubs": "node src/scripts/seed-content-hubs.js",
     "seed:compute": "node src/scripts/seed-compute.js",
+    "seed:banners": "node src/scripts/seed-banners.js",
     "test": "node --test test/**/*.test.js"
   },
   "engines": {

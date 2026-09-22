@@ -1,10 +1,14 @@
 const express = require('express');
 const Product = require('../models/Product');
+const JobPosting = require('../models/JobPosting');
+const TalentProfile = require('../models/TalentProfile');
+const JobApplication = require('../models/JobApplication');
 const Conversation = require('../models/Conversation');
 const ChatMessage = require('../models/ChatMessage');
 const Notification = require('../models/Notification');
 const { authenticate } = require('../middleware/auth');
 const { containsBlockedLink, isAllowedChatImageUrl } = require('../utils/chat-security');
+const { ensureTalentUser } = require('../utils/ensure-talent-user');
 
 const router = express.Router();
 const MAX_BODY = 2000;
@@ -35,12 +39,25 @@ function mapConversation(doc, meId) {
   const sellerId = String(o.seller?._id || o.seller);
   const isBuyer = buyerId === String(meId);
   const other = isBuyer ? o.seller : o.buyer;
+  const contextType = o.contextType || (o.job ? 'job' : o.talentSlug ? 'talent' : 'product');
+  const title =
+    contextType === 'job'
+      ? o.jobTitle || 'Work job'
+      : contextType === 'talent'
+        ? o.talentSlug || 'Talent'
+        : o.productName || o.product?.name || '';
   return {
     id: String(o._id || o.id),
+    contextType,
     productId: String(o.product?._id || o.product || ''),
     productName: o.productName || o.product?.name || '',
     productSlug: o.productSlug || o.product?.slug || '',
     productCover: o.productCover || o.product?.coverUrl || '',
+    jobId: String(o.job?._id || o.job || ''),
+    jobTitle: o.jobTitle || '',
+    jobSlug: o.jobSlug || '',
+    talentSlug: o.talentSlug || '',
+    title,
     role: isBuyer ? 'buyer' : 'seller',
     otherId: isBuyer ? sellerId : buyerId,
     otherName: userName(other) || (isBuyer ? 'Seller' : 'Buyer'),
@@ -118,13 +135,32 @@ async function appendMessage(convo, senderId, { text, imageUrl, kind }) {
   await convo.save();
 
   const recipient = isBuyer ? sellerId : buyerId;
+  const label =
+    convo.contextType === 'job'
+      ? convo.jobTitle || 'Work'
+      : convo.contextType === 'talent'
+        ? convo.talentSlug || 'Talent'
+        : convo.productName || 'Sản phẩm';
   await Notification.create({
     user: recipient,
-    title: isBuyer ? 'Tin nhắn từ người mua' : 'Tin nhắn từ người bán',
-    body: `${convo.productName || 'Sản phẩm'}: ${preview}`.slice(0, 280),
+    title: isBuyer ? 'Tin nhắn mới' : 'Tin nhắn mới',
+    body: `${label}: ${preview}`.slice(0, 280),
     href: isBuyer ? `/sell/messages/${convo._id}` : `/messages/${convo._id}`,
   }).catch(() => {});
   return msg;
+}
+
+async function upsertConversation(query, defaults) {
+  let convo = await Conversation.findOne(query);
+  if (!convo) {
+    try {
+      convo = await Conversation.create({ ...query, ...defaults, lastMessageAt: new Date() });
+    } catch (err) {
+      if (err.code !== 11000) throw err;
+      convo = await Conversation.findOne(query);
+    }
+  }
+  return convo;
 }
 
 router.get('/conversations', authenticate, async (req, res, next) => {
@@ -146,39 +182,146 @@ router.get('/conversations', authenticate, async (req, res, next) => {
 router.post('/conversations', authenticate, async (req, res, next) => {
   try {
     const productId = String(req.body?.productId || '').trim();
-    if (!productId) return res.status(400).json({ message: 'productId required' });
-    const product = await Product.findById(productId);
-    if (!product) return res.status(404).json({ message: 'Product not found' });
-    const sellerId = product.creator && (product.creator._id || product.creator);
-    if (!sellerId) return res.status(400).json({ message: 'Product has no seller' });
-    if (String(sellerId) === String(req.user._id)) {
-      return res.status(400).json({ message: 'You cannot chat about your own product', code: 'CHAT_SELF' });
-    }
+    const jobId = String(req.body?.jobId || '').trim();
+    const jobSlug = String(req.body?.jobSlug || '').trim().toLowerCase();
+    const talentSlug = String(req.body?.talentSlug || '').trim().toLowerCase();
+    const applicationId = String(req.body?.applicationId || '').trim();
 
-    const query = { buyer: req.user._id, seller: sellerId, product: product._id };
-    let convo = await Conversation.findOne(query);
-    if (!convo) {
-      try {
-        convo = await Conversation.create({
-          ...query,
+    let convo;
+
+    if (jobId || jobSlug || applicationId) {
+      let job = null;
+      let application = null;
+      if (applicationId) {
+        application = await JobApplication.findById(applicationId);
+        if (!application) return res.status(404).json({ message: 'Application not found' });
+        job = await JobPosting.findById(application.job);
+      } else if (jobId) {
+        job = await JobPosting.findById(jobId);
+      } else {
+        job = await JobPosting.findOne({ slug: jobSlug });
+      }
+      if (!job) return res.status(404).json({ message: 'Job not found' });
+      const employerId = job.postedBy && (job.postedBy._id || job.postedBy);
+      if (!employerId) return res.status(400).json({ message: 'Job has no employer' });
+
+      const me = String(req.user._id);
+      const emp = String(employerId);
+      let applicantId;
+      let sellerId = emp;
+      let buyerId;
+
+      if (me === emp) {
+        // Employer messaging an applicant
+        applicantId = application
+          ? String(application.applicant)
+          : String(req.body?.applicantId || '').trim();
+        if (!applicantId) return res.status(400).json({ message: 'applicantId required' });
+        buyerId = applicantId;
+      } else {
+        // Applicant messaging employer — ensure application exists
+        buyerId = me;
+        applicantId = me;
+        if (!application) {
+          application = await JobApplication.findOne({ job: job._id, applicant: me });
+        }
+        if (!application) {
+          return res.status(400).json({
+            message: 'Apply with a proposed price before chatting with the employer',
+            code: 'APPLY_FIRST',
+          });
+        }
+      }
+
+      if (buyerId === sellerId) {
+        return res.status(400).json({ message: 'Invalid chat parties', code: 'CHAT_SELF' });
+      }
+
+      convo = await upsertConversation(
+        { buyer: buyerId, seller: sellerId, job: job._id },
+        {
+          contextType: 'job',
+          jobTitle: job.title,
+          jobSlug: job.slug,
+          product: null,
+        },
+      );
+
+      if (application && !application.conversation) {
+        application.conversation = convo._id;
+        await application.save();
+      }
+
+      const seed =
+        String(req.body?.body || '').trim() ||
+        (application && me !== emp
+          ? `Xin chào, tôi đề xuất ${Number(application.proposedAmount).toLocaleString()} ${application.proposedCurrency}/${application.proposedPeriod}.`
+          : '');
+      if (seed || String(req.body?.imageUrl || '').trim()) {
+        await assertRate(req.user._id);
+        const payload = seed
+          ? await parsePayload({ body: seed, imageUrl: req.body?.imageUrl })
+          : await parsePayload(req.body);
+        await appendMessage(convo, req.user._id, payload);
+      }
+    } else if (talentSlug) {
+      const talent = await TalentProfile.findOne({ slug: talentSlug });
+      if (!talent) return res.status(404).json({ message: 'Talent not found' });
+      const talentUserId = await ensureTalentUser(talent);
+      if (!talentUserId) {
+        return res.status(500).json({ message: 'Could not link talent account for chat' });
+      }
+      if (String(talentUserId) === String(req.user._id)) {
+        return res.status(400).json({ message: 'You cannot chat with yourself', code: 'CHAT_SELF' });
+      }
+      convo = await upsertConversation(
+        {
+          buyer: req.user._id,
+          seller: talentUserId,
+          contextType: 'talent',
+          talentSlug: talent.slug,
+        },
+        {
+          contextType: 'talent',
+          talentSlug: talent.slug,
+          product: null,
+          job: null,
+        },
+      );
+      const hasContent = String(req.body?.body || '').trim() || String(req.body?.imageUrl || '').trim();
+      if (hasContent) {
+        await assertRate(req.user._id);
+        const payload = await parsePayload(req.body);
+        await appendMessage(convo, req.user._id, payload);
+      }
+    } else if (productId) {
+      const product = await Product.findById(productId);
+      if (!product) return res.status(404).json({ message: 'Product not found' });
+      const sellerId = product.creator && (product.creator._id || product.creator);
+      if (!sellerId) return res.status(400).json({ message: 'Product has no seller' });
+      if (String(sellerId) === String(req.user._id)) {
+        return res.status(400).json({ message: 'You cannot chat about your own product', code: 'CHAT_SELF' });
+      }
+      convo = await upsertConversation(
+        { buyer: req.user._id, seller: sellerId, product: product._id },
+        {
+          contextType: 'product',
           productName: product.name,
           productSlug: product.slug,
           productCover: product.coverUrl || '',
-          lastMessageAt: new Date(),
-        });
-      } catch (err) {
-        if (err.code !== 11000) throw err;
-        convo = await Conversation.findOne(query);
+        },
+      );
+      const hasContent = String(req.body?.body || '').trim() || String(req.body?.imageUrl || '').trim();
+      if (hasContent) {
+        await assertRate(req.user._id);
+        const payload = await parsePayload(req.body);
+        await appendMessage(convo, req.user._id, payload);
       }
+    } else {
+      return res.status(400).json({ message: 'productId, jobId/jobSlug, or talentSlug required' });
     }
-    if (!convo) return res.status(500).json({ message: 'Could not open conversation' });
 
-    const hasContent = String(req.body?.body || '').trim() || String(req.body?.imageUrl || '').trim();
-    if (hasContent) {
-      await assertRate(req.user._id);
-      const payload = await parsePayload(req.body);
-      await appendMessage(convo, req.user._id, payload);
-    }
+    if (!convo) return res.status(500).json({ message: 'Could not open conversation' });
 
     const full = await Conversation.findById(convo._id)
       .populate('buyer', 'name email')

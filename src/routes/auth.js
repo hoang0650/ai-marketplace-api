@@ -161,6 +161,12 @@ router.get('/google/start', (req, res) => {
   if (!clientId) {
     return res.status(503).json({ message: 'Google Sign-In chưa được cấu hình trên máy chủ' });
   }
+  const mobile = String(req.query.mobile || '') === '1' || String(req.query.mobile || '').toLowerCase() === 'true';
+  const scheme = String(req.query.scheme || 'aimarkets')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9+.-]/g, '')
+    .slice(0, 32) || 'aimarkets';
   const refererOrigin = (() => {
     try {
       return req.get('referer') ? new URL(req.get('referer')).origin : '';
@@ -170,7 +176,10 @@ router.get('/google/start', (req, res) => {
   })();
   const { origin, path } = normalizeReturnTo(String(req.query.returnTo || ''), refererOrigin || config.frontendUrl);
   const redirectUri = googleCallbackUrl(req);
-  const state = jwt.sign({ o: origin, p: path }, config.jwtSecret, { expiresIn: '10m' });
+  const statePayload = mobile
+    ? { m: 1, s: scheme }
+    : { o: origin, p: path };
+  const state = jwt.sign(statePayload, config.jwtSecret, { expiresIn: '10m' });
   const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
   url.searchParams.set('client_id', clientId);
   url.searchParams.set('redirect_uri', redirectUri);
@@ -184,9 +193,14 @@ router.get('/google/start', (req, res) => {
 
 router.get('/google/callback', async (req, res, next) => {
   const fallback = String(config.frontendUrl || 'https://aimarkets.vn').replace(/\/$/, '');
-  const fail = (origin, message) => {
+  const fail = (origin, message, mobileScheme) => {
+    const msg = String(message || 'Google sign-in failed').slice(0, 180);
+    if (mobileScheme) {
+      const q = new URLSearchParams({ google: 'error', message: msg });
+      return res.redirect(`${mobileScheme}://oauthredirect?${q.toString()}`);
+    }
     const o = origin || fallback;
-    const q = new URLSearchParams({ google: 'error', message: String(message || 'Google sign-in failed').slice(0, 180) });
+    const q = new URLSearchParams({ google: 'error', message: msg });
     return res.redirect(`${o}/auth/login?${q.toString()}`);
   };
   try {
@@ -204,6 +218,14 @@ router.get('/google/callback', async (req, res, next) => {
     } catch {
       return fail(fallback, 'Phiên Google hết hạn, thử lại');
     }
+    const mobile = payload.m === 1 || payload.m === true;
+    const mobileScheme = mobile
+      ? String(payload.s || 'aimarkets')
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9+.-]/g, '')
+          .slice(0, 32) || 'aimarkets'
+      : '';
     const origin = String(payload.o || fallback).replace(/\/$/, '');
     const nextPath = String(payload.p || '/').startsWith('/') ? String(payload.p) : '/';
     const redirectUri = googleCallbackUrl(req);
@@ -211,11 +233,35 @@ router.get('/google/callback', async (req, res, next) => {
     const user = await findOrCreateGoogleUser(profile);
     await assertAccountActive(user);
     const session = await attachAuthSession(res, user);
+    if (mobile) {
+      const q = new URLSearchParams({
+        token: session.token,
+        refreshToken: session.refreshToken || '',
+      });
+      return res.redirect(`${mobileScheme}://oauthredirect?${q.toString()}`);
+    }
     const q = new URLSearchParams({ token: session.token, next: nextPath });
     return res.redirect(`${origin}/auth/google/callback?${q.toString()}`);
   } catch (err) {
     console.error('[google-callback]', err?.message || err);
-    return fail(fallback, err.message || 'Đăng nhập Google thất bại');
+    let mobileScheme = '';
+    try {
+      const st = String(req.query.state || '');
+      if (st) {
+        const p = jwt.verify(st, config.jwtSecret, JWT_VERIFY);
+        if (p.m === 1 || p.m === true) {
+          mobileScheme =
+            String(p.s || 'aimarkets')
+              .trim()
+              .toLowerCase()
+              .replace(/[^a-z0-9+.-]/g, '')
+              .slice(0, 32) || 'aimarkets';
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    return fail(fallback, err.message || 'Đăng nhập Google thất bại', mobileScheme || undefined);
   }
 });
 
