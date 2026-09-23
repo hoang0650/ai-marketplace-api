@@ -17,7 +17,7 @@ const provider = require('../utils/denglish-providers');
 
 const router = express.Router();
 
-router.use(authenticate, requireRoles('creator', 'admin'));
+router.use(authenticate, requireRoles('seller', 'admin'));
 
 /** List compute nodes (external + AI Markets hosted) linked to products. */
 router.get('/nodes', async (req, res, next) => {

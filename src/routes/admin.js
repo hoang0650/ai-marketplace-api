@@ -32,7 +32,7 @@ router.get('/overview', authenticate, requireRoles('admin'), async (_req, res, n
       Product.countDocuments(),
       Order.countDocuments(),
       Review.countDocuments(),
-      User.countDocuments({ role: 'creator' }),
+      User.countDocuments({ role: { $in: ['seller', 'talent', 'freelancer'] } }),
       Order.aggregate([
         { $match: { status: 'paid' } },
         {

@@ -103,7 +103,7 @@ router.get('/:slug', async (req, res, next) => {
   }
 });
 
-router.post('/', authenticate, requireRoles('creator', 'admin'), async (req, res, next) => {
+router.post('/', authenticate, requireRoles('seller', 'admin'), async (req, res, next) => {
   try {
     const body = req.body || {};
     const name = String(body.name || '').trim();
@@ -119,8 +119,8 @@ router.post('/', authenticate, requireRoles('creator', 'admin'), async (req, res
     if (exists) slug = `${slug}-${Date.now().toString(36)}`;
 
     const user = req.user;
-    if (user.role === 'creator' && !user.creatorSlug) {
-      return res.status(400).json({ message: 'Creator profile missing slug' });
+    if (user.role === 'seller' && !user.creatorSlug) {
+      return res.status(400).json({ message: 'Seller profile missing slug' });
     }
 
     const requestedOwnership =
@@ -216,7 +216,7 @@ router.post('/', authenticate, requireRoles('creator', 'admin'), async (req, res
   }
 });
 
-router.put('/:id', authenticate, requireRoles('creator', 'admin'), async (req, res, next) => {
+router.put('/:id', authenticate, requireRoles('seller', 'admin'), async (req, res, next) => {
   try {
     const product = await Product.findById(req.params.id);
     if (!product) return res.status(404).json({ message: 'Not found' });
@@ -265,7 +265,7 @@ router.put('/:id', authenticate, requireRoles('creator', 'admin'), async (req, r
   }
 });
 
-router.delete('/:id', authenticate, requireRoles('creator', 'admin'), async (req, res, next) => {
+router.delete('/:id', authenticate, requireRoles('seller', 'admin'), async (req, res, next) => {
   try {
     const product = await Product.findById(req.params.id);
     if (!product) return res.status(404).json({ message: 'Not found' });

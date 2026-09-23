@@ -2,7 +2,10 @@ const express = require('express');
 const mongoose = require('mongoose');
 const Complaint = require('../models/Complaint');
 const Order = require('../models/Order');
+const JobApplication = require('../models/JobApplication');
+const JobPosting = require('../models/JobPosting');
 const { authenticate, requireRoles } = require('../middleware/auth');
+const { ROLE, hasAnyRole } = require('../utils/roles');
 const { canOpenDispute } = require('../utils/payout-hold');
 const { openOrderDispute } = require('../utils/open-order-dispute');
 const { resolveOrderDispute } = require('../utils/resolve-order-dispute');
@@ -18,7 +21,16 @@ const {
 } = require('../utils/complaint-helpers');
 
 const router = express.Router();
-const KINDS = ['buyer_seller', 'buyer_platform', 'seller_platform'];
+const KINDS = Complaint.KINDS || [
+  'buyer_seller',
+  'buyer_platform',
+  'seller_platform',
+  'employer_freelancer',
+  'freelancer_employer',
+  'employer_platform',
+  'freelancer_platform',
+];
+const WORK_KINDS = ['employer_freelancer', 'freelancer_employer', 'employer_platform', 'freelancer_platform'];
 const DECISIONS = ['upheld', 'rejected', 'mediated'];
 
 function isId(v) {
@@ -30,6 +42,12 @@ function relatedFilter(user, as) {
   if (user.role === 'admin' && as === 'admin') return {};
   if (as === 'seller') return { seller: uid };
   if (as === 'mine') return { complainant: uid };
+  if (as === 'work') {
+    return {
+      kind: { $in: WORK_KINDS },
+      $or: [{ complainant: uid }, { seller: uid }],
+    };
+  }
   return { $or: [{ complainant: uid }, { seller: uid }] };
 }
 
@@ -48,7 +66,10 @@ router.post('/', authenticate, async (req, res, next) => {
   try {
     const kind = String(req.body?.kind || '').trim();
     if (!KINDS.includes(kind)) {
-      return res.status(400).json({ message: 'kind must be buyer_seller, buyer_platform, or seller_platform' });
+      return res.status(400).json({
+        message:
+          'kind must be buyer_seller, buyer_platform, seller_platform, employer_freelancer, freelancer_employer, employer_platform, or freelancer_platform',
+      });
     }
     const body = String(req.body?.body || '').trim().slice(0, 4000);
     if (body.length < 8) {
@@ -62,6 +83,88 @@ router.post('/', authenticate, async (req, res, next) => {
       return res.status(429).json({ message: 'Too many open complaints. Wait for existing cases to close.' });
     }
 
+    // ——— Work / freelance complaints ———
+    if (WORK_KINDS.includes(kind)) {
+      const appId = String(req.body?.jobApplicationId || '').trim();
+      if (!isId(appId)) {
+        return res.status(400).json({ message: 'jobApplicationId required for Work complaints' });
+      }
+      const app = await JobApplication.findById(appId);
+      if (!app) return res.status(404).json({ message: 'Application not found' });
+      const job = await JobPosting.findById(app.job);
+      if (!job) return res.status(404).json({ message: 'Job not found' });
+      const employerId = String(job.postedBy || '');
+      const freelancerId = String(app.applicant || '');
+      const me = String(req.user._id);
+      if (me !== employerId && me !== freelancerId) {
+        return res.status(403).json({ message: 'Only job parties can file this complaint' });
+      }
+      if (kind === 'employer_freelancer' && me !== employerId) {
+        return res.status(403).json({ message: 'Only the employer can file employer→freelancer' });
+      }
+      if (kind === 'freelancer_employer' && me !== freelancerId) {
+        return res.status(403).json({ message: 'Only the freelancer can file freelancer→employer' });
+      }
+      if ((kind === 'employer_platform' || kind === 'freelancer_platform') && me !== employerId && me !== freelancerId) {
+        return res.status(403).json({ message: 'Forbidden' });
+      }
+
+      let respondent = null;
+      if (kind === 'employer_freelancer') respondent = freelancerId;
+      else if (kind === 'freelancer_employer') respondent = employerId;
+
+      if (['employer_freelancer', 'freelancer_employer'].includes(kind) && app.status === 'accepted') {
+        if (!['disputed', 'cancelled'].includes(app.workStatus)) {
+          app.workStatus = 'disputed';
+          app.disputedAt = new Date();
+          await app.save();
+        }
+      }
+
+      const complaint = await Complaint.create({
+        complainant: req.user._id,
+        complainantName: String(req.body?.name || req.user.name || '').trim().slice(0, 200) || req.user.name,
+        complainantEmail: String(req.body?.email || req.user.email || '').trim().slice(0, 200) || req.user.email,
+        kind,
+        jobApplication: app._id,
+        job: job._id,
+        jobTitle: job.title || '',
+        jobSlug: job.slug || '',
+        productName: job.title || '',
+        seller: respondent,
+        body,
+        requestedAction: String(req.body?.requestedAction || '').trim().slice(0, 1000),
+        evidenceUrls: parseEvidenceUrls(req.body?.evidenceUrls),
+        status: kind.endsWith('_platform') ? 'received' : 'awaiting_seller',
+        events: [
+          {
+            at: new Date(),
+            actorId: req.user._id,
+            actorRole: req.user.role,
+            action: 'received',
+            note: `Work dispute on job ${job.slug}`,
+          },
+        ],
+      });
+      complaint.caseRef = caseRefFromId(complaint._id);
+      await complaint.save();
+
+      const notifyIds = [respondent, employerId, freelancerId].filter((id) => id && id !== me);
+      await notifyUsers(notifyIds, {
+        title: 'Khiếu nại Work mới',
+        body: `${job.title}: ${body}`.slice(0, 280),
+        href: `/complaints/${complaint._id}`,
+      });
+      await notifyAdmins({
+        title: 'Work complaint',
+        body: `${kind} · ${job.title}`,
+        href: `/admin/complaints/${complaint._id}`,
+      });
+      await auditComplaint(req, 'complaint.create', complaint);
+      return res.status(201).json(mapComplaint(complaint));
+    }
+
+    // ——— Product / order complaints (existing) ———
     let order = null;
     if (req.body?.orderId) {
       if (!isId(req.body.orderId)) {
@@ -79,7 +182,7 @@ router.post('/', authenticate, async (req, res, next) => {
     } else if (kind === 'buyer_seller') {
       return res.status(400).json({ message: 'buyer_seller complaints require an order ID' });
     }
-    if (kind === 'seller_platform' && req.user.role !== 'creator' && req.user.role !== 'admin') {
+    if (kind === 'seller_platform' && !hasAnyRole(req.user, [ROLE.SELLER, ROLE.TALENT, ROLE.FREELANCER])) {
       return res.status(403).json({ message: 'Only sellers can file a seller–platform complaint' });
     }
 
@@ -121,21 +224,20 @@ router.post('/', authenticate, async (req, res, next) => {
     complaint.caseRef = caseRefFromId(complaint._id);
     await complaint.save();
 
-    await notifyAdmins({
-      title: `Khiếu nại ${complaint.caseRef}`,
-      body: `${complaint.complainantName} opened a ${kind} case.`,
-      href: `/admin/complaints/${complaint._id}`,
-    });
     if (complaint.seller) {
       await notifyUsers([complaint.seller], {
-        title: `Khiếu nại ${complaint.caseRef}`,
-        body: `${complaint.complainantName} filed a complaint about ${complaint.productName || 'an order'}.`,
-        href: '/sell/complaints',
+        title: 'Khiếu nại mới',
+        body: body.slice(0, 280),
+        href: `/sell/complaints/${complaint._id}`,
       });
     }
-    await auditComplaint(req, 'complaint.create', complaint, { kind, openedOrderDispute });
-
-    res.status(201).json(mapComplaint(complaint));
+    await notifyAdmins({
+      title: 'New complaint',
+      body: `${kind}`,
+      href: `/admin/complaints/${complaint._id}`,
+    });
+    await auditComplaint(req, 'complaint.create', complaint);
+    return res.status(201).json(mapComplaint(complaint));
   } catch (err) {
     next(err);
   }

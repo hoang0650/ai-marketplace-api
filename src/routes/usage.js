@@ -12,7 +12,7 @@ const {
 const router = express.Router();
 
 /** Seller/admin aggregate stats (existing). */
-router.get('/', authenticate, requireRoles('creator', 'admin'), async (req, res, next) => {
+router.get('/', authenticate, requireRoles('seller', 'admin'), async (req, res, next) => {
   try {
     const creatorId = req.user.role === 'admin' && req.query.creatorId
       ? req.query.creatorId

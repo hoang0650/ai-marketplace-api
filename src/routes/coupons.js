@@ -22,7 +22,7 @@ function unitForProduct(product, licenseTerm) {
   return Number(product.pricing?.price) || 0;
 }
 
-router.get('/', authenticate, requireRoles('creator', 'admin'), async (req, res, next) => {
+router.get('/', authenticate, requireRoles('seller', 'admin'), async (req, res, next) => {
   try {
     const filter = req.user.role === 'admin' && req.query.all === 'true' ? {} : { seller: req.user._id };
     const rows = await Coupon.find(filter).sort({ createdAt: -1 }).limit(200).lean();
@@ -32,7 +32,7 @@ router.get('/', authenticate, requireRoles('creator', 'admin'), async (req, res,
   }
 });
 
-router.post('/', authenticate, requireRoles('creator', 'admin'), async (req, res, next) => {
+router.post('/', authenticate, requireRoles('seller', 'admin'), async (req, res, next) => {
   try {
     const body = req.body || {};
     const code = normalizeCode(body.code);
@@ -76,7 +76,7 @@ router.post('/', authenticate, requireRoles('creator', 'admin'), async (req, res
   }
 });
 
-router.patch('/:id', authenticate, requireRoles('creator', 'admin'), async (req, res, next) => {
+router.patch('/:id', authenticate, requireRoles('seller', 'admin'), async (req, res, next) => {
   try {
     const coupon = await Coupon.findById(req.params.id);
     if (!coupon) return res.status(404).json({ message: 'Not found' });
@@ -110,7 +110,7 @@ router.patch('/:id', authenticate, requireRoles('creator', 'admin'), async (req,
   }
 });
 
-router.delete('/:id', authenticate, requireRoles('creator', 'admin'), async (req, res, next) => {
+router.delete('/:id', authenticate, requireRoles('seller', 'admin'), async (req, res, next) => {
   try {
     const coupon = await Coupon.findById(req.params.id);
     if (!coupon) return res.status(404).json({ message: 'Not found' });

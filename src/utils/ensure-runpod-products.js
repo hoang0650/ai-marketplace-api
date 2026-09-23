@@ -22,7 +22,7 @@ async function ensureRunpodMarketplaceProducts() {
       email: CREATOR.email,
       passwordHash,
       name: CREATOR.name,
-      role: 'creator',
+      role: 'seller',
       creatorSlug: CREATOR.creatorSlug,
       bio: CREATOR.bio,
       avatarUrl: CREATOR.avatarUrl,

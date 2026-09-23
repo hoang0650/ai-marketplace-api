@@ -114,7 +114,7 @@ async function sessionPlayerMode(doc, product, server) {
   return doc.streamKind === 'sandbox' ? 'game' : 'terminal';
 }
 
-router.post('/', authenticate, requireRoles('creator', 'admin', 'buyer'), async (req, res, next) => {
+router.post('/', authenticate, requireRoles('seller', 'admin', 'buyer'), async (req, res, next) => {
   try {
     const projectId = String(req.body?.projectId || 'default');
     const productSlug = String(req.body?.productSlug || '').toLowerCase();

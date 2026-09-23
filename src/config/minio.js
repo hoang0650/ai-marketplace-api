@@ -42,6 +42,7 @@ function getMinioConfig() {
     playgroundPrefix: cleanPrefix(process.env.MINIO_PLAYGROUND_PREFIX, 'aimarkets/playground'),
     voicePrefix: cleanPrefix(process.env.MINIO_VOICE_PREFIX, 'aimarkets/voices'),
     contentPrefix: cleanPrefix(process.env.MINIO_CONTENT_PREFIX, 'aimarkets/content'),
+    kycPrefix: cleanPrefix(process.env.MINIO_KYC_PREFIX, 'aimarkets/kyc'),
   };
 }
 
@@ -168,6 +169,53 @@ async function getContentObjectStream(objectName) {
   return minio.getObject(cfg.bucket, objectName);
 }
 
+/**
+ * Private KYC ID documents — never public. Stored under aimarkets/kyc/{userId}/…
+ */
+async function uploadKycBuffer(buffer, { userId, side, filename, contentType = 'image/jpeg' } = {}) {
+  const cfg = await ensurePlaygroundBucket();
+  const minio = getMinioClient();
+  const ext = extForMime(contentType);
+  const uid = String(userId || '')
+    .trim()
+    .replace(/[^\w\-]+/g, '');
+  if (!uid) throw new Error('userId required for KYC upload');
+  const safeSide = ['front', 'back', 'selfie'].includes(String(side || '')) ? String(side) : 'doc';
+  const objectName = `${cfg.kycPrefix}/${uid}/${safeSide}-${Date.now()}-${crypto.randomBytes(8).toString('hex')}.${ext}`;
+  await minio.putObject(cfg.bucket, objectName, buffer, buffer.length, {
+    'Content-Type': contentType || 'image/jpeg',
+    'Cache-Control': 'private, no-store',
+    'x-amz-meta-kyc-side': safeSide,
+    'x-amz-meta-user-id': uid,
+  });
+  return {
+    bucket: cfg.bucket,
+    objectName,
+    filename: String(filename || objectName),
+    side: safeSide,
+  };
+}
+
+function isKycObjectForUser(objectName, userId) {
+  const cfg = getMinioConfig();
+  const key = String(objectName || '').replace(/^\/+/, '');
+  const uid = String(userId || '').trim();
+  if (!key || !uid) return false;
+  return key.startsWith(`${cfg.kycPrefix}/${uid}/`);
+}
+
+async function getKycObjectStream(objectName) {
+  const cfg = await ensurePlaygroundBucket();
+  const minio = getMinioClient();
+  return minio.getObject(cfg.bucket, objectName);
+}
+
+async function getKycPresignedUrl(objectName, expirySeconds = 900) {
+  const cfg = await ensurePlaygroundBucket();
+  const minio = getMinioClient();
+  return minio.presignedGetObject(cfg.bucket, objectName, expirySeconds);
+}
+
 async function uploadPublicBuffer(buffer, { filename, contentType, prefix }) {
   const cfg = await ensurePlaygroundBucket();
   const minio = getMinioClient();
@@ -201,5 +249,9 @@ module.exports = {
   uploadVoiceSampleBuffer,
   uploadContentBuffer,
   getContentObjectStream,
+  uploadKycBuffer,
+  isKycObjectForUser,
+  getKycObjectStream,
+  getKycPresignedUrl,
   buildPublicObjectUrl,
 };

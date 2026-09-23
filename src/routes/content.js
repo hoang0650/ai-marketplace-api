@@ -138,7 +138,7 @@ router.get('/products/:slug/episodes', async (req, res, next) => {
 router.post(
   '/products/:productId/episodes',
   authenticate,
-  requireRoles('creator', 'admin'),
+  requireRoles('seller', 'admin'),
   uploadChapter,
   async (req, res, next) => {
     try {
@@ -221,7 +221,7 @@ router.post(
   },
 );
 
-router.delete('/episodes/:id', authenticate, requireRoles('creator', 'admin'), async (req, res, next) => {
+router.delete('/episodes/:id', authenticate, requireRoles('seller', 'admin'), async (req, res, next) => {
   try {
     const episode = await ContentEpisode.findById(req.params.id);
     if (!episode) return res.status(404).json({ message: 'Not found' });

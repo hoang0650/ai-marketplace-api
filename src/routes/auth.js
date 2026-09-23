@@ -17,6 +17,20 @@ const {
   normalizeReturnTo,
 } = require('../config/googleAuth');
 const { liftExpired, effectiveStatus, denyMessage } = require('../utils/moderation');
+const { ROLE, SIGNUP_ROLES, isSignupRole } = require('../utils/roles');
+
+const ROLE_LABELS = {
+  [ROLE.BUYER]: 'Người mua',
+  [ROLE.SELLER]: 'Người bán',
+  [ROLE.TALENT]: 'Talent',
+  [ROLE.FREELANCER]: 'Freelancer',
+  [ROLE.EMPLOYER]: 'Nhà tuyển dụng / HR',
+};
+
+/** Short-lived token carrying the verified Google identity for the signup form. */
+function signGoogleSignupToken(claims) {
+  return jwt.sign({ typ: 'google-signup', ...claims }, config.jwtSecret, { expiresIn: '15m' });
+}
 
 const router = express.Router();
 
@@ -43,26 +57,59 @@ async function findOrCreateGoogleUser(profile) {
       err.statusCode = 409;
       throw err;
     }
-    user.googleId = profile.googleId;
-    if (user.authProvider === 'local') user.authProvider = 'google';
-    if (profile.avatar && !user.avatarUrl) user.avatarUrl = profile.avatar;
-    if (profile.fullName && !user.name) user.name = profile.fullName;
-    await user.save();
+    // Google is a sign-in provider: the account must already exist. Accounts
+    // created by an older Google-only flow keep working; brand-new emails don't.
+    if (!user.passwordHash && !user.googleId) {
+      const err = new Error('Tài khoản chưa hoàn tất đăng ký. Vui lòng đăng ký bằng email/mật khẩu trước.');
+      err.statusCode = 409;
+      err.code = 'GOOGLE_SIGNUP_REQUIRED';
+      throw err;
+    }
+    if (!user.googleId) {
+      user.googleId = profile.googleId;
+      user.authProvider = 'google';
+      if (profile.avatar && !user.avatarUrl) user.avatarUrl = profile.avatar;
+      await user.save();
+    }
     return user;
   }
 
-  const name = profile.fullName || profile.email.split('@')[0];
-  return User.create({
+  const err = new Error('Email chưa có tài khoản. Vui lòng đăng ký trước khi đăng nhập bằng Google.');
+  err.statusCode = 404;
+  err.code = 'ACCOUNT_NOT_FOUND';
+  throw err;
+}
+
+/**
+ * Resolve a Google account into prefill data for the signup form.
+ * NEVER creates or signs in a user — the client must collect password + role.
+ */
+async function resolveGoogleSignupPrefill(payload) {
+  const { profile, redirectUri } = payload;
+  const existing = await User.findOne({ $or: [{ googleId: profile.googleId }, { email: profile.email }] })
+    .select('email googleId passwordHash role')
+    .lean();
+  const hasAccount = !!(existing && existing.passwordHash);
+  if (existing?.googleId && existing.googleId !== profile.googleId) {
+    const err = new Error('Email đã liên kết với tài khoản Google khác');
+    err.statusCode = 409;
+    err.code = 'GOOGLE_EMAIL_LINKED';
+    throw err;
+  }
+  return {
     email: profile.email,
-    name,
-    passwordHash: '',
+    name: profile.fullName || profile.email.split('@')[0],
+    avatarUrl: profile.avatar || '',
     googleId: profile.googleId,
-    authProvider: 'google',
-    avatarUrl:
-      profile.avatar ||
-      `https://api.dicebear.com/9.x/shapes/svg?seed=${encodeURIComponent(profile.email)}`,
-    affiliateCode: `PHAI-${slugify(name).slice(0, 8).toUpperCase() || 'USER'}`,
-  });
+    googleSignupToken: signGoogleSignupToken({
+      googleId: profile.googleId,
+      email: profile.email,
+      name: profile.fullName || '',
+      avatar: profile.avatar || '',
+      redirectUri,
+    }),
+    hasAccount,
+  };
 }
 
 router.post('/register', async (req, res, next) => {
@@ -70,7 +117,10 @@ router.post('/register', async (req, res, next) => {
     const email = String(req.body?.email || '').trim().toLowerCase();
     const name = String(req.body?.name || '').trim();
     const password = String(req.body?.password || '');
-    const asCreator = !!req.body?.asCreator;
+    const confirmPassword = req.body?.confirmPassword;
+    const requestedRole = String(req.body?.role || '').trim().toLowerCase();
+    // Back-compat: older clients send boolean asCreator.
+    const role = !requestedRole && req.body?.asCreator ? ROLE.SELLER : requestedRole || ROLE.BUYER;
 
     const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && email.length <= 254;
     if (!emailOk) {
@@ -82,6 +132,32 @@ router.post('/register', async (req, res, next) => {
     if (password.length < 8 || password.length > 128) {
       return res.status(400).json({ message: 'Password must be 8-128 characters' });
     }
+    if (confirmPassword !== undefined && String(confirmPassword) !== password) {
+      return res.status(400).json({ message: 'Mật khẩu xác nhận không khớp', code: 'PASSWORD_MISMATCH' });
+    }
+    if (!isSignupRole(role)) {
+      return res.status(400).json({
+        message: `Invalid role. Choose one of: ${SIGNUP_ROLES.join(', ')}`,
+        code: 'INVALID_ROLE',
+        roles: SIGNUP_ROLES,
+      });
+    }
+
+    // Verify the Google prefill token so the account is linked to that Google id.
+    let googleId = '';
+    const prefillToken = String(req.body?.googleSignupToken || '');
+    if (prefillToken) {
+      try {
+        const claims = jwt.verify(prefillToken, config.jwtSecret, JWT_VERIFY);
+        if (claims.typ !== 'google-signup') throw new Error('bad type');
+        if (String(claims.email || '').toLowerCase() !== email) {
+          return res.status(400).json({ message: 'Email không khớp với Google', code: 'GOOGLE_EMAIL_MISMATCH' });
+        }
+        googleId = String(claims.googleId || '');
+      } catch {
+        return res.status(400).json({ message: 'Phiên Google đã hết hạn, vui lòng đăng nhập lại', code: 'GOOGLE_SIGNUP_EXPIRED' });
+      }
+    }
 
     const exists = await User.findOne({ email });
     if (exists) {
@@ -89,9 +165,10 @@ router.post('/register', async (req, res, next) => {
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
+    const asSeller = role === ROLE.SELLER;
     let creatorSlug;
-    if (asCreator) {
-      creatorSlug = slugify(name) || `creator-${Date.now()}`;
+    if (asSeller) {
+      creatorSlug = slugify(name) || `seller-${Date.now()}`;
       const clash = await User.findOne({ creatorSlug });
       if (clash) creatorSlug = `${creatorSlug}-${Date.now().toString(36)}`;
     }
@@ -100,14 +177,18 @@ router.post('/register', async (req, res, next) => {
       email,
       name,
       passwordHash,
-      role: asCreator ? 'creator' : 'buyer',
+      role,
       creatorSlug,
-      avatarUrl: `https://api.dicebear.com/9.x/shapes/svg?seed=${encodeURIComponent(email)}`,
+      googleId: googleId || undefined,
+      authProvider: googleId ? 'google' : 'local',
+      avatarUrl:
+        String(req.body?.avatarUrl || '').trim() ||
+        `https://api.dicebear.com/9.x/shapes/svg?seed=${encodeURIComponent(email)}`,
       affiliateCode: `PHAI-${slugify(name).slice(0, 8).toUpperCase() || 'USER'}`,
     });
 
-    if (asCreator) {
-      // New creator appears in /creators listings.
+    if (asSeller) {
+      // New seller appears in /creators listings.
       deleteCachePattern('creators:*').catch(() => {});
     }
 
@@ -116,6 +197,13 @@ router.post('/register', async (req, res, next) => {
   } catch (err) {
     next(err);
   }
+});
+
+/** Roles a user may choose at signup (never admin). */
+router.get('/roles', (_req, res) => {
+  res.json({
+    roles: SIGNUP_ROLES.map((id) => ({ id, label: ROLE_LABELS[id] || id })),
+  });
 });
 
 router.post('/login', async (req, res, next) => {
@@ -176,9 +264,11 @@ router.get('/google/start', (req, res) => {
   })();
   const { origin, path } = normalizeReturnTo(String(req.query.returnTo || ''), refererOrigin || config.frontendUrl);
   const redirectUri = googleCallbackUrl(req);
+  // mode=signup: Google only prefills the signup form (no session created).
+  const mode = String(req.query.mode || 'login').toLowerCase() === 'signup' ? 'signup' : 'login';
   const statePayload = mobile
-    ? { m: 1, s: scheme }
-    : { o: origin, p: path };
+    ? { m: 1, s: scheme, g: mode }
+    : { o: origin, p: path, g: mode };
   const state = jwt.sign(statePayload, config.jwtSecret, { expiresIn: '10m' });
   const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
   url.searchParams.set('client_id', clientId);
@@ -228,8 +318,33 @@ router.get('/google/callback', async (req, res, next) => {
       : '';
     const origin = String(payload.o || fallback).replace(/\/$/, '');
     const nextPath = String(payload.p || '/').startsWith('/') ? String(payload.p) : '/';
+    const signupMode = payload.g === 'signup';
     const redirectUri = googleCallbackUrl(req);
     const profile = await verifyGoogleAuthCode(code, redirectUri);
+
+    if (signupMode) {
+      // Prefill only — never create a session or account here.
+      const prefill = await resolveGoogleSignupPrefill({ profile, redirectUri });
+      if (mobile) {
+        const q = new URLSearchParams({
+          google: 'prefill',
+          email: prefill.email,
+          name: prefill.name,
+          avatar: prefill.avatarUrl || '',
+          googleSignupToken: prefill.googleSignupToken,
+        });
+        return res.redirect(`${mobileScheme}://oauthredirect?${q.toString()}`);
+      }
+      const q = new URLSearchParams({
+        google: 'prefill',
+        email: prefill.email,
+        name: prefill.name,
+        avatar: prefill.avatarUrl || '',
+        googleSignupToken: prefill.googleSignupToken,
+      });
+      return res.redirect(`${origin}/auth/register?${q.toString()}`);
+    }
+
     const user = await findOrCreateGoogleUser(profile);
     await assertAccountActive(user);
     const session = await attachAuthSession(res, user);
@@ -290,6 +405,37 @@ router.post('/google/login', async (req, res, next) => {
         code: err.code,
         suspendedUntil: err.suspendedUntil,
       });
+    }
+    next(err);
+  }
+});
+
+/** Google for SIGNUP: verify identity + return prefill data. Never creates a session. */
+router.post('/google/prefill', async (req, res, next) => {
+  try {
+    if (!getGoogleClientIds().length) {
+      return res.status(503).json({ message: 'Google Sign-In chưa được cấu hình trên máy chủ' });
+    }
+    const { idToken, code, redirectUri, clientId: bodyClientId } = req.body || {};
+    let profile;
+    if (idToken) {
+      profile = await verifyGoogleIdToken(idToken);
+    } else if (code) {
+      profile = await verifyGoogleAuthCode(code, redirectUri || 'postmessage', bodyClientId);
+    } else {
+      return res.status(400).json({ message: 'Thiếu idToken hoặc code Google' });
+    }
+    const prefill = await resolveGoogleSignupPrefill({ profile, redirectUri });
+    return res.json({
+      email: prefill.email,
+      name: prefill.name,
+      avatarUrl: prefill.avatarUrl,
+      googleSignupToken: prefill.googleSignupToken,
+      hasAccount: prefill.hasAccount,
+    });
+  } catch (err) {
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({ message: err.message, code: err.code });
     }
     next(err);
   }

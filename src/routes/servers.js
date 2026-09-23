@@ -20,7 +20,7 @@ function publicServer(doc, live = {}) {
   };
 }
 
-router.use(authenticate, requireRoles('creator', 'admin'));
+router.use(authenticate, requireRoles('seller', 'admin'));
 
 router.get('/', async (req, res, next) => {
   try {

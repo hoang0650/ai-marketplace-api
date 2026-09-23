@@ -168,7 +168,7 @@ function buildRunpodUser() {
     id: CREATOR.mockUserId,
     email: CREATOR.email,
     name: CREATOR.name,
-    role: 'creator',
+    role: 'seller',
     creatorSlug: CREATOR.creatorSlug,
     bio: CREATOR.bio,
     avatarUrl: CREATOR.avatarUrl,

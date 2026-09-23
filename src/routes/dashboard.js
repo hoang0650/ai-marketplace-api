@@ -6,7 +6,7 @@ const { authenticate, requireRoles } = require('../middleware/auth');
 
 const router = express.Router();
 
-router.get('/summary', authenticate, requireRoles('creator', 'admin'), async (req, res, next) => {
+router.get('/summary', authenticate, requireRoles('seller', 'admin'), async (req, res, next) => {
   try {
     const sellerId = req.user._id;
     const paidOrders = await Order.find({ seller: sellerId, status: 'paid' }).lean();

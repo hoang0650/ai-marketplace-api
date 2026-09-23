@@ -10,7 +10,7 @@ const {
 } = require('../terminal/permission.service');
 
 const router = express.Router();
-router.use(authenticate, requireRoles('creator', 'admin', 'buyer'));
+router.use(authenticate, requireRoles('seller', 'admin', 'buyer'));
 
 function publicSession(doc) {
   return {

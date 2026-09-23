@@ -1,6 +1,15 @@
 const mongoose = require('mongoose');
 
-const KINDS = ['buyer_seller', 'buyer_platform', 'seller_platform'];
+const KINDS = [
+  'buyer_seller',
+  'buyer_platform',
+  'seller_platform',
+  /** Work / freelance */
+  'employer_freelancer',
+  'freelancer_employer',
+  'employer_platform',
+  'freelancer_platform',
+];
 const STATUSES = [
   'received',
   'verifying',
@@ -20,7 +29,7 @@ const eventSchema = new mongoose.Schema(
     action: { type: String, required: true },
     note: { type: String, default: '', maxlength: 2000 },
   },
-  { _id: false }
+  { _id: false },
 );
 
 const complaintSchema = new mongoose.Schema(
@@ -33,7 +42,12 @@ const complaintSchema = new mongoose.Schema(
     order: { type: mongoose.Schema.Types.ObjectId, ref: 'Order', default: null, index: true },
     product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', default: null },
     productName: { type: String, default: '', maxlength: 300 },
+    /** Respondent (seller on product cases; employer or freelancer on Work cases). */
     seller: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null, index: true },
+    jobApplication: { type: mongoose.Schema.Types.ObjectId, ref: 'JobApplication', default: null, index: true },
+    job: { type: mongoose.Schema.Types.ObjectId, ref: 'JobPosting', default: null, index: true },
+    jobTitle: { type: String, default: '', maxlength: 300 },
+    jobSlug: { type: String, default: '', maxlength: 200 },
     body: { type: String, required: true, maxlength: 4000 },
     requestedAction: { type: String, default: '', maxlength: 1000 },
     evidenceUrls: { type: [String], default: [] },
@@ -49,12 +63,13 @@ const complaintSchema = new mongoose.Schema(
     closedAt: { type: Date, default: null },
     events: { type: [eventSchema], default: [] },
   },
-  { timestamps: { createdAt: true, updatedAt: true } }
+  { timestamps: { createdAt: true, updatedAt: true } },
 );
 
 complaintSchema.index({ complainant: 1, createdAt: -1 });
 complaintSchema.index({ seller: 1, status: 1, createdAt: -1 });
 complaintSchema.index({ status: 1, createdAt: -1 });
+complaintSchema.index({ jobApplication: 1, createdAt: -1 });
 
 complaintSchema.virtual('id').get(function idVirtual() {
   return this._id.toString();

@@ -27,21 +27,21 @@ const CREATORS = [
     email: 'nova@creators.dev',
     name: 'Nova Labs',
     creatorSlug: 'nova-labs',
-    role: 'creator',
+    role: 'seller',
     bio: 'Building production AI agents for hospitality and ops.',
   },
   {
     email: 'orbit@creators.dev',
     name: 'Orbit AI',
     creatorSlug: 'orbit-ai',
-    role: 'creator',
+    role: 'seller',
     bio: 'Text and embedding models tuned for SEA languages.',
   },
   {
     email: 'pulse@creators.dev',
     name: 'Pulse Studio',
     creatorSlug: 'pulse-studio',
-    role: 'creator',
+    role: 'seller',
     bio: 'Image and video generation toolkits.',
   },
 ];
@@ -57,7 +57,7 @@ async function ensureUser(spec, passwordHash) {
     creatorSlug: spec.creatorSlug,
     bio: spec.bio || '',
     avatarUrl: `https://api.dicebear.com/9.x/shapes/svg?seed=${spec.creatorSlug || spec.email}`,
-    verified: spec.role === 'creator',
+    verified: spec.role === 'seller',
     affiliateCode: `PHAI-${(spec.name || 'USER').replace(/\s+/g, '').slice(0, 8).toUpperCase()}`,
   });
 }

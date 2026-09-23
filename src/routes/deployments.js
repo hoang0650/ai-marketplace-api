@@ -98,7 +98,7 @@ async function findOwnedDeployment(req, res) {
  * Seller deploys their own product with RunPod / gateway runtime.
  * Only the product creator (or admin) may create a deployment.
  */
-router.post('/', authenticate, requireRoles('creator', 'admin'), async (req, res, next) => {
+router.post('/', authenticate, requireRoles('seller', 'admin'), async (req, res, next) => {
   try {
     const body = req.body || {};
     const product = await Product.findById(body.productId);
@@ -163,7 +163,7 @@ router.post('/', authenticate, requireRoles('creator', 'admin'), async (req, res
 });
 
 /** Seller's deployments (secrets included). */
-router.get('/mine', authenticate, requireRoles('creator', 'admin'), async (req, res, next) => {
+router.get('/mine', authenticate, requireRoles('seller', 'admin'), async (req, res, next) => {
   try {
     const filter =
       req.user.role === 'admin' && req.query.all === '1'
@@ -198,7 +198,7 @@ router.get('/browser', async (_req, res, next) => {
  * Seller updates runtime: RunPod serverless, tokenize, gateway, public endpoint, .env, skills.
  * Optionally syncs back to Product.runtime.
  */
-router.patch('/:id', authenticate, requireRoles('creator', 'admin'), async (req, res, next) => {
+router.patch('/:id', authenticate, requireRoles('seller', 'admin'), async (req, res, next) => {
   try {
     const dep = await findOwnedDeployment(req, res);
     if (!dep) return;
@@ -242,7 +242,7 @@ router.patch('/:id', authenticate, requireRoles('creator', 'admin'), async (req,
   }
 });
 
-router.delete('/:id', authenticate, requireRoles('creator', 'admin'), async (req, res, next) => {
+router.delete('/:id', authenticate, requireRoles('seller', 'admin'), async (req, res, next) => {
   try {
     const dep = await findOwnedDeployment(req, res);
     if (!dep) return;
@@ -379,7 +379,7 @@ router.post('/:id/invoke', authenticate, async (req, res, next) => {
   }
 });
 
-router.get('/:id/usage', authenticate, requireRoles('creator', 'admin'), async (req, res, next) => {
+router.get('/:id/usage', authenticate, requireRoles('seller', 'admin'), async (req, res, next) => {
   try {
     const dep = await findOwnedDeployment(req, res);
     if (!dep) return;

@@ -14,7 +14,7 @@ async function ensureCreator() {
       email: CREATOR.email,
       passwordHash: await bcrypt.hash('password', 10),
       name: CREATOR.name,
-      role: 'creator',
+      role: 'seller',
       creatorSlug: CREATOR.creatorSlug,
       bio: CREATOR.bio,
       avatarUrl: CREATOR.avatarUrl,

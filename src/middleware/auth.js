@@ -4,6 +4,7 @@ const User = require('../models/User');
 const { toClient } = require('../utils/serialize');
 const { getCache, setCache, deleteCache, isCacheAvailable, generateCacheKey } = require('../utils/cache');
 const { liftExpired, effectiveStatus, denyMessage } = require('../utils/moderation');
+const { normalizeRole, hasCapability } = require('../utils/roles');
 
 const AUTH_USER_CACHE_TTL = 60 * 60;
 const AUTH_SESSION_TTL = 30 * 24 * 60 * 60;
@@ -42,7 +43,7 @@ function buildAccessTokenPayload(user) {
     userId: id,
     sub: id,
     email: user.email,
-    role: user.role,
+    role: normalizeRole(user.role),
     status: user.accountStatus || 'active',
   };
 }
@@ -122,15 +123,17 @@ function extractRefreshToken(req) {
 
 function publicUser(user) {
   const u = toClient(user);
+  const kycStatus = user?.kyc?.status || u?.kyc?.status || 'none';
   return {
     id: u.id,
     email: u.email,
     name: u.name,
     avatarUrl: u.avatarUrl || undefined,
     coverUrl: u.coverUrl || undefined,
-    role: u.role,
+    role: normalizeRole(u.role),
     creatorSlug: u.creatorSlug || undefined,
     bio: u.bio || undefined,
+    kycStatus,
     createdAt: user.createdAt ? new Date(user.createdAt).toISOString() : new Date().toISOString(),
   };
 }
@@ -175,7 +178,7 @@ async function persistAuthCaches(user, meta = {}) {
   const session = {
     userId: id,
     email: user.email,
-    role: user.role,
+    role: normalizeRole(user.role),
     status: user.accountStatus || 'active',
     lastLogin: (meta.lastLogin || new Date()).toISOString(),
     lastLoginIp: meta.ip || null,
@@ -313,12 +316,31 @@ function optionalAuth(req, _res, next) {
 }
 
 function requireRoles(...roles) {
+  const allowed = roles.flat().map(normalizeRole);
   return (req, res, next) => {
     if (!req.user) {
       return res.status(401).json({ message: 'Unauthorized', code: 'UNAUTHORIZED' });
     }
-    if (!roles.includes(req.user.role)) {
+    const role = normalizeRole(req.user.role);
+    if (role !== 'admin' && !allowed.includes(role)) {
       return res.status(403).json({ message: 'Forbidden', code: 'FORBIDDEN' });
+    }
+    next();
+  };
+}
+
+/** Gate by capability name (see utils/roles.js). Admin always passes. */
+function requireCapability(capability) {
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({ message: 'Unauthorized', code: 'UNAUTHORIZED' });
+    }
+    if (!hasCapability(req.user, capability)) {
+      return res.status(403).json({
+        message: 'Forbidden',
+        code: 'FORBIDDEN',
+        capability,
+      });
     }
     next();
   };
@@ -351,6 +373,7 @@ module.exports = {
   authenticate,
   optionalAuth,
   requireRoles,
+  requireCapability,
   authorizeRoles,
   JWT_VERIFY,
 };

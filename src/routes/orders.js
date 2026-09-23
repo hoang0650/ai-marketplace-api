@@ -1,6 +1,7 @@
 const express = require('express');
 const Order = require('../models/Order');
 const { authenticate } = require('../middleware/auth');
+const { hasCapability } = require('../utils/roles');
 const { mapOrder } = require('../utils/mappers');
 const { openOrderDispute } = require('../utils/open-order-dispute');
 
@@ -11,7 +12,7 @@ router.get('/', authenticate, async (req, res, next) => {
     const filter =
       req.user.role === 'admin'
         ? {}
-        : req.user.role === 'creator'
+        : hasCapability(req.user, 'orderSeller')
           ? { $or: [{ seller: req.user._id }, { buyer: req.user._id }] }
           : { buyer: req.user._id };
     const orders = await Order.find(filter).sort({ createdAt: -1 }).lean();

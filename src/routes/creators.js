@@ -12,7 +12,7 @@ router.get('/', async (_req, res, next) => {
   try {
     const result = await cached('creators:list', CREATORS_TTL, async () => {
       const creators = await User.find({
-        role: { $in: ['creator', 'admin'] },
+        role: { $in: ['seller', 'admin'] },
         creatorSlug: { $exists: true, $ne: '' },
       });
       return Promise.all(creators.map((u) => mapCreator(u, Product)));

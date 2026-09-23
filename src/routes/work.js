@@ -2,7 +2,8 @@ const express = require('express');
 const JobPosting = require('../models/JobPosting');
 const TalentProfile = require('../models/TalentProfile');
 const JobApplication = require('../models/JobApplication');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, requireRoles } = require('../middleware/auth');
+const { ROLE } = require('../utils/roles');
 const { slugify } = require('../utils/serialize');
 const { WORK_FIELDS } = require('../data/work-fields');
 const { isDbReady } = require('../config/db');
@@ -36,7 +37,7 @@ function mapJob(doc) {
   };
 }
 
-function mapApplication(doc, { meId, employerId } = {}) {
+function mapApplication(doc, { meId, employerId, job } = {}) {
   const a = doc.toJSON ? doc.toJSON() : doc;
   const applicantId = String(a.applicant?._id || a.applicant || '');
   const isMine = meId && applicantId === String(meId);
@@ -44,6 +45,8 @@ function mapApplication(doc, { meId, employerId } = {}) {
   return {
     id: String(a.id || a._id),
     jobId: String(a.job?._id || a.job || ''),
+    jobSlug: job?.slug || a.jobSlug || '',
+    jobTitle: job?.title || a.jobTitle || '',
     applicantId,
     applicantName: a.applicantName || a.applicant?.name || 'Ứng viên',
     applicantAvatar: a.applicantAvatar || a.applicant?.avatarUrl || '',
@@ -52,11 +55,38 @@ function mapApplication(doc, { meId, employerId } = {}) {
     proposedPeriod: a.proposedPeriod || 'project',
     coverLetter: isMine || isEmployer ? a.coverLetter || '' : '',
     status: a.status || 'pending',
+    workStatus: a.workStatus || 'none',
+    deliveryNote: isMine || isEmployer ? a.deliveryNote || '' : '',
+    deliveryUrls: isMine || isEmployer ? a.deliveryUrls || [] : [],
+    deliveredAt: a.deliveredAt || null,
+    revisionNote: isMine || isEmployer ? a.revisionNote || '' : '',
+    revisionCount: Number(a.revisionCount) || 0,
+    completedAt: a.completedAt || null,
+    disputedAt: a.disputedAt || null,
     conversationId: isMine || isEmployer ? String(a.conversation || '') || undefined : undefined,
     createdAt: a.createdAt,
     updatedAt: a.updatedAt,
     mine: !!isMine,
   };
+}
+
+function parseDeliveryUrls(raw) {
+  const list = Array.isArray(raw)
+    ? raw
+    : String(raw || '')
+        .split(/[\n,]/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+  const urls = [];
+  for (const item of list.slice(0, 8)) {
+    try {
+      const u = new URL(item);
+      if (u.protocol === 'http:' || u.protocol === 'https:') urls.push(u.toString().slice(0, 500));
+    } catch {
+      /* skip */
+    }
+  }
+  return urls;
 }
 
 function mapTalent(doc) {
@@ -317,7 +347,7 @@ router.get('/jobs/:slug/bids', async (req, res, next) => {
   }
 });
 
-router.post('/jobs/:slug/applications', authenticate, async (req, res, next) => {
+router.post('/jobs/:slug/applications', authenticate, requireRoles(ROLE.FREELANCER, ROLE.ADMIN), async (req, res, next) => {
   try {
     const job = await JobPosting.findOne({ slug: String(req.params.slug).toLowerCase() });
     if (!job) return res.status(404).json({ message: 'Job not found' });
@@ -403,14 +433,26 @@ router.patch('/applications/:id', authenticate, async (req, res, next) => {
     const isApplicant = String(app.applicant) === String(req.user._id);
     const status = String(req.body?.status || '').trim();
     if (isApplicant && status === 'withdrawn') {
+      if (['delivered', 'completed', 'disputed'].includes(app.workStatus)) {
+        return res.status(400).json({ message: 'Cannot withdraw after delivery/completion' });
+      }
       app.status = 'withdrawn';
+      app.workStatus = 'cancelled';
       await app.save();
-      return res.json(mapApplication(app, { meId: req.user._id, employerId }));
+      return res.json(mapApplication(app, { meId: req.user._id, employerId, job }));
     }
     if (isEmployer && (status === 'accepted' || status === 'rejected')) {
       app.status = status;
+      if (status === 'accepted') {
+        app.workStatus = 'hired';
+        // Close other pending apps on this job (optional soft reject)
+        await JobApplication.updateMany(
+          { job: job._id, _id: { $ne: app._id }, status: 'pending' },
+          { $set: { status: 'rejected' } },
+        );
+      }
       await app.save();
-      return res.json(mapApplication(app, { meId: req.user._id, employerId }));
+      return res.json(mapApplication(app, { meId: req.user._id, employerId, job }));
     }
     return res.status(403).json({ message: 'Forbidden' });
   } catch (err) {
@@ -418,7 +460,147 @@ router.patch('/applications/:id', authenticate, async (req, res, next) => {
   }
 });
 
-router.post('/jobs', authenticate, async (req, res, next) => {
+/** Freelancer submits delivery. */
+router.post('/applications/:id/deliver', authenticate, async (req, res, next) => {
+  try {
+    const app = await JobApplication.findById(req.params.id);
+    if (!app) return res.status(404).json({ message: 'Application not found' });
+    if (String(app.applicant) !== String(req.user._id)) {
+      return res.status(403).json({ message: 'Only the hired freelancer can deliver' });
+    }
+    if (app.status !== 'accepted') {
+      return res.status(400).json({ message: 'Application must be accepted first' });
+    }
+    if (!['hired', 'in_progress', 'revision_requested'].includes(app.workStatus)) {
+      return res.status(400).json({ message: `Cannot deliver from status ${app.workStatus}` });
+    }
+    const note = String(req.body?.note || req.body?.deliveryNote || '').trim().slice(0, 4000);
+    if (note.length < 4) {
+      return res.status(400).json({ message: 'delivery note required (min 4 chars)' });
+    }
+    app.deliveryNote = note;
+    app.deliveryUrls = parseDeliveryUrls(req.body?.urls || req.body?.deliveryUrls);
+    app.deliveredAt = new Date();
+    app.workStatus = 'delivered';
+    await app.save();
+    const job = await JobPosting.findById(app.job);
+    const employerId = String(job?.postedBy || '');
+    res.json(mapApplication(app, { meId: req.user._id, employerId, job }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Employer accepts delivery → job completed. */
+router.post('/applications/:id/complete', authenticate, async (req, res, next) => {
+  try {
+    const app = await JobApplication.findById(req.params.id);
+    if (!app) return res.status(404).json({ message: 'Application not found' });
+    const job = await JobPosting.findById(app.job);
+    if (!job) return res.status(404).json({ message: 'Job not found' });
+    if (String(job.postedBy || '') !== String(req.user._id)) {
+      return res.status(403).json({ message: 'Only the employer can complete the job' });
+    }
+    if (app.workStatus !== 'delivered') {
+      return res.status(400).json({ message: 'Freelancer must deliver before completion' });
+    }
+    app.workStatus = 'completed';
+    app.completedAt = new Date();
+    await app.save();
+    res.json(mapApplication(app, { meId: req.user._id, employerId: String(job.postedBy), job }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Employer requests revision (max 3). */
+router.post('/applications/:id/revision', authenticate, async (req, res, next) => {
+  try {
+    const app = await JobApplication.findById(req.params.id);
+    if (!app) return res.status(404).json({ message: 'Application not found' });
+    const job = await JobPosting.findById(app.job);
+    if (!job) return res.status(404).json({ message: 'Job not found' });
+    if (String(job.postedBy || '') !== String(req.user._id)) {
+      return res.status(403).json({ message: 'Only the employer can request revision' });
+    }
+    if (app.workStatus !== 'delivered') {
+      return res.status(400).json({ message: 'Revision only after delivery' });
+    }
+    if ((app.revisionCount || 0) >= 3) {
+      return res.status(400).json({ message: 'Maximum 3 revision rounds. Open a complaint if still unresolved.' });
+    }
+    const note = String(req.body?.note || '').trim().slice(0, 2000);
+    if (note.length < 4) {
+      return res.status(400).json({ message: 'revision note required' });
+    }
+    app.revisionNote = note;
+    app.revisionCount = (app.revisionCount || 0) + 1;
+    app.workStatus = 'revision_requested';
+    await app.save();
+    res.json(mapApplication(app, { meId: req.user._id, employerId: String(job.postedBy), job }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Freelancer marks in progress after hire. */
+router.post('/applications/:id/start', authenticate, async (req, res, next) => {
+  try {
+    const app = await JobApplication.findById(req.params.id);
+    if (!app) return res.status(404).json({ message: 'Application not found' });
+    if (String(app.applicant) !== String(req.user._id)) {
+      return res.status(403).json({ message: 'Only the freelancer can start work' });
+    }
+    if (app.status !== 'accepted' || !['hired', 'revision_requested'].includes(app.workStatus)) {
+      return res.status(400).json({ message: 'Cannot start from current status' });
+    }
+    if (app.workStatus === 'hired') app.workStatus = 'in_progress';
+    await app.save();
+    const job = await JobPosting.findById(app.job);
+    res.json(mapApplication(app, { meId: req.user._id, employerId: String(job?.postedBy || ''), job }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Contracts list for manage dashboard. */
+router.get('/contracts/mine', authenticate, async (req, res, next) => {
+  try {
+    const as = String(req.query.as || 'all');
+    const myJobs = await JobPosting.find({ postedBy: req.user._id }).select('_id slug title postedBy').lean();
+    const jobIds = myJobs.map((j) => j._id);
+    const jobMap = Object.fromEntries(myJobs.map((j) => [String(j._id), j]));
+    const filter =
+      as === 'employer'
+        ? { job: { $in: jobIds }, status: 'accepted' }
+        : as === 'freelancer'
+          ? { applicant: req.user._id, status: 'accepted' }
+          : {
+              status: 'accepted',
+              $or: [{ applicant: req.user._id }, { job: { $in: jobIds } }],
+            };
+    const rows = await JobApplication.find(filter).sort({ updatedAt: -1 }).limit(100).lean({ virtuals: true });
+    const missingJobIds = [...new Set(rows.map((r) => String(r.job)).filter((id) => !jobMap[id]))];
+    if (missingJobIds.length) {
+      const extra = await JobPosting.find({ _id: { $in: missingJobIds } }).select('_id slug title postedBy').lean();
+      for (const j of extra) jobMap[String(j._id)] = j;
+    }
+    res.json(
+      rows.map((r) => {
+        const job = jobMap[String(r.job)];
+        return mapApplication(r, {
+          meId: req.user._id,
+          employerId: String(job?.postedBy || ''),
+          job,
+        });
+      }),
+    );
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/jobs', authenticate, requireRoles(ROLE.EMPLOYER, ROLE.ADMIN), async (req, res, next) => {
   try {
     const body = req.body || {};
     const title = String(body.title || '').trim();
@@ -484,7 +666,7 @@ router.get('/talents/:slug', async (req, res, next) => {
   }
 });
 
-router.post('/talents', authenticate, async (req, res, next) => {
+router.post('/talents', authenticate, requireRoles(ROLE.TALENT, ROLE.ADMIN), async (req, res, next) => {
   try {
     const body = req.body || {};
     const name = String(body.name || req.user.name || '').trim();

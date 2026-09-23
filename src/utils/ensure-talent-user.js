@@ -23,7 +23,7 @@ async function ensureTalentUser(talent) {
         authProvider: 'local',
         avatarUrl: talent.avatarUrl || '',
         bio: String(talent.bio || '').slice(0, 500),
-        role: 'buyer',
+        role: 'talent',
         affiliateCode: `PHAI-T-${slugify(slug).slice(0, 10).toUpperCase() || 'TALENT'}`,
       });
     } catch (err) {
