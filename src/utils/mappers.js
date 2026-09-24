@@ -136,6 +136,8 @@ function mapWallet(doc) {
     payoutId: o.payoutId || '',
     paymentMethod: o.paymentMethod || '',
     paypalOrderId: o.paypalOrderId || '',
+    gpayTransactionId: o.gpayTransactionId || '',
+    gpayAccountNumber: o.gpayAccountNumber || '',
     reviewNote: o.reviewNote || '',
     reviewedAt: o.reviewedAt ? new Date(o.reviewedAt).toISOString() : null,
     createdAt: o.createdAt ? new Date(o.createdAt).toISOString() : new Date().toISOString(),

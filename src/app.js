@@ -62,6 +62,7 @@ const couponRoutes = require('./routes/coupons');
 const kycRoutes = require('./routes/kyc');
 const contentRoutes = require('./routes/content');
 const paypalRoutes = require('./routes/paypal');
+const gpayRoutes = require('./routes/gpay');
 const iapRoutes = require('./routes/iap');
 
 function createApp() {
@@ -223,6 +224,7 @@ function createApp() {
   app.use('/v1/licenses', licenseRoutes);
   app.use('/v1/content', contentRoutes);
   app.use('/v1/paypal', paypalRoutes);
+  app.use('/v1/gpay', gpayRoutes);
   app.use('/v1/iap', iapRoutes);
   app.use('/v1/complaints', complaintRoutes);
   app.use('/v1/chat', chatRoutes);

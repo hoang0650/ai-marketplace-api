@@ -14,8 +14,11 @@ const walletTxSchema = new mongoose.Schema(
       index: true,
     },
     payoutId: { type: String, default: '', index: true },
-    paymentMethod: { type: String, enum: ['', 'sepay', 'paypal', 'iap', 'apple_pay', 'google_pay'], default: '' },
+    paymentMethod: { type: String, enum: ['', 'sepay', 'paypal', 'iap', 'apple_pay', 'google_pay', 'gpay'], default: '' },
     paypalOrderId: { type: String, default: '', index: true },
+    /** GPay Virtual Account deposit reference. */
+    gpayTransactionId: { type: String, default: '', index: true },
+    gpayAccountNumber: { type: String, default: '' },
     iapTransactionId: { type: String, index: true },
     iapProductId: { type: String, default: '' },
     paypalPayerId: { type: String, default: '' },
@@ -30,6 +33,11 @@ const walletTxSchema = new mongoose.Schema(
 walletTxSchema.index({ type: 1, status: 1, createdAt: -1 });
 walletTxSchema.index({ user: 1, 'meta.channel': 1, createdAt: -1 });
 walletTxSchema.index({ iapTransactionId: 1 }, { unique: true, sparse: true });
+/** One GPay deposit row per GPay transaction (idempotent webhooks). */
+walletTxSchema.index(
+  { gpayTransactionId: 1 },
+  { unique: true, partialFilterExpression: { gpayTransactionId: { $gt: '' } } }
+);
 
 walletTxSchema.virtual('id').get(function idVirtual() {
   return this._id.toString();

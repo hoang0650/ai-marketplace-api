@@ -78,6 +78,8 @@ const config = {
   emailFrom: (process.env.EMAIL_FROM || process.env.RESEND_FROM || 'AI Markets <noreply@aimarkets.vn>').trim(),
   emailReplyTo: (process.env.EMAIL_REPLY_TO || 'support@aimarkets.vn').trim(),
   frontendUrl: (process.env.FRONTEND_URL || process.env.APP_URL || 'https://aimarkets.vn').trim(),
+  /** Public base URL of this API — used for provider webhook callbacks. */
+  apiPublicUrl: (process.env.API_PUBLIC_URL || process.env.PUBLIC_API_URL || '').trim(),
   skipEmail:
     process.env.SKIP_EMAIL === '1' ||
     process.env.SKIP_EMAIL === 'true' ||
@@ -90,6 +92,31 @@ const config = {
   paypalClientSecret: (process.env.PAYPAL_CLIENT_SECRET || '').trim(),
   paypalSandbox: process.env.PAYPAL_SANDBOX !== 'false',
   paypalVndPerUsd: Number(process.env.PAYPAL_VND_PER_USD || 26000),
+  /**
+   * GPay (G-Pay Vietnam) — runs alongside PayPal for wallet top-up.
+   * Virtual Account = VND collection account per user (webhook credits the wallet).
+   */
+  gpayVaEnabled: process.env.GPAY_ENABLED !== '0' && process.env.GPAY_ENABLED !== 'false',
+  gpaySandbox: process.env.GPAY_SANDBOX !== 'false',
+  gpayMerchantCode: (process.env.GPAY_MERCHANT_CODE || '').trim(),
+  gpayPassword: (process.env.GPAY_PASSWORD || '').trim(),
+  /** PKCS#8/PKCS#1 PEM (or base64) we use to sign requests sent to GPay. */
+  gpayPrivateKey: (process.env.GPAY_PRIVATE_KEY || '').trim(),
+  /** GPay's public key — used to verify webhook signatures. */
+  gpayPublicKey: (process.env.GPAY_PUBLIC_KEY || '').trim(),
+  gpayBankCode: (process.env.GPAY_BANK_CODE || 'VCCB').trim(),
+  gpayVaBankCode: (process.env.GPAY_VA_BANK_CODE || process.env.GPAY_BANK_CODE || 'VCCB').trim(),
+  gpayAccountType: (process.env.GPAY_ACCOUNT_TYPE || 'M').trim(),
+  /** VND per USD used to credit the (USD) wallet from a VND VA deposit. */
+  gpayVndPerUsd: Number(process.env.GPAY_VND_PER_USD || process.env.PAYPAL_VND_PER_USD || 26000),
+  gpayMinTopupVnd: Number(process.env.GPAY_MIN_TOPUP_VND || 10000),
+  /**
+   * Sandbox-only escape hatch: accept unsigned webhooks when no public key is
+   * configured. Never enabled in production.
+   */
+  gpayTrustUnsignedWebhook:
+    process.env.GPAY_TRUST_UNSIGNED_WEBHOOK === '1' ||
+    (process.env.GPAY_TRUST_UNSIGNED_WEBHOOK !== '0' && nodeEnv !== 'production'),
   appleIapSharedSecret: (process.env.APPLE_IAP_SHARED_SECRET || '').trim(),
   appleIapIssuerId: (process.env.APPLE_IAP_ISSUER_ID || '').trim(),
   appleIapKeyId: (process.env.APPLE_IAP_KEY_ID || '').trim(),
