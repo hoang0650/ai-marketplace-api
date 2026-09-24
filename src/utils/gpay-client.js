@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const config = require('../config/env');
+const { publicApiBase } = require('../config/googleAuth');
 
 /**
  * GPay Payment Platform client.
@@ -230,9 +231,11 @@ async function queryVirtualAccount(accountNumber) {
 }
 
 /** Deposit webhook URL on our side, e.g. https://api.aimarkets.vn/v1/gpay/webhook. */
-function webhookUrl() {
-  const base = String(config.apiPublicUrl || config.frontendUrl || '').replace(/\/+$/, '');
-  return `${base}/v1/gpay/webhook`;
+function webhookUrl(req) {
+  let base = String(config.apiPublicUrl || '').trim();
+  if (!base && req) base = publicApiBase(req);
+  if (!base) base = String(config.frontendUrl || '');
+  return `${base.replace(/\/+$/, '')}/v1/gpay/webhook`;
 }
 
 module.exports = {

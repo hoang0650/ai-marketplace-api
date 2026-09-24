@@ -385,12 +385,12 @@ router.post('/google/login', async (req, res, next) => {
     if (!getGoogleClientIds().length) {
       return res.status(503).json({ message: 'Google Sign-In chưa được cấu hình trên máy chủ' });
     }
-    const { idToken, code, redirectUri, clientId: bodyClientId } = req.body || {};
+    const { idToken, code, redirectUri, clientId: bodyClientId, codeVerifier } = req.body || {};
     let profile;
     if (idToken) {
       profile = await verifyGoogleIdToken(idToken);
     } else if (code) {
-      profile = await verifyGoogleAuthCode(code, redirectUri || 'postmessage', bodyClientId);
+      profile = await verifyGoogleAuthCode(code, redirectUri || 'postmessage', bodyClientId, codeVerifier);
     } else {
       return res.status(400).json({ message: 'Thiếu idToken hoặc code Google' });
     }
@@ -416,12 +416,12 @@ router.post('/google/prefill', async (req, res, next) => {
     if (!getGoogleClientIds().length) {
       return res.status(503).json({ message: 'Google Sign-In chưa được cấu hình trên máy chủ' });
     }
-    const { idToken, code, redirectUri, clientId: bodyClientId } = req.body || {};
+    const { idToken, code, redirectUri, clientId: bodyClientId, codeVerifier } = req.body || {};
     let profile;
     if (idToken) {
       profile = await verifyGoogleIdToken(idToken);
     } else if (code) {
-      profile = await verifyGoogleAuthCode(code, redirectUri || 'postmessage', bodyClientId);
+      profile = await verifyGoogleAuthCode(code, redirectUri || 'postmessage', bodyClientId, codeVerifier);
     } else {
       return res.status(400).json({ message: 'Thiếu idToken hoặc code Google' });
     }

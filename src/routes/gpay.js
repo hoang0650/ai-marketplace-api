@@ -2,9 +2,10 @@ const express = require('express');
 const mongoose = require('mongoose');
 const GpayVirtualAccount = require('../models/GpayVirtualAccount');
 const WalletTx = require('../models/WalletTx');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, optionalAuth } = require('../middleware/auth');
 const { mapWallet } = require('../utils/mappers');
 const { claimEvent } = require('../finance/idempotency');
+const { isAdmin } = require('../utils/roles');
 const config = require('../config/env');
 const {
   gpayEnabled,
@@ -35,18 +36,33 @@ function publicAccount(doc) {
   };
 }
 
-/** Feature flag + display config for the deposit screens. */
-router.get('/config', (_req, res) => {
+/**
+ * Simulated credits mint real wallet balance, so outside dev/test they are
+ * restricted to admins even when the gateway points at GPay's sandbox.
+ */
+function canSimulate(user) {
+  if (!gpaySandbox()) return false;
+  if (!config.isProduction) return true;
+  return isAdmin(user);
+}
+
+/**
+ * Feature flag + display config for the deposit screens.
+ * `available` keeps the method visible; `enabled` means merchant credentials are set.
+ */
+router.get('/config', optionalAuth, (req, res) => {
   const enabled = gpayEnabled() && gpayVaEnabled();
   res.json({
+    available: config.gpayVaEnabled !== false,
     enabled,
     sandbox: gpaySandbox(),
+    canSimulate: enabled && canSimulate(req.user),
     bankCode: config.gpayVaBankCode,
     accountType: config.gpayAccountType,
     minTopupVnd: Number(config.gpayMinTopupVnd) || 0,
     vndPerUsd: Number(config.gpayVndPerUsd) || 26000,
     merchantName: 'AI Markets',
-    webhookUrl: webhookUrl(),
+    webhookUrl: webhookUrl(req),
   });
 });
 
@@ -238,7 +254,7 @@ router.post('/webhook', async (req, res, next) => {
 /** Sandbox helper: simulate a bank transfer so the flow is testable without GPay. */
 router.post('/sandbox/credit', authenticate, async (req, res, next) => {
   try {
-    if (!gpaySandbox()) {
+    if (!canSimulate(req.user)) {
       return res.status(403).json({ message: 'Sandbox simulation is disabled', code: 'GPAY_NOT_SANDBOX' });
     }
     const va = await GpayVirtualAccount.findOne({ user: req.user._id, status: { $ne: 'closed' } });

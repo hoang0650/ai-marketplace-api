@@ -32,46 +32,47 @@ function isNativeGoogleRedirectUri(redirectUri) {
   return /^com\.googleusercontent\.apps\.[^:]+:/.test(String(redirectUri || ''));
 }
 
+/**
+ * Pick the OAuth client used to exchange an authorization code.
+ *
+ * - Reverse-client-ID redirect (`com.googleusercontent.apps.{id}:/…`): the iOS
+ *   client, a public client (no secret, PKCE verifier instead).
+ * - http(s) redirect or `postmessage`: always the Web client + secret.
+ *
+ * Android clients never exchange codes: Google no longer allows custom URI
+ * schemes on Android and Android clients have no redirect URIs. The Android
+ * client only appears as the `azp` of ID tokens minted by the native SDK
+ * (see verifyGoogleIdToken).
+ */
 function resolveGoogleCodeExchangeCredentials(redirectUri, explicitClientId) {
   const uri = String(redirectUri || 'postmessage').trim();
   const webClientId = getGoogleClientId();
   const iosClientId = getGoogleIosClientId();
   const androidClientId = getGoogleAndroidClientId();
-  const allowedIds = getGoogleClientIds();
+  const requested = String(explicitClientId || '').trim();
 
-  let clientId = String(explicitClientId || '').trim();
+  let clientId;
   let clientSecret = null;
 
-  if (!clientId) {
-    if (isNativeGoogleRedirectUri(uri)) {
-      const schemePrefix = uri.match(/^com\.googleusercontent\.apps\.([^:]+):/)?.[1];
-      if (schemePrefix) {
-        clientId = `${schemePrefix}.apps.googleusercontent.com`;
-      }
-      if (!allowedIds.includes(clientId) && iosClientId) {
-        clientId = iosClientId;
-      }
-    } else if (uri.startsWith('http://') || uri.startsWith('https://')) {
-      clientId = androidClientId || webClientId;
-      if (clientId === webClientId) {
-        clientSecret = getGoogleClientSecret();
-      }
-    } else {
-      clientId = webClientId;
-      clientSecret = getGoogleClientSecret();
+  if (isNativeGoogleRedirectUri(uri)) {
+    const schemePrefix = uri.match(/^com\.googleusercontent\.apps\.([^:]+):/)?.[1];
+    const fromScheme = schemePrefix ? `${schemePrefix}.apps.googleusercontent.com` : '';
+    if (!iosClientId) throw new Error('Chưa cấu hình GOOGLE_IOS_CLIENT_ID');
+    if (fromScheme !== iosClientId || (requested && requested !== iosClientId)) {
+      throw new Error('Google client_id không được phép');
     }
-  } else if (clientId === webClientId) {
+    clientId = iosClientId;
+  } else {
+    if (requested && androidClientId && requested === androidClientId) {
+      throw new Error('Android client không đổi được mã Google; dùng ID token từ SDK Android');
+    }
+    if (requested && requested !== webClientId) {
+      throw new Error('Google client_id không được phép');
+    }
+    clientId = webClientId;
     clientSecret = getGoogleClientSecret();
-  }
-
-  if (!clientId) {
-    throw new Error('Chưa cấu hình GOOGLE_CLIENT_ID phù hợp');
-  }
-  if (!allowedIds.includes(clientId)) {
-    throw new Error('Google client_id không được phép');
-  }
-  if (clientId === webClientId && !clientSecret) {
-    throw new Error('Chưa cấu hình GOOGLE_CLIENT_SECRET cho Web client');
+    if (!clientId) throw new Error('Chưa cấu hình GOOGLE_CLIENT_ID');
+    if (!clientSecret) throw new Error('Chưa cấu hình GOOGLE_CLIENT_SECRET cho Web client');
   }
 
   return { clientId, clientSecret, redirectUri: uri };
@@ -158,7 +159,7 @@ async function verifyGoogleIdToken(idToken) {
   return normalizeGoogleProfile(data);
 }
 
-async function verifyGoogleAuthCode(code, redirectUri = 'postmessage', explicitClientId) {
+async function verifyGoogleAuthCode(code, redirectUri = 'postmessage', explicitClientId, codeVerifier) {
   const authCode = String(code || '').trim();
   if (!authCode) throw new Error('Thiếu Google authorization code');
 
@@ -174,6 +175,8 @@ async function verifyGoogleAuthCode(code, redirectUri = 'postmessage', explicitC
     grant_type: 'authorization_code',
   });
   if (clientSecret) body.set('client_secret', clientSecret);
+  const verifier = String(codeVerifier || '').trim();
+  if (verifier) body.set('code_verifier', verifier);
 
   const res = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
@@ -201,6 +204,7 @@ module.exports = {
   getGoogleIosClientId,
   getGoogleAndroidClientId,
   getGoogleClientSecret,
+  resolveGoogleCodeExchangeCredentials,
   publicApiBase,
   googleCallbackUrl,
   allowedFrontendOrigins,
