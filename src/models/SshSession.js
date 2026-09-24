@@ -7,8 +7,14 @@ const sshSessionSchema = new mongoose.Schema(
     host: { type: String, required: true },
     port: { type: Number, default: 22 },
     username: { type: String, required: true },
-    /** Plain password shown once at generation; stored for active session lookup */
-    password: { type: String, required: true },
+    /** `password` (OpenClaw/Hermes/NanoClaw) or `key` (SpaceBot sshd). */
+    authMethod: { type: String, enum: ['password', 'key'], default: 'password' },
+    /** Plain password shown once at generation; unset for key sessions. */
+    password: { type: String, required: false },
+    /** OpenSSH private key (PEM) for key-based sessions; required when authMethod=key. */
+    privateKey: { type: String, required: false },
+    /** Public key pushed to the agent's `authorized_keys`. */
+    publicKey: { type: String, required: false },
     command: { type: String, required: true },
     expiresAt: { type: Date, required: true, index: true },
     revokedAt: { type: Date, default: null },
