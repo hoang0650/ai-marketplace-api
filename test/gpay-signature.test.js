@@ -7,7 +7,10 @@ const {
   buildBalanceWebhookInput,
   normalizePrivateKey,
   verifyWebhookSignature,
+  verifyRelaySecret,
+  webhookUrl,
 } = require('../src/utils/gpay-client');
+const { GPAY_PUBLIC_KEY_SANDBOX, GPAY_PUBLIC_KEY_PRODUCT } = require('../src/config/gpayKeys');
 
 test('buildSignatureInput joins fields as k=v with & in order', () => {
   const input = buildSignatureInput({ merchant_code: 'M_X', order_id: '1', amount: 10 });
@@ -107,5 +110,53 @@ test('close-account webhook uses its own signature input', () => {
     assert.equal(verifyWebhookSignature({ ...payload, signature }), true);
   } finally {
     config.gpayPublicKey = prev.pub;
+  }
+});
+
+test('embedded GPay public keys are RSA-2048 and reject foreign signatures', () => {
+  for (const pem of [GPAY_PUBLIC_KEY_SANDBOX, GPAY_PUBLIC_KEY_PRODUCT]) {
+    const key = crypto.createPublicKey(pem);
+    assert.equal(key.asymmetricKeyType, 'rsa');
+    assert.equal(key.asymmetricKeyDetails.modulusLength, 2048);
+  }
+  const config = require('../src/config/env');
+  const prev = config.gpayPublicKey;
+  config.gpayPublicKey = '';
+  try {
+    const { privateKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+    const payload = { account_number: '1', message: 'm', action: 'CLOSE_ACCOUNT' };
+    const input = buildSignatureInput(payload);
+    const signature = crypto.sign('RSA-SHA256', Buffer.from(input), privateKey).toString('base64');
+    // Falls back to GPay's key, so a self-signed payload must not verify.
+    assert.equal(verifyWebhookSignature({ ...payload, signature }), false);
+    assert.equal(verifyWebhookSignature(payload), false);
+  } finally {
+    config.gpayPublicKey = prev;
+  }
+});
+
+test('relay secret gates the webhook only when configured', () => {
+  const config = require('../src/config/env');
+  const prev = config.gpayRelaySecret;
+  try {
+    config.gpayRelaySecret = '';
+    assert.equal(verifyRelaySecret(undefined), true);
+    config.gpayRelaySecret = 's3cret';
+    assert.equal(verifyRelaySecret('s3cret'), true);
+    assert.equal(verifyRelaySecret('s3cre'), false);
+    assert.equal(verifyRelaySecret(undefined), false);
+  } finally {
+    config.gpayRelaySecret = prev;
+  }
+});
+
+test('webhookUrl points GPay at the PHHotel webhook by default', () => {
+  const config = require('../src/config/env');
+  const prev = config.gpayWebhookUrl;
+  try {
+    config.gpayWebhookUrl = 'https://api.phhotel.vn/gpay/webhook';
+    assert.equal(webhookUrl(), 'https://api.phhotel.vn/gpay/webhook');
+  } finally {
+    config.gpayWebhookUrl = prev;
   }
 });

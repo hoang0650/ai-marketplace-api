@@ -102,21 +102,28 @@ const config = {
   gpayPassword: (process.env.GPAY_PASSWORD || '').trim(),
   /** PKCS#8/PKCS#1 PEM (or base64) we use to sign requests sent to GPay. */
   gpayPrivateKey: (process.env.GPAY_PRIVATE_KEY || '').trim(),
-  /** GPay's public key — used to verify webhook signatures. */
+  /** GPay's public key override; defaults to the embedded sandbox/product key. */
   gpayPublicKey: (process.env.GPAY_PUBLIC_KEY || '').trim(),
+  /**
+   * The GPay merchant contract belongs to PHHotel: GPay calls phhotel-api, which
+   * relays AI Markets accounts to /v1/gpay/webhook with this shared secret.
+   */
+  gpayWebhookUrl: (process.env.GPAY_WEBHOOK_URL || 'https://api.phhotel.vn/gpay/webhook').trim(),
+  /** Payment gateway v4 ("1 cổng"); defaults to the QR/VA merchant credentials. */
+  gpayPortalMerchantCode: (process.env.GPAY_PORTAL_MERCHANT_CODE || process.env.GPAY_MERCHANT_CODE || '').trim(),
+  gpayPortalPassword: (process.env.GPAY_PORTAL_PASSWORD || process.env.GPAY_PASSWORD || '').trim(),
+  /** Empty = customer picks ATM / card / VA on GPay's page. */
+  gpayPortalPaymentMethod: (process.env.GPAY_PORTAL_PAYMENT_METHOD || '').trim(),
+  gpayQrSourceOfFund: (process.env.GPAY_QR_SOURCE_OF_FUND || 'VIETQR').trim(),
+  gpayQrTerminalId: (process.env.GPAY_QR_TERMINAL_ID || '').trim(),
+  gpayQrStoreCode: (process.env.GPAY_QR_STORE_CODE || '').trim(),
+  gpayRelaySecret: (process.env.GPAY_RELAY_SECRET || '').trim(),
   gpayBankCode: (process.env.GPAY_BANK_CODE || 'VCCB').trim(),
   gpayVaBankCode: (process.env.GPAY_VA_BANK_CODE || process.env.GPAY_BANK_CODE || 'VCCB').trim(),
   gpayAccountType: (process.env.GPAY_ACCOUNT_TYPE || 'M').trim(),
   /** VND per USD used to credit the (USD) wallet from a VND VA deposit. */
   gpayVndPerUsd: Number(process.env.GPAY_VND_PER_USD || process.env.PAYPAL_VND_PER_USD || 26000),
   gpayMinTopupVnd: Number(process.env.GPAY_MIN_TOPUP_VND || 10000),
-  /**
-   * Sandbox-only escape hatch: accept unsigned webhooks when no public key is
-   * configured. Never enabled in production.
-   */
-  gpayTrustUnsignedWebhook:
-    process.env.GPAY_TRUST_UNSIGNED_WEBHOOK === '1' ||
-    (process.env.GPAY_TRUST_UNSIGNED_WEBHOOK !== '0' && nodeEnv !== 'production'),
   appleIapSharedSecret: (process.env.APPLE_IAP_SHARED_SECRET || '').trim(),
   appleIapIssuerId: (process.env.APPLE_IAP_ISSUER_ID || '').trim(),
   appleIapKeyId: (process.env.APPLE_IAP_KEY_ID || '').trim(),

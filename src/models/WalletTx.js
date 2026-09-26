@@ -16,9 +16,13 @@ const walletTxSchema = new mongoose.Schema(
     payoutId: { type: String, default: '', index: true },
     paymentMethod: { type: String, enum: ['', 'sepay', 'paypal', 'iap', 'apple_pay', 'google_pay', 'gpay'], default: '' },
     paypalOrderId: { type: String, default: '', index: true },
-    /** GPay Virtual Account deposit reference. */
+    /** GPay transaction reference (gateway / QR / Virtual Account). */
     gpayTransactionId: { type: String, default: '' },
     gpayAccountNumber: { type: String, default: '' },
+    /** Our GPay order id (`AIM…`): gateway request_id / QR bill_id. */
+    gpayRequestId: { type: String, default: '' },
+    /** GPay gateway bill id (for bill-info reconciliation). */
+    gpayBillId: { type: String, default: '' },
     iapTransactionId: { type: String, index: true },
     iapProductId: { type: String, default: '' },
     paypalPayerId: { type: String, default: '' },
@@ -37,6 +41,10 @@ walletTxSchema.index({ iapTransactionId: 1 }, { unique: true, sparse: true });
 walletTxSchema.index(
   { gpayTransactionId: 1 },
   { unique: true, partialFilterExpression: { gpayTransactionId: { $gt: '' } } }
+);
+walletTxSchema.index(
+  { gpayRequestId: 1 },
+  { unique: true, partialFilterExpression: { gpayRequestId: { $gt: '' } } }
 );
 
 walletTxSchema.virtual('id').get(function idVirtual() {

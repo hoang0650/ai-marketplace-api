@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const config = require('../config/env');
 const { publicApiBase } = require('../config/googleAuth');
+const { GPAY_PUBLIC_KEY_SANDBOX, GPAY_PUBLIC_KEY_PRODUCT } = require('../config/gpayKeys');
 
 /**
  * GPay Payment Platform client.
@@ -14,13 +15,26 @@ const { publicApiBase } = require('../config/googleAuth');
  * Digital Signature — RSA/SHA-256 over `k1=v1&k2=v2…`, base64 encoded.
  */
 
+// Virtual Account + QR Payment share the mpa-va host.
 const VA_SANDBOX_BASE = 'https://mpa-va.sandbox.g-pay.vn/api/v3';
 const VA_LIVE_BASE = 'https://mpa-va.g-pay.vn/api/v3';
 const POB_SANDBOX_BASE = 'https://mpa.sandbox.g-pay.vn/api/v3';
 const POB_LIVE_BASE = 'https://mpa.g-pay.vn/api/v3';
+// Payment gateway ("1 cổng": ATM / international card / VA on GPay's page).
+const PORTAL_SANDBOX_BASE = 'https://payment-sandbox.g-pay.vn/api/v4';
+const PORTAL_LIVE_BASE = 'https://payment.g-pay.vn/api/v4';
 
 function gpayEnabled() {
   return Boolean(config.gpayMerchantCode && config.gpayPassword);
+}
+
+function gpayPortalEnabled() {
+  if (!config.gpayVaEnabled) return false;
+  return Boolean(config.gpayPortalMerchantCode && config.gpayPortalPassword && gpayPrivateKey());
+}
+
+function portalBase() {
+  return gpaySandbox() ? PORTAL_SANDBOX_BASE : PORTAL_LIVE_BASE;
 }
 
 /** VA only needs merchant code + password (+ signature key for live). */
@@ -61,7 +75,10 @@ function gpayPrivateKey() {
 }
 
 function gpayPublicKey() {
-  return normalizePrivateKey(config.gpayPublicKey);
+  return (
+    normalizePrivateKey(config.gpayPublicKey) ||
+    (gpaySandbox() ? GPAY_PUBLIC_KEY_SANDBOX : GPAY_PUBLIC_KEY_PRODUCT)
+  );
 }
 
 /** `k1=v1&k2=v2` in the exact order given (spec-defined per API). */
@@ -108,52 +125,114 @@ function buildBalanceWebhookInput(payload = {}) {
   });
 }
 
-/** Verify a signature produced by GPay using their public key. */
+/** Gateway webhook + bill-info response (portal spec). */
+function buildPortalWebhookInput(payload = {}) {
+  return buildSignatureInput({
+    merchant_order_id: payload.merchant_order_id,
+    gpay_trans_id: payload.gpay_trans_id,
+    gpay_bill_id: payload.gpay_bill_id,
+    status: payload.status,
+    embed_data: payload.embed_data,
+    user_payment_method: payload.user_payment_method,
+  });
+}
+
+/**
+ * QR webhook. The spec's INPUT line was copied from the VA spec (it names
+ * transaction_id/bank_trace_id/account_number/action, which QR payloads don't
+ * carry), so accept the documented form and the payload's own field order.
+ */
+function buildQrWebhookInputs(payload = {}) {
+  return [
+    buildSignatureInput({
+      transaction_id: payload.transaction_id ?? payload.gpay_trans_id,
+      bank_trace_id: payload.bank_trace_id,
+      bank_transaction_id: payload.bank_transaction_id,
+      account_number: payload.account_number,
+      amount: payload.amount,
+      message: payload.message,
+      action: payload.action,
+    }),
+    buildBalanceWebhookInput(payload),
+    buildSignatureInput({
+      gpay_trans_id: payload.gpay_trans_id,
+      bank_transaction_id: payload.bank_transaction_id,
+      amount: payload.amount,
+      message: payload.message,
+      merchant_code: payload.merchant_code,
+      terminal_id: payload.terminal_id,
+      source_of_fund: payload.source_of_fund,
+      store_code: payload.store_code,
+      qr_type: payload.qr_type,
+      bill_id: payload.bill_id,
+    }),
+  ];
+}
+
+/** Which GPay product sent this webhook: 'portal' | 'qr' | 'va'. */
+function detectWebhookKind(payload = {}) {
+  if (payload.gpay_bill_id || payload.merchant_order_id) return 'portal';
+  if (payload.qr_type || (payload.bill_id && !payload.account_number)) return 'qr';
+  return 'va';
+}
+
+/** Verify a signature produced by GPay using their public key (any product). */
 function verifyWebhookSignature(payload = {}) {
   const provided = String(payload.signature || '').trim();
   if (!provided) return false;
   const publicKey = gpayPublicKey();
-  if (!publicKey) {
-    // No key configured: only trust when explicitly allowed (sandbox/simulation).
-    return gpaySandbox() && config.gpayTrustUnsignedWebhook === true;
-  }
-  const action = String(payload.action || '').trim();
-  const input = action === 'CLOSE_ACCOUNT'
-    ? buildSignatureInput({
+  const kind = detectWebhookKind(payload);
+  let inputs;
+  if (kind === 'portal') inputs = [buildPortalWebhookInput(payload)];
+  else if (kind === 'qr') inputs = buildQrWebhookInputs(payload);
+  else if (String(payload.action || '').trim().toUpperCase() === 'CLOSE_ACCOUNT') {
+    inputs = [buildSignatureInput({
       account_number: payload.account_number,
       message: payload.message,
       action: payload.action,
-    })
-    : buildBalanceWebhookInput(payload);
-  try {
-    return crypto.verify('RSA-SHA256', Buffer.from(input, 'utf8'), publicKey, Buffer.from(provided, 'base64'));
-  } catch {
-    return false;
-  }
+    })];
+  } else inputs = [buildBalanceWebhookInput(payload)];
+  return inputs.some((input) => {
+    try {
+      return crypto.verify('RSA-SHA256', Buffer.from(input, 'utf8'), publicKey, Buffer.from(provided, 'base64'));
+    } catch {
+      return false;
+    }
+  });
 }
 
-let tokenCache = { token: '', expiresAt: 0 };
+const tokenCache = new Map();
 
 function resetTokenCache() {
-  tokenCache = { token: '', expiresAt: 0 };
+  tokenCache.clear();
 }
 
-async function getAccessToken() {
-  if (!gpayEnabled()) {
+function vaCreds() {
+  return { base: vaBase(), merchantCode: config.gpayMerchantCode, password: config.gpayPassword };
+}
+
+function portalCreds() {
+  return { base: portalBase(), merchantCode: config.gpayPortalMerchantCode, password: config.gpayPortalPassword };
+}
+
+async function getAccessToken(creds = vaCreds()) {
+  if (!creds.merchantCode || !creds.password) {
     const err = new Error('GPay credentials not configured');
     err.status = 503;
     err.code = 'GPAY_NOT_CONFIGURED';
     throw err;
   }
+  const cacheKey = `${creds.base}|${creds.merchantCode}`;
+  const cached = tokenCache.get(cacheKey);
   const now = Date.now();
-  if (tokenCache.token && tokenCache.expiresAt > now + 30_000) return tokenCache.token;
+  if (cached && cached.expiresAt > now + 30_000) return cached.token;
 
-  const res = await fetch(`${vaBase()}/authentication/token/create`, {
+  const res = await fetch(`${creds.base}/authentication/token/create`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify({
-      merchant_code: config.gpayMerchantCode,
-      password: config.gpayPassword,
+      merchant_code: creds.merchantCode,
+      password: creds.password,
     }),
   });
   const data = await res.json().catch(() => ({}));
@@ -167,13 +246,13 @@ async function getAccessToken() {
     throw err;
   }
   const expiresAt = Date.parse(data?.response?.expired_at || '') || now + 55 * 60_000;
-  tokenCache = { token, expiresAt };
+  tokenCache.set(cacheKey, { token, expiresAt });
   return token;
 }
 
-async function gpayVaFetch(path, body = {}, { method = 'POST' } = {}) {
-  const token = await getAccessToken();
-  const res = await fetch(`${vaBase()}${path}`, {
+async function gpayVaFetch(path, body = {}, { method = 'POST', creds = vaCreds() } = {}) {
+  const token = await getAccessToken(creds);
+  const res = await fetch(`${creds.base}${path}`, {
     method,
     headers: {
       'Content-Type': 'application/json',
@@ -230,8 +309,86 @@ async function queryVirtualAccount(accountNumber) {
   return data.response || {};
 }
 
-/** Deposit webhook URL on our side, e.g. https://api.aimarkets.vn/v1/gpay/webhook. */
+/**
+ * Payment gateway: create a bill and get `bill_url` to redirect the payer to.
+ * GPay posts the result to the PHHotel webhook, which relays `AIM…` orders here.
+ */
+async function initBill({ requestId, amountVnd, customerId, customerName, title, description, callbackUrl, embedData }) {
+  const signed = {
+    merchant_code: config.gpayPortalMerchantCode,
+    request_id: requestId,
+    amount: Math.round(Number(amountVnd) || 0),
+    customer_id: String(customerId || '').slice(0, 20),
+    payment_method: config.gpayPortalPaymentMethod,
+    embed_data: embedData || '',
+  };
+  const body = {
+    ...signed,
+    title: title || undefined,
+    description: description || undefined,
+    customer_name: customerName || undefined,
+    callback_url: callbackUrl,
+    webhook_url: webhookUrl(),
+    payment_type: 'IMMEDIATE',
+    signature: signInput(buildSignatureInput(signed)),
+  };
+  if (!body.payment_method) delete body.payment_method;
+  const data = await gpayVaFetch('/init-bill', body, { creds: portalCreds() });
+  return data.response || {};
+}
+
+/** Payment gateway: current status of a bill (signed like the webhook). */
+async function getBillInfo({ merchantOrderId, gpayBillId }) {
+  const signed = {
+    merchant_code: config.gpayPortalMerchantCode,
+    merchant_order_id: merchantOrderId,
+    gpay_bill_id: gpayBillId,
+  };
+  const data = await gpayVaFetch(
+    '/bill-info',
+    { ...signed, signature: signInput(buildSignatureInput(signed)) },
+    { creds: portalCreds() },
+  );
+  return data.response || {};
+}
+
+/** QR Payment: dynamic VietQR for one bill; bill_id comes back in the webhook. */
+async function createQrPayment({ billId, amountVnd, accountName, description }) {
+  const signed = {
+    merchant_code: config.gpayMerchantCode,
+    account_name: String(accountName || 'AI MARKETS').slice(0, 50),
+    qr_type: 'DYNAMIC',
+    source_of_fund: config.gpayQrSourceOfFund,
+    bill_id: billId,
+  };
+  const body = {
+    ...signed,
+    amount: Math.round(Number(amountVnd) || 0),
+    description: String(description || billId).slice(0, 30),
+    signature: signInput(buildSignatureInput(signed)),
+  };
+  if (config.gpayQrTerminalId) body.terminal_id = config.gpayQrTerminalId;
+  if (config.gpayQrStoreCode) body.store_code = config.gpayQrStoreCode;
+  if (!body.source_of_fund) delete body.source_of_fund;
+  const data = await gpayVaFetch('/qr-payment/create', body);
+  return data.response || {};
+}
+
+/**
+ * Relayed webhooks from phhotel-api carry `X-GPay-Relay-Secret`. When the
+ * secret is configured, only the relay may call /v1/gpay/webhook.
+ */
+function verifyRelaySecret(provided) {
+  const expected = String(config.gpayRelaySecret || '');
+  if (!expected) return true;
+  const a = Buffer.from(String(provided || ''), 'utf8');
+  const b = Buffer.from(expected, 'utf8');
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+/** URL registered with GPay (phhotel-api owns the merchant contract). */
 function webhookUrl(req) {
+  if (config.gpayWebhookUrl) return config.gpayWebhookUrl;
   let base = String(config.apiPublicUrl || '').trim();
   if (!base && req) base = publicApiBase(req);
   if (!base) base = String(config.frontendUrl || '');
@@ -243,21 +400,32 @@ module.exports = {
   VA_LIVE_BASE,
   POB_SANDBOX_BASE,
   POB_LIVE_BASE,
+  PORTAL_SANDBOX_BASE,
+  PORTAL_LIVE_BASE,
   gpayEnabled,
   gpayVaEnabled,
+  gpayPortalEnabled,
   gpaySandbox,
   vaBase,
   pobBase,
+  portalBase,
   normalizePrivateKey,
   buildSignatureInput,
   buildCreateVirtualAccountInput,
   buildBalanceWebhookInput,
+  buildPortalWebhookInput,
+  buildQrWebhookInputs,
+  detectWebhookKind,
   signInput,
   verifyWebhookSignature,
+  verifyRelaySecret,
   resetTokenCache,
   getAccessToken,
   gpayVaFetch,
   createVirtualAccount,
   queryVirtualAccount,
+  initBill,
+  getBillInfo,
+  createQrPayment,
   webhookUrl,
 };
