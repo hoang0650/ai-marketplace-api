@@ -373,10 +373,11 @@ async function createQrPayment({ billId, amountVnd, accountName, description }) 
     qr_type: 'DYNAMIC',
     source_of_fund: config.gpayQrSourceOfFund,
     bill_id: billId,
+    // GPay signs amount too (seen in its 1009 msgSignature), unlike the spec.
+    amount: Math.round(Number(amountVnd) || 0),
   };
   const body = {
     ...signed,
-    amount: Math.round(Number(amountVnd) || 0),
     description: String(description || billId).slice(0, 30),
     signature: signInput(buildSignatureInput(signed)),
   };
