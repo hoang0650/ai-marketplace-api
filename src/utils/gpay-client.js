@@ -16,9 +16,9 @@ const { GPAY_PUBLIC_KEY_SANDBOX, GPAY_PUBLIC_KEY_PRODUCT } = require('../config/
  */
 
 // Virtual Account + QR Payment share the mpa-va host.
-const VA_SANDBOX_BASE = 'https://mpa-va.sandbox.g-pay.vn/api/v3';
+const VA_SANDBOX_BASE = 'https://mpa-va-sandbox.g-pay.vn/api/v3';
 const VA_LIVE_BASE = 'https://mpa-va.g-pay.vn/api/v3';
-const POB_SANDBOX_BASE = 'https://mpa.sandbox.g-pay.vn/api/v3';
+const POB_SANDBOX_BASE = 'https://mpa-sandbox.g-pay.vn/api/v3';
 const POB_LIVE_BASE = 'https://mpa.g-pay.vn/api/v3';
 // Payment gateway ("1 cổng": ATM / international card / VA on GPay's page).
 const PORTAL_SANDBOX_BASE = 'https://payment-sandbox.g-pay.vn/api/v4';
