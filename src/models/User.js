@@ -2,16 +2,24 @@ const mongoose = require('mongoose');
 
 const KYC_STATUSES = ['none', 'draft', 'pending', 'verified', 'rejected'];
 const KYC_ID_TYPES = ['cccd', 'cmnd', 'passport', 'other'];
+const KYC_SUBJECT_TYPES = ['individual', 'organization'];
+const KYC_ORG_TYPES = ['household', 'company'];
 
 const kycSchema = new mongoose.Schema(
   {
     status: { type: String, enum: KYC_STATUSES, default: 'none', index: true },
+    subjectType: { type: String, enum: KYC_SUBJECT_TYPES, default: 'individual' },
+    /** Individual: the person. Organization: its legal representative / household owner. */
     fullName: { type: String, default: '', trim: true, maxlength: 200 },
     idType: { type: String, enum: KYC_ID_TYPES, default: 'cccd' },
     idNumber: { type: String, default: '', trim: true, maxlength: 64 },
+    personalTaxCode: { type: String, default: '', trim: true, maxlength: 20 },
+    orgType: { type: String, enum: [...KYC_ORG_TYPES, ''], default: '' },
+    orgName: { type: String, default: '', trim: true, maxlength: 300 },
+    orgTaxCode: { type: String, default: '', trim: true, maxlength: 20 },
+    orgAddress: { type: String, default: '', trim: true, maxlength: 500 },
     frontObjectName: { type: String, default: '' },
     backObjectName: { type: String, default: '' },
-    selfieObjectName: { type: String, default: '' },
     submittedAt: { type: Date, default: null },
     reviewedAt: { type: Date, default: null },
     reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
@@ -64,4 +72,6 @@ userSchema.set('toObject', { virtuals: true });
 const User = mongoose.model('User', userSchema);
 User.KYC_STATUSES = KYC_STATUSES;
 User.KYC_ID_TYPES = KYC_ID_TYPES;
+User.KYC_SUBJECT_TYPES = KYC_SUBJECT_TYPES;
+User.KYC_ORG_TYPES = KYC_ORG_TYPES;
 module.exports = User;

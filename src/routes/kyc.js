@@ -1,7 +1,9 @@
 const express = require('express');
 const multer = require('multer');
 const User = require('../models/User');
+const Notification = require('../models/Notification');
 const { authenticate, requireRoles, invalidateAuthUserCache } = require('../middleware/auth');
+const { writeAuditLog } = require('../utils/audit');
 const {
   isMinioEnabled,
   uploadKycBuffer,
@@ -16,6 +18,7 @@ const {
   kycStatus,
   canSubmit,
   objectNameForSide,
+  parseKycSubmission,
 } = require('../utils/kyc');
 
 const router = express.Router();
@@ -46,12 +49,12 @@ router.get('/me', authenticate, async (req, res, next) => {
   }
 });
 
-/** POST /v1/kyc/documents/:side — upload front|back|selfie → private MinIO */
+/** POST /v1/kyc/documents/:side — upload ID front|back → private MinIO */
 router.post('/documents/:side', authenticate, upload.single('image'), async (req, res, next) => {
   try {
     const side = String(req.params.side || '').trim();
     if (!KYC_SIDES.includes(side)) {
-      return res.status(400).json({ message: 'side must be front, back, or selfie', code: 'INVALID_SIDE' });
+      return res.status(400).json({ message: 'side must be front or back', code: 'INVALID_SIDE' });
     }
     if (!isMinioEnabled()) {
       return res.status(503).json({ message: 'Document upload is not configured (MinIO)', code: 'MINIO_NOT_CONFIGURED' });
@@ -119,7 +122,7 @@ router.get('/documents/:side', authenticate, async (req, res, next) => {
   try {
     const side = String(req.params.side || '').trim();
     if (!KYC_SIDES.includes(side)) {
-      return res.status(400).json({ message: 'side must be front, back, or selfie', code: 'INVALID_SIDE' });
+      return res.status(400).json({ message: 'side must be front or back', code: 'INVALID_SIDE' });
     }
     const targetId = req.query.userId && req.user.role === 'admin' ? String(req.query.userId) : String(req.user._id);
     const user = await User.findById(targetId);
@@ -179,32 +182,17 @@ router.post('/submit', authenticate, async (req, res, next) => {
       return res.status(400).json({ message: 'Already submitted; awaiting review', code: 'KYC_PENDING' });
     }
 
-    const fullName = String(req.body?.fullName || user.name || '').trim().slice(0, 200);
-    const idType = String(req.body?.idType || 'cccd').trim();
-    const idNumber = String(req.body?.idNumber || '')
-      .trim()
-      .replace(/\s+/g, '')
-      .slice(0, 64);
-    if (!fullName || fullName.length < 2) {
-      return res.status(400).json({ message: 'Full legal name is required', code: 'NAME_REQUIRED' });
-    }
-    if (!User.KYC_ID_TYPES.includes(idType)) {
-      return res.status(400).json({ message: 'Invalid idType', code: 'INVALID_ID_TYPE' });
-    }
-    if (idNumber.length < 6) {
-      return res.status(400).json({ message: 'ID number is required (min 6 characters)', code: 'ID_REQUIRED' });
-    }
+    const parsed = parseKycSubmission(req.body, user.name);
+    if (!parsed.ok) return res.status(400).json({ message: parsed.message, code: parsed.code });
 
     const kyc = ensureKyc(user);
-    kyc.fullName = fullName;
-    kyc.idType = idType;
-    kyc.idNumber = idNumber;
     if (!canSubmit(kyc, status)) {
       return res.status(400).json({
-        message: 'Upload front, back, and selfie photos before submitting',
+        message: 'Upload the front and back of the ID document before submitting',
         code: 'DOCUMENTS_INCOMPLETE',
       });
     }
+    Object.assign(kyc, parsed.data);
     kyc.status = 'pending';
     kyc.submittedAt = new Date();
     kyc.rejectReason = '';
@@ -218,46 +206,117 @@ router.post('/submit', authenticate, async (req, res, next) => {
   }
 });
 
-/** GET /v1/kyc/admin/queue */
+const REVIEW_STATUSES = ['pending', 'verified', 'rejected'];
+
+function escapeRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** GET /v1/kyc/admin/queue?status=pending|verified|rejected|all&subjectType=&q= */
 router.get('/admin/queue', authenticate, requireRoles('admin'), async (req, res, next) => {
   try {
     const status = String(req.query.status || 'pending').trim();
-    const filter = status === 'all' ? { 'kyc.status': { $in: ['pending', 'verified', 'rejected'] } } : { 'kyc.status': status };
-    const users = await User.find(filter).sort({ 'kyc.submittedAt': -1 }).limit(100).lean();
-    res.json(
-      users.map((u) => ({
-        userId: String(u._id),
-        email: u.email,
-        name: u.name,
-        role: u.role,
-        kyc: mapKyc(u, { includeSensitive: true }),
-      })),
-    );
+    const filter = {
+      'kyc.status': status === 'all' || !REVIEW_STATUSES.includes(status) ? { $in: REVIEW_STATUSES } : status,
+    };
+    const subjectType = String(req.query.subjectType || '').trim();
+    if (subjectType === 'organization') filter['kyc.subjectType'] = 'organization';
+    else if (subjectType === 'individual') filter['kyc.subjectType'] = { $ne: 'organization' };
+    const q = String(req.query.q || '').trim().slice(0, 100);
+    if (q) {
+      const re = new RegExp(escapeRegex(q), 'i');
+      filter.$or = [
+        { email: re },
+        { name: re },
+        { 'kyc.fullName': re },
+        { 'kyc.orgName': re },
+        { 'kyc.orgTaxCode': re },
+        { 'kyc.personalTaxCode': re },
+        { 'kyc.idNumber': re },
+      ];
+    }
+
+    const [users, counts] = await Promise.all([
+      User.find(filter)
+        .sort({ 'kyc.submittedAt': status === 'pending' ? 1 : -1 })
+        .limit(200)
+        .populate('kyc.reviewedBy', 'name email')
+        .lean(),
+      User.aggregate([
+        { $match: { 'kyc.status': { $in: REVIEW_STATUSES } } },
+        { $group: { _id: '$kyc.status', n: { $sum: 1 } } },
+      ]),
+    ]);
+    const countBy = Object.fromEntries(counts.map((c) => [c._id, c.n]));
+
+    res.json({
+      counts: { pending: countBy.pending || 0, verified: countBy.verified || 0, rejected: countBy.rejected || 0 },
+      items: users.map((u) => {
+        const reviewer = u.kyc?.reviewedBy && typeof u.kyc.reviewedBy === 'object' ? u.kyc.reviewedBy : null;
+        return {
+          userId: String(u._id),
+          email: u.email,
+          name: u.name,
+          role: u.role,
+          reviewedBy: reviewer ? { name: reviewer.name || '', email: reviewer.email || '' } : null,
+          kyc: mapKyc(u, { includeSensitive: true }),
+        };
+      }),
+    });
   } catch (err) {
     next(err);
   }
 });
 
-/** PATCH /v1/kyc/admin/:userId — { decision: 'verified'|'rejected', rejectReason? } */
+/** PATCH /v1/kyc/admin/:userId — { decision: 'verified'|'rejected', rejectReason (required when rejected) } */
 router.patch('/admin/:userId', authenticate, requireRoles('admin'), async (req, res, next) => {
   try {
     const decision = String(req.body?.decision || '').trim();
     if (decision !== 'verified' && decision !== 'rejected') {
       return res.status(400).json({ message: 'decision must be verified or rejected', code: 'INVALID_DECISION' });
     }
+    const rejectReason = String(req.body?.rejectReason || '').trim().slice(0, 1000);
+    if (decision === 'rejected' && rejectReason.length < 5) {
+      return res.status(400).json({ message: 'A reject reason is required so the user can fix the application', code: 'REASON_REQUIRED' });
+    }
     const user = await User.findById(req.params.userId);
     if (!user) return res.status(404).json({ message: 'User not found' });
-    const kyc = ensureKyc(user);
-    if (kycStatus(user) !== 'pending' && decision === 'verified') {
-      // allow force-verify from draft for ops
+    const before = kycStatus(user);
+    if (before !== 'pending') {
+      return res.status(409).json({ message: 'Only pending applications can be reviewed', code: 'KYC_NOT_PENDING', kycStatus: before });
     }
+
+    const kyc = ensureKyc(user);
     kyc.status = decision;
     kyc.reviewedAt = new Date();
     kyc.reviewedBy = req.user._id;
-    kyc.rejectReason = decision === 'rejected' ? String(req.body?.rejectReason || '').trim().slice(0, 1000) : '';
+    kyc.rejectReason = decision === 'rejected' ? rejectReason : '';
     user.markModified('kyc');
     await user.save();
     await invalidateAuthUserCache(user._id);
+
+    await Notification.create({
+      user: user._id,
+      title: decision === 'verified' ? 'eKYC đã được duyệt' : 'eKYC bị từ chối',
+      body:
+        decision === 'verified'
+          ? 'Hồ sơ xác minh của bạn đã được duyệt. Bạn có thể rút tiền.'
+          : `Hồ sơ xác minh bị từ chối: ${rejectReason} Vui lòng cập nhật và gửi lại.`,
+      href: '/settings/kyc',
+    });
+    await writeAuditLog({
+      actorId: req.user._id,
+      actorRole: req.user.role,
+      action: decision === 'verified' ? 'KYC_VERIFIED' : 'KYC_REJECTED',
+      resourceType: 'User',
+      resourceId: user._id,
+      oldValue: { kycStatus: before },
+      newValue: { kycStatus: decision, subjectType: kyc.subjectType || 'individual' },
+      reason: kyc.rejectReason,
+      ip: req.ip,
+      userAgent: String(req.headers['user-agent'] || ''),
+    });
+
     res.json({ ok: true, userId: String(user._id), kyc: mapKyc(user, { includeSensitive: true }) });
   } catch (err) {
     next(err);

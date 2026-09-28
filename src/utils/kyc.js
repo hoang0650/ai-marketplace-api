@@ -1,6 +1,12 @@
 const User = require('../models/User');
 
-const KYC_SIDES = ['front', 'back', 'selfie'];
+const KYC_SIDES = ['front', 'back'];
+
+// VN tax codes: enterprise 10 digits (+ "-NNN" for branches). Since 01/07/2025 individuals and
+// household businesses use the 12-digit personal identification number; legacy 10-digit codes stay valid.
+const PERSONAL_TAX_RE = /^(\d{10}|\d{12})$/;
+const COMPANY_TAX_RE = /^\d{10}(-\d{3})?$/;
+const HOUSEHOLD_TAX_RE = /^(\d{10}(-\d{3})?|\d{12})$/;
 
 function kycOf(user) {
   return user?.kyc && typeof user.kyc === 'object' ? user.kyc : {};
@@ -36,17 +42,27 @@ function hasDoc(kyc, side) {
   return Boolean(String(kyc?.[key] || '').trim());
 }
 
+function subjectTypeOf(kyc) {
+  return User.KYC_SUBJECT_TYPES.includes(kyc?.subjectType) ? kyc.subjectType : 'individual';
+}
+
 function mapKyc(user, { includeSensitive = false } = {}) {
   const k = kycOf(user);
   const status = kycStatus(user);
+  const subjectType = subjectTypeOf(k);
   const base = {
     status,
+    subjectType,
     fullName: k.fullName || '',
     idType: k.idType || 'cccd',
     idNumberMasked: maskId(k.idNumber),
+    personalTaxCodeMasked: maskId(k.personalTaxCode),
+    orgType: subjectType === 'organization' ? k.orgType || '' : '',
+    orgName: subjectType === 'organization' ? k.orgName || '' : '',
+    orgTaxCode: subjectType === 'organization' ? k.orgTaxCode || '' : '',
+    orgAddress: subjectType === 'organization' ? k.orgAddress || '' : '',
     hasFront: hasDoc(k, 'front'),
     hasBack: hasDoc(k, 'back'),
-    hasSelfie: hasDoc(k, 'selfie'),
     submittedAt: k.submittedAt ? new Date(k.submittedAt).toISOString() : null,
     reviewedAt: k.reviewedAt ? new Date(k.reviewedAt).toISOString() : null,
     rejectReason: k.rejectReason || '',
@@ -58,15 +74,15 @@ function mapKyc(user, { includeSensitive = false } = {}) {
   return {
     ...base,
     idNumber: k.idNumber || '',
+    personalTaxCode: k.personalTaxCode || '',
     frontObjectName: k.frontObjectName || '',
     backObjectName: k.backObjectName || '',
-    selfieObjectName: k.selfieObjectName || '',
   };
 }
 
 function canSubmit(kyc, status) {
   if (status === 'pending' || status === 'verified') return false;
-  return hasDoc(kyc, 'front') && hasDoc(kyc, 'back') && hasDoc(kyc, 'selfie');
+  return KYC_SIDES.every((side) => hasDoc(kyc, side));
 }
 
 function maskId(raw) {
@@ -80,6 +96,81 @@ function objectNameForSide(kyc, side) {
   return String(kyc?.[`${side}ObjectName`] || '').trim();
 }
 
+function normalizeTaxCode(raw) {
+  return String(raw || '')
+    .replace(/[\s.]/g, '')
+    .slice(0, 20);
+}
+
+const clean = (v, max) => String(v || '').trim().replace(/\s+/g, ' ').slice(0, max);
+
+/**
+ * Validates a submit body. Individual: person + personal tax code.
+ * Organization: household business / company + its tax code, name, address; the ID
+ * documents and name belong to the legal representative (household owner).
+ * @returns {{ ok: true, data: object } | { ok: false, code: string, message: string }}
+ */
+function parseKycSubmission(body, fallbackName = '') {
+  const b = body || {};
+  const fail = (code, message) => ({ ok: false, code, message });
+
+  const subjectType = String(b.subjectType || 'individual').trim();
+  if (!User.KYC_SUBJECT_TYPES.includes(subjectType)) return fail('INVALID_SUBJECT_TYPE', 'Invalid subjectType');
+
+  const fullName = clean(b.fullName || fallbackName, 200);
+  if (fullName.length < 2) {
+    return fail(
+      'NAME_REQUIRED',
+      subjectType === 'organization' ? 'Legal representative name is required' : 'Full legal name is required',
+    );
+  }
+  const idType = String(b.idType || 'cccd').trim();
+  if (!User.KYC_ID_TYPES.includes(idType)) return fail('INVALID_ID_TYPE', 'Invalid idType');
+  const idNumber = String(b.idNumber || '').replace(/\s+/g, '').slice(0, 64);
+  if (idNumber.length < 6) return fail('ID_REQUIRED', 'ID number is required (min 6 characters)');
+
+  const data = {
+    subjectType,
+    fullName,
+    idType,
+    idNumber,
+    personalTaxCode: '',
+    orgType: '',
+    orgName: '',
+    orgTaxCode: '',
+    orgAddress: '',
+  };
+
+  if (subjectType === 'individual') {
+    const personalTaxCode = normalizeTaxCode(b.personalTaxCode);
+    if (!PERSONAL_TAX_RE.test(personalTaxCode)) {
+      return fail('INVALID_PERSONAL_TAX_CODE', 'Personal tax code must be 10 digits or the 12-digit personal ID number');
+    }
+    data.personalTaxCode = personalTaxCode;
+    return { ok: true, data };
+  }
+
+  const orgType = String(b.orgType || '').trim();
+  if (!User.KYC_ORG_TYPES.includes(orgType)) return fail('INVALID_ORG_TYPE', 'orgType must be household or company');
+  const orgName = clean(b.orgName, 300);
+  if (orgName.length < 3) return fail('ORG_NAME_REQUIRED', 'Business name is required');
+  const orgTaxCode = normalizeTaxCode(b.orgTaxCode);
+  const taxRe = orgType === 'company' ? COMPANY_TAX_RE : HOUSEHOLD_TAX_RE;
+  if (!taxRe.test(orgTaxCode)) {
+    return fail(
+      'INVALID_ORG_TAX_CODE',
+      orgType === 'company'
+        ? 'Business tax code must be 10 digits (or 10-3 digits for a branch)'
+        : 'Household business tax code must be 10 digits, 10-3 digits, or the 12-digit owner ID number',
+    );
+  }
+  const orgAddress = clean(b.orgAddress, 500);
+  if (orgAddress.length < 10) return fail('ORG_ADDRESS_REQUIRED', 'Registered business address is required');
+
+  Object.assign(data, { orgType, orgName, orgTaxCode, orgAddress });
+  return { ok: true, data };
+}
+
 module.exports = {
   KYC_SIDES,
   kycOf,
@@ -89,4 +180,6 @@ module.exports = {
   canSubmit,
   objectNameForSide,
   hasDoc,
+  normalizeTaxCode,
+  parseKycSubmission,
 };

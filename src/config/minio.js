@@ -180,7 +180,7 @@ async function uploadKycBuffer(buffer, { userId, side, filename, contentType = '
     .trim()
     .replace(/[^\w\-]+/g, '');
   if (!uid) throw new Error('userId required for KYC upload');
-  const safeSide = ['front', 'back', 'selfie'].includes(String(side || '')) ? String(side) : 'doc';
+  const safeSide = ['front', 'back'].includes(String(side || '')) ? String(side) : 'doc';
   const objectName = `${cfg.kycPrefix}/${uid}/${safeSide}-${Date.now()}-${crypto.randomBytes(8).toString('hex')}.${ext}`;
   await minio.putObject(cfg.bucket, objectName, buffer, buffer.length, {
     'Content-Type': contentType || 'image/jpeg',
