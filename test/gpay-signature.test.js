@@ -156,6 +156,8 @@ test('webhookUrl points GPay at the PHHotel webhook by default', () => {
   try {
     config.gpayWebhookUrl = 'https://api.phhotel.vn/gpay/webhook';
     assert.equal(webhookUrl(), 'https://api.phhotel.vn/gpay/webhook');
+    config.gpayWebhookUrl = '';
+    assert.equal(webhookUrl(), 'https://api.phhotel.vn/gpay/webhook');
   } finally {
     config.gpayWebhookUrl = prev;
   }

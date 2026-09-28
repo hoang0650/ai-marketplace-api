@@ -1,6 +1,5 @@
 const crypto = require('crypto');
 const config = require('../config/env');
-const { publicApiBase } = require('../config/googleAuth');
 const { GPAY_PUBLIC_KEY_SANDBOX, GPAY_PUBLIC_KEY_PRODUCT } = require('../config/gpayKeys');
 
 /**
@@ -400,13 +399,14 @@ function verifyRelaySecret(provided) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
-/** URL registered with GPay (phhotel-api owns the merchant contract). */
-function webhookUrl(req) {
-  if (config.gpayWebhookUrl) return config.gpayWebhookUrl;
-  let base = String(config.apiPublicUrl || '').trim();
-  if (!base && req) base = publicApiBase(req);
-  if (!base) base = String(config.frontendUrl || '');
-  return `${base.replace(/\/+$/, '')}/v1/gpay/webhook`;
+const PHHOTEL_WEBHOOK_URL = 'https://api.phhotel.vn/gpay/webhook';
+
+/**
+ * Only PHHotel's webhook is registered with GPay; it relays AIM… events to
+ * /v1/gpay/webhook, so GPay must never be pointed at this API directly.
+ */
+function webhookUrl() {
+  return config.gpayWebhookUrl || PHHOTEL_WEBHOOK_URL;
 }
 
 module.exports = {

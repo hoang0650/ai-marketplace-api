@@ -60,12 +60,12 @@ function publicOrder(tx) {
 }
 
 /**
- * Simulated credits mint real wallet balance, so outside dev/test they are
- * restricted to admins even when the gateway points at GPay's sandbox.
+ * Simulated credits mint real wallet balance, so they are admin-only unless
+ * NODE_ENV is explicitly development/test (an unset NODE_ENV counts as deployed).
  */
 function canSimulate(user) {
   if (!gpaySandbox()) return false;
-  if (!config.isProduction) return true;
+  if (['development', 'test'].includes(String(process.env.NODE_ENV || '').trim())) return true;
   return isAdmin(user);
 }
 
@@ -123,7 +123,7 @@ router.get('/config', optionalAuth, (req, res) => {
     minTopupVnd: Number(config.gpayMinTopupVnd) || 0,
     vndPerUsd: vndPerUsd(),
     merchantName: 'AI Markets',
-    webhookUrl: webhookUrl(req),
+    webhookUrl: webhookUrl(),
   });
 });
 
