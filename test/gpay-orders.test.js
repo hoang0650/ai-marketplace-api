@@ -51,8 +51,11 @@ function pendingRow(overrides = {}) {
   };
 }
 
-test('order ids carry the AIM prefix PHHotel routes on', () => {
-  assert.equal(orderRequestId('65f0c0ffee'), 'AIM65f0c0ffee');
+test('order ids carry the AIM prefix PHHotel routes on and fit GPay bill_id', () => {
+  assert.equal(orderRequestId('65f0c0ffee'), `AIM${(0x65f0c0ffeen).toString(36).toUpperCase()}`);
+  const longest = orderRequestId('ffffffffffffffffffffffff');
+  assert.match(longest, /^AIM[0-9A-Z]+$/);
+  assert.ok(longest.length <= 24, `${longest} is ${longest.length} chars`);
 });
 
 test('resolveOrderEvent maps gateway statuses and QR payments', () => {

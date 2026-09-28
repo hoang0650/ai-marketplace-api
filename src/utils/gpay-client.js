@@ -278,7 +278,8 @@ async function gpayVaFetch(path, body = {}, { method = 'POST', creds = vaCreds()
   const code = String(data?.meta?.code ?? '');
   if (!res.ok || code !== '200') {
     const err = new Error(data?.meta?.msg || data?.meta?.internal_msg || 'GPay request failed');
-    err.status = res.status >= 400 && res.status < 500 ? res.status : 502;
+    // GPay rejecting our request is an upstream failure, not the caller's; never pass its 4xx through.
+    err.status = 502;
     err.code = 'GPAY_REQUEST_FAILED';
     err.detail = data;
     throw err;

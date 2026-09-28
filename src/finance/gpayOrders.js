@@ -4,9 +4,13 @@ const roundMoney = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
 const FAILED_STATUSES = new Set(['ORDER_FAILED', 'ORDER_CANCEL']);
 
-/** Our GPay order id: gateway request_id / QR bill_id. The `AIM` prefix routes webhooks here. */
+/**
+ * Our GPay order id: gateway request_id / QR bill_id. The `AIM` prefix routes webhooks here.
+ * GPay rejects QR bill_id longer than 24 chars (despite the documented 50), so the
+ * ObjectId is base36-encoded: at most 3 + 19 = 22 chars.
+ */
 function orderRequestId(txId) {
-  return `AIM${String(txId)}`;
+  return `AIM${BigInt(`0x${String(txId)}`).toString(36).toUpperCase()}`;
 }
 
 /**
