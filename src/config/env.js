@@ -112,6 +112,10 @@ const config = {
   /** Payment gateway v4 ("1 cổng"); defaults to the QR/VA merchant credentials. */
   gpayPortalMerchantCode: (process.env.GPAY_PORTAL_MERCHANT_CODE || process.env.GPAY_MERCHANT_CODE || '').trim(),
   gpayPortalPassword: (process.env.GPAY_PORTAL_PASSWORD || process.env.GPAY_PASSWORD || '').trim(),
+  gpayPortalCredsShared: !process.env.GPAY_PORTAL_MERCHANT_CODE,
+  /** Host overrides (e.g. https://mpa-va-sandbox.g-pay.vn/api/v3); default follows GPAY_SANDBOX. */
+  gpayVaBaseUrl: (process.env.GPAY_VA_BASE_URL || '').trim().replace(/\/+$/, ''),
+  gpayPortalBaseUrl: (process.env.GPAY_PORTAL_BASE_URL || '').trim().replace(/\/+$/, ''),
   /** Empty = customer picks ATM / card / VA on GPay's page. */
   gpayPortalPaymentMethod: (process.env.GPAY_PORTAL_PAYMENT_METHOD || '').trim(),
   gpayQrSourceOfFund: (process.env.GPAY_QR_SOURCE_OF_FUND || 'VIETQR').trim(),

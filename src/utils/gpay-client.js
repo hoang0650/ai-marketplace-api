@@ -15,7 +15,8 @@ const { GPAY_PUBLIC_KEY_SANDBOX, GPAY_PUBLIC_KEY_PRODUCT } = require('../config/
  * Digital Signature — RSA/SHA-256 over `k1=v1&k2=v2…`, base64 encoded.
  */
 
-// Virtual Account + QR Payment share the mpa-va host.
+// Virtual Account + QR Payment share the mpa-va host. The QR spec lists
+// mpa-va.sandbox.g-pay.vn, which has no DNS record; GPAY_VA_BASE_URL overrides.
 const VA_SANDBOX_BASE = 'https://mpa-va-sandbox.g-pay.vn/api/v3';
 const VA_LIVE_BASE = 'https://mpa-va.g-pay.vn/api/v3';
 const POB_SANDBOX_BASE = 'https://mpa-sandbox.g-pay.vn/api/v3';
@@ -34,7 +35,7 @@ function gpayPortalEnabled() {
 }
 
 function portalBase() {
-  return gpaySandbox() ? PORTAL_SANDBOX_BASE : PORTAL_LIVE_BASE;
+  return config.gpayPortalBaseUrl || (gpaySandbox() ? PORTAL_SANDBOX_BASE : PORTAL_LIVE_BASE);
 }
 
 /** VA only needs merchant code + password (+ signature key for live). */
@@ -48,7 +49,7 @@ function gpaySandbox() {
 }
 
 function vaBase() {
-  return gpaySandbox() ? VA_SANDBOX_BASE : VA_LIVE_BASE;
+  return config.gpayVaBaseUrl || (gpaySandbox() ? VA_SANDBOX_BASE : VA_LIVE_BASE);
 }
 
 function pobBase() {
@@ -203,6 +204,13 @@ function verifyWebhookSignature(payload = {}) {
 
 const tokenCache = new Map();
 
+/** QR returns `expired_at` as RFC 3339; the gateway documents a UTC timestamp. */
+function tokenExpiresAt(raw, now = Date.now()) {
+  const n = Number(raw);
+  if (Number.isFinite(n) && n > 0) return n < 1e12 ? n * 1000 : n;
+  return Date.parse(raw || '') || now + 55 * 60_000;
+}
+
 function resetTokenCache() {
   tokenCache.clear();
 }
@@ -239,14 +247,20 @@ async function getAccessToken(creds = vaCreds()) {
   const code = String(data?.meta?.code ?? '');
   const token = data?.response?.token;
   if (!res.ok || code !== '200' || !token) {
-    const err = new Error(data?.meta?.msg || data?.meta?.internal_msg || 'GPay auth failed');
+    const reason = data?.meta?.msg ? String(data.meta.msg).trim() : `HTTP ${res.status}`;
+    const err = new Error(`GPay auth failed (${reason})`);
     err.status = 502;
     err.code = 'GPAY_AUTH_FAILED';
-    err.detail = data;
+    err.detail = { base: creds.base, sandbox: gpaySandbox(), status: res.status, meta: data?.meta };
+    if (res.status === 401 || ['401', '51317'].includes(code)) {
+      err.detail.hint = `merchant_code/password không hợp lệ cho môi trường ${gpaySandbox() ? 'sandbox' : 'production'} của GPay`;
+      if (creds.base === portalBase() && config.gpayPortalCredsShared) {
+        err.detail.hint += '; cổng thanh toán đang dùng chung GPAY_MERCHANT_CODE — đặt GPAY_PORTAL_MERCHANT_CODE / GPAY_PORTAL_PASSWORD';
+      }
+    }
     throw err;
   }
-  const expiresAt = Date.parse(data?.response?.expired_at || '') || now + 55 * 60_000;
-  tokenCache.set(cacheKey, { token, expiresAt });
+  tokenCache.set(cacheKey, { token, expiresAt: tokenExpiresAt(data?.response?.expired_at, now) });
   return token;
 }
 
@@ -419,6 +433,7 @@ module.exports = {
   signInput,
   verifyWebhookSignature,
   verifyRelaySecret,
+  tokenExpiresAt,
   resetTokenCache,
   getAccessToken,
   gpayVaFetch,
