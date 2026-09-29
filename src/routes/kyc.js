@@ -1,7 +1,7 @@
 const express = require('express');
 const multer = require('multer');
 const User = require('../models/User');
-const Notification = require('../models/Notification');
+const { notifyUser } = require('../utils/notify');
 const { authenticate, requireRoles, invalidateAuthUserCache } = require('../middleware/auth');
 const { writeAuditLog } = require('../utils/audit');
 const {
@@ -295,15 +295,12 @@ router.patch('/admin/:userId', authenticate, requireRoles('admin'), async (req, 
     await user.save();
     await invalidateAuthUserCache(user._id);
 
-    await Notification.create({
-      user: user._id,
-      title: decision === 'verified' ? 'eKYC đã được duyệt' : 'eKYC bị từ chối',
-      body:
-        decision === 'verified'
-          ? 'Hồ sơ xác minh của bạn đã được duyệt. Bạn có thể rút tiền.'
-          : `Hồ sơ xác minh bị từ chối: ${rejectReason} Vui lòng cập nhật và gửi lại.`,
-      href: '/settings/kyc',
-    });
+    await notifyUser(
+      user._id,
+      decision === 'verified' ? 'kyc.verified' : 'kyc.rejected',
+      decision === 'verified' ? {} : { reason: rejectReason },
+      '/settings/kyc',
+    );
     await writeAuditLog({
       actorId: req.user._id,
       actorRole: req.user.role,

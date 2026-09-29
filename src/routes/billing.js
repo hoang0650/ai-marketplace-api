@@ -2,7 +2,7 @@ const express = require('express');
 const Product = require('../models/Product');
 const Order = require('../models/Order');
 const WalletTx = require('../models/WalletTx');
-const Notification = require('../models/Notification');
+const { notifyUser } = require('../utils/notify');
 const SellerProfile = require('../models/SellerProfile');
 const LegalDocument = require('../models/LegalDocument');
 const { authenticate } = require('../middleware/auth');
@@ -266,12 +266,12 @@ router.post('/checkout', authenticate, async (req, res, next) => {
     deleteCachePattern('creators:*').catch(() => {});
     deleteCachePattern('home:*').catch(() => {});
 
-    await Notification.create({
-      user: product.creator,
-      title: 'New order',
-      body: `${req.user.name} purchased ${product.name} (${ownershipType})`,
-      href: '/dashboard/orders',
-    });
+    await notifyUser(
+      product.creator,
+      'order.new',
+      { buyer: req.user.name, product: product.name, ownership: ownershipType },
+      '/dashboard/orders',
+    );
 
     await writeAuditLog({
       actorId: req.user._id,
@@ -318,14 +318,12 @@ router.post('/checkout', authenticate, async (req, res, next) => {
       console.error('[mail] checkout email failed:', err.message);
     }
 
-    await Notification.create({
-      user: req.user._id,
-      title: 'Thanh toán thành công',
-      body: license?.licenseKey
-        ? `${product.name} · license ${license.licenseKey}. Email xác nhận đã gửi.`
-        : `${product.name} đã thanh toán bằng ví AI Markets.`,
-      href: license?.licenseKey ? '/dashboard/licenses' : '/dashboard/orders',
-    }).catch(() => {});
+    await notifyUser(
+      req.user._id,
+      license?.licenseKey ? 'order.paidLicense' : 'order.paid',
+      { product: product.name, licenseKey: license?.licenseKey },
+      license?.licenseKey ? '/dashboard/licenses' : '/dashboard/orders',
+    ).catch(() => {});
 
     const balance = await getBalance(req.user._id);
     res.status(201).json({

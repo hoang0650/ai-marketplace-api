@@ -1,5 +1,5 @@
 const WalletTx = require('../models/WalletTx');
-const Notification = require('../models/Notification');
+const { notifyUser } = require('./notify');
 const { writeAuditLog } = require('./audit');
 const { setPayoutStatus } = require('../finance/payout-engine');
 const { mapWallet } = require('./mappers');
@@ -7,16 +7,10 @@ const { mapWallet } = require('./mappers');
 const REVIEWABLE = new Set(['completed', 'failed', 'cancelled']);
 
 function notifyCopy(type, status) {
-  if (type === 'deposit' && status === 'completed') {
-    return { title: 'Nạp tiền đã xác nhận', body: 'Số tiền đã được cộng vào ví.', href: '/wallet' };
-  }
-  if (type === 'deposit') {
-    return { title: 'Yêu cầu nạp bị từ chối', body: 'Admin đã từ chối hoặc hủy yêu cầu nạp tiền.', href: '/wallet' };
-  }
-  if (type === 'withdraw' && status === 'completed') {
-    return { title: 'Rút tiền đã chuyển', body: 'Yêu cầu rút đã được thanh toán.', href: '/sell/withdraw' };
-  }
-  return { title: 'Yêu cầu rút bị từ chối', body: 'Số tiền đã được hoàn lại số dư khả dụng.', href: '/sell/withdraw' };
+  if (type === 'deposit' && status === 'completed') return { key: 'wallet.depositCompleted', href: '/wallet' };
+  if (type === 'deposit') return { key: 'wallet.depositRejected', href: '/wallet' };
+  if (type === 'withdraw' && status === 'completed') return { key: 'wallet.withdrawCompleted', href: '/sell/withdraw' };
+  return { key: 'wallet.withdrawRejected', href: '/sell/withdraw' };
 }
 
 async function reviewWalletTx(id, status, { actorId = null, note = '' } = {}) {
@@ -68,12 +62,7 @@ async function reviewWalletTx(id, status, { actorId = null, note = '' } = {}) {
   }
 
   const copy = notifyCopy(tx.type, next);
-  await Notification.create({
-    user: tx.user,
-    title: copy.title,
-    body: note ? `${copy.body} ${note}`.trim() : copy.body,
-    href: copy.href,
-  });
+  await notifyUser(tx.user, copy.key, { note: String(note || '').trim() || undefined }, copy.href);
 
   await writeAuditLog({
     actorId,

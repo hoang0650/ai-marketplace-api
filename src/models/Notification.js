@@ -7,6 +7,9 @@ const notificationSchema = new mongoose.Schema(
     body: { type: String, default: '' },
     read: { type: Boolean, default: false },
     href: { type: String },
+    /** i18n key (`notify.<key>` on web/app); title/body hold the Vietnamese fallback. */
+    key: { type: String },
+    params: { type: mongoose.Schema.Types.Mixed },
   },
   { timestamps: { createdAt: true, updatedAt: false } }
 );

@@ -150,16 +150,13 @@ router.post('/', authenticate, async (req, res, next) => {
       await complaint.save();
 
       const notifyIds = [respondent, employerId, freelancerId].filter((id) => id && id !== me);
-      await notifyUsers(notifyIds, {
-        title: 'Khiếu nại Work mới',
-        body: `${job.title}: ${body}`.slice(0, 280),
-        href: `/complaints/${complaint._id}`,
-      });
-      await notifyAdmins({
-        title: 'Work complaint',
-        body: `${kind} · ${job.title}`,
-        href: `/admin/complaints/${complaint._id}`,
-      });
+      await notifyUsers(
+        notifyIds,
+        'complaint.workNew',
+        { job: job.title, text: String(body).slice(0, 240) },
+        `/complaints/${complaint._id}`,
+      );
+      await notifyAdmins('complaint.workAdmin', { kind, job: job.title }, `/admin/complaints/${complaint._id}`);
       await auditComplaint(req, 'complaint.create', complaint);
       return res.status(201).json(mapComplaint(complaint));
     }
@@ -225,17 +222,14 @@ router.post('/', authenticate, async (req, res, next) => {
     await complaint.save();
 
     if (complaint.seller) {
-      await notifyUsers([complaint.seller], {
-        title: 'Khiếu nại mới',
-        body: body.slice(0, 280),
-        href: `/sell/complaints/${complaint._id}`,
-      });
+      await notifyUsers(
+        [complaint.seller],
+        'complaint.new',
+        { text: body.slice(0, 280) },
+        `/sell/complaints/${complaint._id}`,
+      );
     }
-    await notifyAdmins({
-      title: 'New complaint',
-      body: `${kind}`,
-      href: `/admin/complaints/${complaint._id}`,
-    });
+    await notifyAdmins('complaint.newAdmin', { kind }, `/admin/complaints/${complaint._id}`);
     await auditComplaint(req, 'complaint.create', complaint);
     return res.status(201).json(mapComplaint(complaint));
   } catch (err) {
@@ -277,16 +271,17 @@ router.post('/:id/seller-response', authenticate, async (req, res, next) => {
     complaint.status = 'reviewing';
     pushEvent(complaint, req, 'seller_response', text.slice(0, 200));
     await complaint.save();
-    await notifyUsers([complaint.complainant], {
-      title: `${complaint.caseRef}: seller replied`,
-      body: 'The seller submitted a response. The platform is reviewing evidence.',
-      href: `/complaints/${complaint._id}`,
-    });
-    await notifyAdmins({
-      title: `${complaint.caseRef}: seller replied`,
-      body: 'Seller response received. Case moved to evidence review.',
-      href: `/admin/complaints/${complaint._id}`,
-    });
+    await notifyUsers(
+      [complaint.complainant],
+      'complaint.sellerReplied',
+      { caseRef: complaint.caseRef },
+      `/complaints/${complaint._id}`,
+    );
+    await notifyAdmins(
+      'complaint.sellerRepliedAdmin',
+      { caseRef: complaint.caseRef },
+      `/admin/complaints/${complaint._id}`,
+    );
     await auditComplaint(req, 'complaint.seller_response', complaint);
     res.json(mapComplaint(complaint));
   } catch (err) {
@@ -319,11 +314,11 @@ router.post('/:id/appeal', authenticate, async (req, res, next) => {
     complaint.status = 'reviewing';
     pushEvent(complaint, req, 'appeal', reason.slice(0, 200));
     await complaint.save();
-    await notifyAdmins({
-      title: `${complaint.caseRef}: appeal`,
-      body: `${req.user.name} requested an internal review.`,
-      href: `/admin/complaints/${complaint._id}`,
-    });
+    await notifyAdmins(
+      'complaint.appeal',
+      { caseRef: complaint.caseRef, name: req.user.name },
+      `/admin/complaints/${complaint._id}`,
+    );
     await auditComplaint(req, 'complaint.appeal', complaint, { reason });
     res.json(mapComplaint(complaint));
   } catch (err) {
@@ -359,11 +354,12 @@ router.patch('/:id', authenticate, requireRoles('admin'), async (req, res, next)
       pushEvent(complaint, req, next, note);
       await complaint.save();
       if (next === 'awaiting_seller' && complaint.seller) {
-        await notifyUsers([complaint.seller], {
-          title: `${complaint.caseRef}: phản hồi seller`,
-          body: 'The platform asked you to respond to this complaint.',
-          href: `/complaints/${complaint._id}`,
-        });
+        await notifyUsers(
+          [complaint.seller],
+          'complaint.askSeller',
+          { caseRef: complaint.caseRef },
+          `/complaints/${complaint._id}`,
+        );
       }
     } else if (action === 'skip_seller') {
       if (complaint.status !== 'awaiting_seller' && complaint.status !== 'classified') {
@@ -406,11 +402,12 @@ router.patch('/:id', authenticate, requireRoles('admin'), async (req, res, next)
         }
       }
       await complaint.save();
-      await notifyUsers([complaint.complainant, complaint.seller].filter(Boolean), {
-        title: `${complaint.caseRef}: quyết định`,
-        body: `Decision: ${decision}. ${decisionNote}`.slice(0, 400),
-        href: `/complaints/${complaint._id}`,
-      });
+      await notifyUsers(
+        [complaint.complainant, complaint.seller].filter(Boolean),
+        'complaint.decision',
+        { caseRef: complaint.caseRef, decision, detail: decisionNote || '' },
+        `/complaints/${complaint._id}`,
+      );
     } else if (action === 'close') {
       if (complaint.status !== 'decided') {
         return res.status(400).json({ message: 'Close is only allowed after a decision' });

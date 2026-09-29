@@ -1,5 +1,6 @@
 const { publicRuntime } = require('./runtime');
 const { isPayoutHeld, holdKind, holdUntil, canOpenDispute, roundMoney, effectiveSellerNet } = require('./payout-hold');
+const { inferLegacy } = require('./notify');
 
 function mapProduct(doc, { includeSecrets = false } = {}) {
   if (!doc) return null;
@@ -148,6 +149,7 @@ function mapWallet(doc) {
 
 function mapNotification(doc) {
   const o = typeof doc.toObject === 'function' ? doc.toObject({ virtuals: true }) : { ...doc };
+  const i18n = o.key ? { key: o.key, params: o.params || {} } : inferLegacy(o.title, o.body);
   return {
     id: String(o._id || o.id),
     title: o.title,
@@ -155,6 +157,8 @@ function mapNotification(doc) {
     read: !!o.read,
     createdAt: o.createdAt ? new Date(o.createdAt).toISOString() : new Date().toISOString(),
     href: o.href || undefined,
+    key: i18n?.key,
+    params: i18n?.params,
   };
 }
 

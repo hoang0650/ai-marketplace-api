@@ -5,7 +5,7 @@ const TalentProfile = require('../models/TalentProfile');
 const JobApplication = require('../models/JobApplication');
 const Conversation = require('../models/Conversation');
 const ChatMessage = require('../models/ChatMessage');
-const Notification = require('../models/Notification');
+const { notifyUser } = require('../utils/notify');
 const { authenticate } = require('../middleware/auth');
 const { containsBlockedLink, isAllowedChatImageUrl } = require('../utils/chat-security');
 const { ensureTalentUser } = require('../utils/ensure-talent-user');
@@ -141,12 +141,12 @@ async function appendMessage(convo, senderId, { text, imageUrl, kind }) {
       : convo.contextType === 'talent'
         ? convo.talentSlug || 'Talent'
         : convo.productName || 'Sản phẩm';
-  await Notification.create({
-    user: recipient,
-    title: isBuyer ? 'Tin nhắn mới' : 'Tin nhắn mới',
-    body: `${label}: ${preview}`.slice(0, 280),
-    href: isBuyer ? `/sell/messages/${convo._id}` : `/messages/${convo._id}`,
-  }).catch(() => {});
+  await notifyUser(
+    recipient,
+    'chat.newMessage',
+    { sender: label, preview: preview.slice(0, 240) },
+    isBuyer ? `/sell/messages/${convo._id}` : `/messages/${convo._id}`,
+  ).catch(() => {});
   return msg;
 }
 

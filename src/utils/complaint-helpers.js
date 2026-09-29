@@ -1,5 +1,5 @@
 const User = require('../models/User');
-const Notification = require('../models/Notification');
+const { notifyMany } = require('./notify');
 const { writeAuditLog } = require('./audit');
 
 function caseRefFromId(id) {
@@ -86,19 +86,17 @@ function canAccessComplaint(user, complaint) {
   return false;
 }
 
-async function notifyUsers(userIds, { title, body, href }) {
-  const ids = [...new Set(userIds.filter(Boolean).map((id) => String(id)))];
-  if (!ids.length) return;
-  await Notification.insertMany(
-    ids.map((user) => ({ user, title, body, href })),
-  );
+async function notifyUsers(userIds, key, params, href) {
+  await notifyMany(userIds, key, params, href);
 }
 
-async function notifyAdmins(payload) {
+async function notifyAdmins(key, params, href) {
   const admins = await User.find({ role: 'admin', accountStatus: 'active' }).select('_id').lean();
-  await notifyUsers(
+  await notifyMany(
     admins.map((u) => u._id),
-    payload,
+    key,
+    params,
+    href,
   );
 }
 
