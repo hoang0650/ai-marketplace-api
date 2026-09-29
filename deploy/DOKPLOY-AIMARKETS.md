@@ -135,6 +135,8 @@ Traefik: `open-webui/deploy/dokploy-dynamic-openwebui-aimarkets-wildcard.yml`. G
 
 > ⚠️ Agent của Paperclip chạy ngay trong container server, thừa hưởng mọi env (trừ `PAPERCLIP_*`) và đọc được `/paperclip` (DB, `master.key`). Một instance dùng chung **không cô lập** được buyer — chỉ nên mở cho khách tin cậy, hoặc tách 1 container/buyer. Tuyệt đối không đặt provider API key vào env container; buyer nhập key làm company secret.
 
+> **Không build Open WebUI / Paperclip trên VPS** (vite/Rust build OOM). GitHub Actions (`docker-dokploy.yml` của mỗi fork) build + push GHCR (public); Dokploy → Provider **Docker**, image `ghcr.io/hoang0650/<open-webui|paperclip>-aimarkets:latest`, không cần registry credentials. Secret repo `DOKPLOY_WEBHOOK_URL` (webhook Deployments của app) để tự redeploy sau mỗi build.
+
 Hire products cần có trong DB: `openwebui-ops-agent`, `paperclip-ops-agent` (web/app map theo `hireProductSlug`).
 
 ### Launch → 404 + “Không bảo mật”
