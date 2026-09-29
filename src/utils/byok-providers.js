@@ -65,13 +65,6 @@ const BYOK_PROVIDERS = [
     verify: { url: 'https://api.x.ai/v1/models', auth: 'bearer' },
   },
   {
-    id: 'mistral',
-    label: 'Mistral',
-    keyUrl: 'https://console.mistral.ai/api-keys',
-    keyHint: '',
-    verify: { url: 'https://api.mistral.ai/v1/models', auth: 'bearer' },
-  },
-  {
     id: 'byok-custom',
     label: 'OpenAI-compatible (custom)',
     keyUrl: '',
