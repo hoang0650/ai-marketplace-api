@@ -16,6 +16,10 @@ VPS Hostinger `72.62.72.165` · Dokploy `deploy.phgrouptechs.com` · DNS **Mắt
 | `*.hermes` | A | `72.62.72.165` → `{userId}.hermes.aimarkets.vn` |
 | `nanoclaw` | A | `72.62.72.165` → `nanoclaw.aimarkets.vn` |
 | `*.nanoclaw` | A | `72.62.72.165` → `{userId}.nanoclaw.aimarkets.vn` |
+| `openwebui` | A | `72.62.72.165` → `openwebui.aimarkets.vn` |
+| `*.openwebui` | A | `72.62.72.165` → `{userId}.openwebui.aimarkets.vn` |
+| `paperclip` | A | `72.62.72.165` → `paperclip.aimarkets.vn` |
+| `*.paperclip` | A | `72.62.72.165` → `{userId}.paperclip.aimarkets.vn` |
 
 ## API (`aimarketplace-api`)
 
@@ -59,6 +63,11 @@ NANOCLAW_DASHBOARD_SECRET=<shared-secret-min-24-chars>
 # NANOCLAW_USE_LOGIN_PROXY=1
 AIMARKETS_SERVICE_SECRET=<shared with OpenClaw/Hermes aimarkets-usage plugins>
 OPENCLAW_AIMARKETS_MARKUP=0.25
+# Open WebUI / Paperclip SSO — cùng giá trị trên service tương ứng (thiếu → launch 503)
+OPENWEBUI_SSO_SECRET=<min-32-chars>
+PAPERCLIP_SSO_SECRET=<min-32-chars, khác OPENWEBUI_SSO_SECRET>
+OPENWEBUI_AIMARKETS_PUBLIC_URL_TEMPLATE=https://{userId}.openwebui.aimarkets.vn
+PAPERCLIP_AIMARKETS_PUBLIC_URL_TEMPLATE=https://{userId}.paperclip.aimarkets.vn
 ```
 
 **OpenClaw auto-login / auto-approve:** Launch trả URL hash `#gatewayUrl&token&autoConnect` (giống hotelapp). Gateway + API + PHGroup-AI phải cùng `OPENCLAW_GATEWAY_TOKEN`. Thiếu/sai token → Control UI `unauthorized` / `token_mismatch`, không tới bước device pairing approve.
@@ -97,13 +106,36 @@ curl -s "https://api.aimarkets.vn/v1/products?limit=1"
 4. **`dynamic/openclaw-aimarkets-wildcard.yml`** — `openclaw/deploy/dokploy-dynamic-openclaw-aimarkets-wildcard.yml` (**thêm**, không thay file `{hotelId}.phhotel.vn`). File **phải có** `services.openclaw-aimarkets-svc` → upstream `:8080`.
 5. **`dynamic/hermes-aimarkets-wildcard.yml`** — `hermes-agent/deploy/dokploy-dynamic-hermes-aimarkets-wildcard.yml` (dashboard port **9119** + `services.hermes-aimarkets-svc`).
 6. **`dynamic/nanoclaw-aimarkets-wildcard.yml`** — `nanoclaw.aimarkets.vn` + `*.nanoclaw.aimarkets.vn` → NanoClaw `:3100`.
-7. **`dynamic/aimarkets-user-certs.yml`** — exact `Host()` + `domains.main` per buyer (same LE HTTP-01 as denglish `ai.aimarkets.vn`). Template: `dokploy-dynamic-aimarkets-user-certs.yml`. VPS: `python3 openclaw/deploy/_apply-aimarkets-user-certs.py <userId>`. Without this, `{userId}.hermes|nanoclaw|openclaw` stays on **TRAEFIK DEFAULT CERT**.
+7. **`dynamic/aimarkets-user-certs.yml`** — exact `Host()` + `domains.main` per buyer (same LE HTTP-01 as denglish `ai.aimarkets.vn`). Template: `dokploy-dynamic-aimarkets-user-certs.yml`. VPS: `python3 openclaw/deploy/_apply-aimarkets-user-certs.py <userId>`. Without this, `{userId}.hermes|nanoclaw|openclaw|openwebui|paperclip` stays on **TRAEFIK DEFAULT CERT**.
 
 **OpenClaw AI Markets:** Control UI `https://{userId}.openclaw.aimarkets.vn` (userId = Mongo ObjectId 24 hex). DNS `openclaw` + `*.openclaw` A → `72.62.72.165`. Session `market-{userId}`, `audience=aimarkets`. Luồng PHHotel `{hotelId}.phhotel.vn` giữ nguyên.
 
 **Hermes AI Markets:** Dashboard `https://{userId}.hermes.aimarkets.vn` (cùng userId). DNS `hermes` + `*.hermes` A → `72.62.72.165`. Session `market-{userId}`, `audience=aimarkets`. API: `/v1/hermes/launch|ssh|usage`.
 
 **NanoClaw AI Markets:** `https://{userId}.nanoclaw.aimarkets.vn` (cùng pattern Hermes/OpenClaw). API: `/v1/nanoclaw/launch|ssh|usage`. Xem `nanoclaw/deploy/DOKPLOY-AIMARKETS.md`.
+
+**Open WebUI AI Markets:** `POST /v1/openwebui/launch` → `https://{userId}.openwebui.aimarkets.vn/api/v1/aimarkets/sso?ticket=…` (HMAC `aimr.v1.openwebui.`, TTL 2 phút, dùng 1 lần) → tài khoản riêng role `user` → `/auth`. Không SSH, không pairing, BYOK qua Direct Connections. Image `ghcr.io/hoang0650/open-webui-aimarkets` (fork, workflow `docker-dokploy.yml`), service `aimarketplace-openwebui:8080`, volume `/app/backend/data`. Env tối thiểu:
+
+```env
+WEBUI_SECRET_KEY=<random>
+OPENWEBUI_SSO_SECRET=<giống API>
+ENABLE_PERSISTENT_CONFIG=false
+ENABLE_SIGNUP=false
+ENABLE_LOGIN_FORM=false
+ENABLE_DIRECT_CONNECTIONS=true
+ENABLE_OPENAI_API=false
+ENABLE_OLLAMA_API=false
+WEBUI_ADMIN_EMAIL=<admin nền tảng>
+WEBUI_ADMIN_PASSWORD=<...>
+```
+
+Traefik: `open-webui/deploy/dokploy-dynamic-openwebui-aimarkets-wildcard.yml`. Giữ branding "Open WebUI" (license bắt buộc khi > 50 user).
+
+**Paperclip AI Markets:** `POST /v1/paperclip/launch` → `https://{userId}.paperclip.aimarkets.vn/api/auth/aimarkets/sso?ticket=…` (Better Auth plugin) → user + company riêng (owner) → `/`. Image `ghcr.io/hoang0650/paperclip-aimarkets` (stage `production`), service `aimarketplace-paperclip:3100`, volume `/paperclip`, healthcheck `/api/health`. Env: `PAPERCLIP_DEPLOYMENT_MODE=authenticated`, `PAPERCLIP_DEPLOYMENT_EXPOSURE=public`, `PAPERCLIP_PUBLIC_URL`, `PAPERCLIP_AGENT_JWT_SECRET`, `PAPERCLIP_AUTH_DISABLE_SIGN_UP=true`, `PAPERCLIP_SSO_SECRET` (dùng tên `PAPERCLIP_*` — agent process không thừa hưởng biến này), `TRUST_PROXY=1`. Traefik: `paperclip/deploy/dokploy-dynamic-paperclip-aimarkets-wildcard.yml`.
+
+> ⚠️ Agent của Paperclip chạy ngay trong container server, thừa hưởng mọi env (trừ `PAPERCLIP_*`) và đọc được `/paperclip` (DB, `master.key`). Một instance dùng chung **không cô lập** được buyer — chỉ nên mở cho khách tin cậy, hoặc tách 1 container/buyer. Tuyệt đối không đặt provider API key vào env container; buyer nhập key làm company secret.
+
+Hire products cần có trong DB: `openwebui-ops-agent`, `paperclip-ops-agent` (web/app map theo `hireProductSlug`).
 
 ### Launch → 404 + “Không bảo mật”
 

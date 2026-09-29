@@ -31,7 +31,7 @@ test('market ticket verifies for the issued user only', () => {
     'base64url'
   );
   assert.equal(verifyMarketTicket(`${forged}.${sig}`), null);
-  assert.equal(verifyMarketTicket(`${payload}.x${sig.slice(1)}`), null);
+  assert.equal(verifyMarketTicket(`${payload}.${sig[0] === 'x' ? 'y' : 'x'}${sig.slice(1)}`), null);
 });
 
 test('market ticket expires', () => {
