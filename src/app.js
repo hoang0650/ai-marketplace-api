@@ -91,6 +91,8 @@ function createApp() {
           return cb(null, true);
         }
         if (originAllowed(origin)) return cb(null, true);
+        // OpenClaw Control UI (BYOK page) on https://{userId}.openclaw.aimarkets.vn
+        if (/^https:\/\/(?:[a-f0-9]{24}\.)?openclaw\.aimarkets\.vn$/i.test(origin)) return cb(null, true);
         return cb(null, false);
       },
       credentials: true,

@@ -11,8 +11,12 @@ const {
   computeOpenClawSellCost,
   isPhhotelModelId,
 } = require('../utils/openclaw-pricing');
+const { issueMarketTicket } = require('../utils/openclaw-ticket');
+const { serviceSecretOk } = require('../utils/service-secret');
+const byokRoutes = require('./openclaw-byok');
 
 const router = express.Router();
+router.use('/byok', byokRoutes);
 const SSH_TTL_MS = 60 * 60 * 1000; // 60 minutes
 const USER_ID_RE = /^[a-f0-9]{24}$/i;
 const AIMARKETS_PUBLIC_TEMPLATE =
@@ -54,6 +58,16 @@ function resolveGatewayToken(_userId) {
     .update(`phhotel-openclaw-gateway:${seed}`, 'utf8')
     .digest('hex')
     .slice(0, 48);
+}
+
+/** Adds the signed buyer ticket to the Control UI fragment (never the query string). */
+function withMarketTicket(url, userId) {
+  const ticket = issueMarketTicket(userId);
+  if (!ticket || !url) return url;
+  const [base, hash = ''] = String(url).split('#');
+  const params = new URLSearchParams(hash);
+  params.set('marketTicket', ticket);
+  return `${base}#${params.toString()}`;
 }
 
 function buildHashUrl({ uiBaseUrl, gatewayUrl, token, password, session, userId }) {
@@ -176,7 +190,7 @@ router.post('/launch', authenticate, async (req, res, next) => {
         if (upstream.ok && data?.success && data?.url) {
           return res.json({
             success: true,
-            url: data.url,
+            url: withMarketTicket(data.url, userId),
             audience: 'aimarkets',
             userId,
             message: data.message,
@@ -198,14 +212,17 @@ router.post('/launch', authenticate, async (req, res, next) => {
       });
     }
     const password = String(process.env.OPENCLAW_GATEWAY_PASSWORD || token).trim() || token;
-    const url = buildHashUrl({
-      uiBaseUrl: uiBase,
-      gatewayUrl,
-      token,
-      password,
-      session: `market-${userId}`,
-      userId,
-    });
+    const url = withMarketTicket(
+      buildHashUrl({
+        uiBaseUrl: uiBase,
+        gatewayUrl,
+        token,
+        password,
+        session: `market-${userId}`,
+        userId,
+      }),
+      userId
+    );
 
     if (!url) {
       return res.status(503).json({
@@ -369,18 +386,6 @@ router.post('/ssh/revoke', authenticate, async (req, res, next) => {
   }
 });
 
-function serviceSecretOk(req) {
-  const expected = String(
-    process.env.AIMARKETS_SERVICE_SECRET ||
-      process.env.NEST_SERVICE_AUTH_SECRET ||
-      process.env.PYTHON_AI_SHARED_SECRET ||
-      ''
-  ).trim();
-  if (!expected) return false;
-  const got = String(req.headers['x-service-secret'] || '').trim();
-  return got && got === expected;
-}
-
 function readOpenClawUserId(req) {
   return String(
     req.body?.user_id ||
@@ -457,6 +462,18 @@ router.post('/usage', async (req, res, next) => {
     }
     const inputTokens = Math.max(0, Math.floor(Number(req.body?.inputTokens) || 0));
     const outputTokens = Math.max(0, Math.floor(Number(req.body?.outputTokens) || 0));
+    // Buyer's own provider key: AI Markets sells the agent, not the tokens.
+    if (req.body?.byok === true) {
+      return res.json({
+        success: true,
+        charged: 0,
+        skipped: true,
+        reason: 'byok',
+        model,
+        inputTokens,
+        outputTokens,
+      });
+    }
     const markup =
       Number.isFinite(Number(req.body?.markup)) && Number(req.body.markup) >= 0
         ? Number(req.body.markup)
