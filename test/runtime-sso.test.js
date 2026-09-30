@@ -57,6 +57,72 @@ test('no ticket without a valid user id', () => {
   assert.equal(issueRuntimeTicket({ runtime: 'openwebui', envPrefix: 'OPENWEBUI', user: { _id: 'nope' } }), '');
 });
 
+const { createByokClaimHandler, toOpenAICompatibleConnection } = require('../src/routes/runtime-byok-claim');
+
+function callClaim(handler, { secret, ticket }) {
+  return new Promise((resolve, reject) => {
+    const res = {
+      statusCode: 200,
+      set() {},
+      status(code) {
+        this.statusCode = code;
+        return this;
+      },
+      json(body) {
+        resolve({ status: this.statusCode, body });
+      },
+    };
+    handler({ headers: { 'x-runtime-secret': secret }, body: { ticket } }, res, reject);
+  });
+}
+
+test('byok claim returns only the ticket owner keys, once, for the runtime secret holder', async () => {
+  const seen = [];
+  const handler = createByokClaimHandler({
+    runtime: 'openwebui',
+    envPrefix: 'OPENWEBUI',
+    loadKeys: async (uid) => {
+      seen.push(uid);
+      return [
+        { provider: 'openai', apiKey: 'sk-a' },
+        { provider: 'byok-custom', apiKey: 'sk-c', baseUrl: 'https://llm.example.com/v1/', model: 'llama-3.3' },
+        { provider: 'unknown', apiKey: 'x' },
+      ];
+    },
+  });
+  const secret = process.env.OPENWEBUI_SSO_SECRET;
+  const ticket = issueRuntimeTicket({ runtime: 'openwebui', envPrefix: 'OPENWEBUI', user });
+
+  assert.equal((await callClaim(handler, { secret: 'wrong', ticket })).status, 401);
+  const paperclipTicket = issueRuntimeTicket({ runtime: 'paperclip', envPrefix: 'PAPERCLIP', user });
+  assert.equal((await callClaim(handler, { secret, ticket: paperclipTicket })).status, 401);
+
+  const ok = await callClaim(handler, { secret, ticket });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.body.userId, UID);
+  assert.deepEqual(seen, [UID]);
+  assert.deepEqual(ok.body.connections, [
+    { provider: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', apiKey: 'sk-a', modelIds: [] },
+    {
+      provider: 'byok-custom',
+      label: 'OpenAI-compatible (custom)',
+      baseUrl: 'https://llm.example.com/v1',
+      apiKey: 'sk-c',
+      modelIds: ['llama-3.3'],
+    },
+  ]);
+
+  assert.equal((await callClaim(handler, { secret, ticket })).status, 409);
+});
+
+test('every built-in BYOK provider maps to an https OpenAI-compatible endpoint', () => {
+  for (const id of ['openai', 'anthropic', 'google', 'openrouter', 'deepseek', 'groq', 'xai']) {
+    const conn = toOpenAICompatibleConnection({ provider: id, apiKey: 'k' });
+    assert.ok(conn && conn.baseUrl.startsWith('https://'), id);
+  }
+  assert.equal(toOpenAICompatibleConnection({ provider: 'byok-custom', apiKey: 'k', baseUrl: 'http://x' }), null);
+});
+
 test('launch url is https on the buyer host with the ticket in the query', () => {
   const base = applyTemplate('http://{userId}.openwebui.aimarkets.vn/', UID.toUpperCase());
   assert.equal(base, `https://${UID}.openwebui.aimarkets.vn`);

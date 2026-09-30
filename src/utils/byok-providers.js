@@ -2,8 +2,10 @@ const dns = require('dns').promises;
 const net = require('net');
 
 /**
- * BYOK providers exposed to AI Markets OpenClaw buyers.
+ * BYOK providers exposed to AI Markets OpenClaw / Open WebUI buyers.
  * `id` must match the OpenClaw provider id used in openclaw.json model refs.
+ * `openaiBaseUrl` is the provider's OpenAI-compatible endpoint (Open WebUI Direct Connections);
+ * every one of them answers CORS preflights from the buyer's browser.
  */
 const BYOK_PROVIDERS = [
   {
@@ -11,6 +13,7 @@ const BYOK_PROVIDERS = [
     label: 'OpenAI',
     keyUrl: 'https://platform.openai.com/api-keys',
     keyHint: 'sk-...',
+    openaiBaseUrl: 'https://api.openai.com/v1',
     verify: { url: 'https://api.openai.com/v1/models', auth: 'bearer' },
   },
   {
@@ -18,6 +21,7 @@ const BYOK_PROVIDERS = [
     label: 'Anthropic (Claude)',
     keyUrl: 'https://console.anthropic.com/settings/keys',
     keyHint: 'sk-ant-...',
+    openaiBaseUrl: 'https://api.anthropic.com/v1',
     verify: {
       url: 'https://api.anthropic.com/v1/models',
       auth: 'header',
@@ -30,6 +34,7 @@ const BYOK_PROVIDERS = [
     label: 'Google Gemini',
     keyUrl: 'https://aistudio.google.com/app/apikey',
     keyHint: 'AIza...',
+    openaiBaseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
     verify: {
       url: 'https://generativelanguage.googleapis.com/v1beta/models?pageSize=1',
       auth: 'header',
@@ -41,6 +46,7 @@ const BYOK_PROVIDERS = [
     label: 'OpenRouter',
     keyUrl: 'https://openrouter.ai/settings/keys',
     keyHint: 'sk-or-...',
+    openaiBaseUrl: 'https://openrouter.ai/api/v1',
     verify: { url: 'https://openrouter.ai/api/v1/key', auth: 'bearer' },
   },
   {
@@ -48,6 +54,7 @@ const BYOK_PROVIDERS = [
     label: 'DeepSeek',
     keyUrl: 'https://platform.deepseek.com/api_keys',
     keyHint: 'sk-...',
+    openaiBaseUrl: 'https://api.deepseek.com/v1',
     verify: { url: 'https://api.deepseek.com/models', auth: 'bearer' },
   },
   {
@@ -55,6 +62,7 @@ const BYOK_PROVIDERS = [
     label: 'Groq',
     keyUrl: 'https://console.groq.com/keys',
     keyHint: 'gsk_...',
+    openaiBaseUrl: 'https://api.groq.com/openai/v1',
     verify: { url: 'https://api.groq.com/openai/v1/models', auth: 'bearer' },
   },
   {
@@ -62,6 +70,7 @@ const BYOK_PROVIDERS = [
     label: 'xAI (Grok)',
     keyUrl: 'https://console.x.ai',
     keyHint: 'xai-...',
+    openaiBaseUrl: 'https://api.x.ai/v1',
     verify: { url: 'https://api.x.ai/v1/models', auth: 'bearer' },
   },
   {
