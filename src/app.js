@@ -12,6 +12,7 @@ const { isReady: isRedisReady } = require('./config/redis');
 const { notFound, errorHandler } = require('./middleware/error');
 const { proxvnIngress, originAllowed } = require('./utils/proxvn');
 const { allowMarketplaceGameFrame } = require('./utils/frame-ancestors');
+const { gpuWorkspaceProxy } = require('./terminal/gpu-proxy');
 
 const authRoutes = require('./routes/auth');
 const productRoutes = require('./routes/products');
@@ -37,6 +38,7 @@ const openwebuiRoutes = require('./routes/openwebui');
 const paperclipRoutes = require('./routes/paperclip');
 const deploymentRoutes = require('./routes/deployments');
 const runpodRoutes = require('./routes/runpod');
+const mediaRoutes = require('./routes/media');
 const playgroundRoutes = require('./routes/playground');
 const agentsRoutes = require('./routes/agents');
 const hiredAgentRoutes = require('./routes/hired-agents');
@@ -66,6 +68,7 @@ const contentRoutes = require('./routes/content');
 const paypalRoutes = require('./routes/paypal');
 const gpayRoutes = require('./routes/gpay');
 const iapRoutes = require('./routes/iap');
+const gpuRoutes = require('./routes/gpu');
 
 function createApp() {
   const app = express();
@@ -85,6 +88,8 @@ function createApp() {
     })
   );
   app.use(allowMarketplaceGameFrame);
+  // Workspace proxy streams raw bodies; must run before cors/compression/body parsers/rate limit.
+  app.use(gpuWorkspaceProxy());
 
   app.use(
     cors({
@@ -159,6 +164,9 @@ function createApp() {
     message: { message: 'Too many refresh attempts, please try again later.' },
   });
 
+  // Signed media links: video players issue many Range requests, so this sits before the API limiter.
+  app.use('/v1/media', mediaRoutes);
+
   app.use('/v1', apiLimiter);
   app.use('/v2', apiLimiter);
   app.use('/v1/auth/login', authLimiter);
@@ -167,8 +175,8 @@ function createApp() {
   app.use('/v1/auth/google/login', authLimiter);
   app.use('/v1/auth/refresh-token', refreshLimiter);
 
-  // Static RunPod Public Endpoints catalog (docs) — no DB required.
-  app.use('/v1/runpod', runpodRoutes);
+  // Static public endpoints catalog (docs) — no DB required. `/v1/runpod` is the legacy path.
+  app.use(['/v1/endpoints', '/v1/runpod'], runpodRoutes);
 
   app.use('/v1', (req, res, next) => {
     if (isDbReady()) return next();
@@ -212,6 +220,7 @@ function createApp() {
   app.use('/v1/agents', agentsRoutes);
   app.use('/v1/agents', hiredAgentRoutes);
   app.use('/v1/servers', serverRoutes);
+  app.use('/v1/gpu', gpuRoutes);
   app.use('/v1/terminal', terminalRoutes);
   app.use('/v1/game-sessions', gameSessionRoutes);
   app.use('/v1/seller/compute', sellerComputeRoutes);

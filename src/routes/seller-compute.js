@@ -147,7 +147,7 @@ router.post('/nodes/:id/ping', async (req, res, next) => {
       const stream = conn?.connection?.stream;
       return res.json({
         ok: true,
-        via: 'runpod',
+        via: 'hosted',
         status: conn?.connection?.status || node.status,
         hasStream: !!(stream?.host && stream?.port),
       });
@@ -186,13 +186,12 @@ router.get('/schema', (_req, res) => {
     registerHostedNode: {
       hosting: 'aimarkets',
       productSlug: 'your-product-slug',
-      name: 'RunPod Game Box',
+      name: 'Hosted Game Box',
       kind: 'game',
       gpuType: 'NVIDIA GeForce RTX 4090',
-      provider: 'runpod',
-      note: 'Provisions RunPod Pod via denglish-api (ai.aimarkets.vn)',
+      note: 'Provisions an AI Markets hosted GPU pod (ai.aimarkets.vn)',
     },
-    buyerResolveOrder: ['external seller node', 'AI Markets hosted RunPod pod'],
+    buyerResolveOrder: ['external seller node', 'AI Markets hosted GPU pod'],
     webhookEvents: ['session.start', 'session.stop', 'session.ping'],
     webhookResponse: {
       streamHost: '10.0.0.5',

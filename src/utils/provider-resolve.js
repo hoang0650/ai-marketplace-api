@@ -1,6 +1,7 @@
 const { getRunpodPublicEndpoint } = require('../data/runpod-public-endpoints');
 const { isVoiceCategory } = require('./license-keys');
 const { voiceCloneProvider } = require('./voice-clone');
+const { catalogModelSlug, isCatalogProductSlug } = require('./product-slug');
 const {
   extractAimarketsModelId,
   extractProviderEndpointId,
@@ -37,7 +38,7 @@ function resolveProviderForProduct(product) {
         extractProviderEndpointId(publicUrl || serverlessUrl) ||
         aimarketsId ||
         runtime.baseModel ||
-        slug.replace(/^runpod-/, ''),
+        catalogModelSlug(slug),
       model: runtime.baseModel || '',
     };
   }
@@ -75,13 +76,13 @@ function resolveProviderForProduct(product) {
   }
 
   if (
-    slug.startsWith('runpod-') ||
+    isCatalogProductSlug(slug) ||
     tags.includes('public-endpoint') ||
     isProviderUrl(publicUrl) ||
     isAimarketsUrl(runtime.publicEndpoint) ||
     isAimarketsUrl(runtime.serverlessEndpoint)
   ) {
-    const catalogSlug = slug.replace(/^runpod-/, '') || aimarketsId;
+    const catalogSlug = catalogModelSlug(slug) || aimarketsId;
     const ep =
       getRunpodPublicEndpoint(catalogSlug) ||
       getRunpodPublicEndpoint(upstream.endpointId) ||

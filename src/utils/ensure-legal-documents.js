@@ -36,7 +36,7 @@ ${PLATFORM_NAME} do ${OPERATOR} vận hành theo mô hình **sàn thương mại
 - **Buyer**: người mua / sử dụng dịch vụ.
 - **Seller**: bên thứ ba cung cấp sản phẩm/dịch vụ trên sàn (sau khi xác minh).
 - **Platform**: đơn vị vận hành sàn; có thể là người bán trực tiếp khi \`ownershipType = PLATFORM_DIRECT\`.
-- **Provider**: hạ tầng kỹ thuật (RunPod, OpenRouter, AWS, …) — **không** đồng nghĩa Seller.
+- **Provider**: hạ tầng kỹ thuật (nhà cung cấp GPU, OpenRouter, AWS, …) — **không** đồng nghĩa Seller.
 
 ## 3. Điều kiện đăng bán
 Seller phải hoàn tất xác minh danh tính/doanh nghiệp, chấp thuận Thỏa thuận Seller và tuân thủ kiểm duyệt sản phẩm trước khi công khai listing.

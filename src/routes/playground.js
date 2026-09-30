@@ -7,6 +7,9 @@ const { getAvailableBalance } = require('../utils/wallet');
 const { chargeUsage } = require('../finance/charge-usage');
 const { resolveProviderForProduct, computeUsageCost } = require('../utils/provider-resolve');
 const { inferWithFallback, quoteInference } = require('../utils/denglish-client');
+const { publicProvider, scrubVendor, scrubVendorDeep } = require('../utils/white-label');
+const { rehostMediaDeep, requestOrigin } = require('../utils/media-rehost');
+const { productSlugQuery } = require('../utils/product-slug');
 const {
   isVoiceProduct,
   voiceSampleUrl,
@@ -36,7 +39,7 @@ const MEDIA_FIELDS = ['image_url', 'video_url', 'audio_url'];
  * Ask denglish-api for the exact RunPod payload and the price.
  *
  * `providerCost` is the sell price (RunPod's documented cost plus the configured
- * markup); `upstreamCost` is what RunPod itself charges, kept for reporting.
+ * markup); `upstreamCost` is what RunPod itself charges and is never returned to clients.
  * Falls back to a coarse local guess when denglish-api or the catalog can't help.
  */
 async function preflight({ provider, endpointId, model, input }) {
@@ -73,7 +76,7 @@ async function preflight({ provider, endpointId, model, input }) {
  * Flatten the provider payload into the shape the playground UI renders:
  * one media URL (or text) plus the metering the buyer was charged for.
  */
-function buildOutput(data, { kind, charged, providerCost, upstreamCost, usage }) {
+function buildOutput(data, { kind, charged, providerCost, usage }) {
   if (!data || typeof data !== 'object') {
     return { kind: kind || 'text', text: String(data ?? ''), cost: charged };
   }
@@ -92,7 +95,6 @@ function buildOutput(data, { kind, charged, providerCost, upstreamCost, usage })
 
   output.cost = charged;
   output.providerCost = providerCost;
-  output.upstreamCost = upstreamCost;
   output.usage = {
     input: Number(usage.input_tokens) || 0,
     output: Number(usage.output_tokens) || 0,
@@ -125,7 +127,7 @@ router.post('/run', authenticate, async (req, res, next) => {
 
     let product = null;
     if (productId) product = await Product.findById(productId);
-    if (!product && productSlug) product = await Product.findOne({ slug: String(productSlug).toLowerCase() });
+    if (!product && productSlug) product = await Product.findOne(productSlugQuery(productSlug));
     if (!product) return res.status(404).json({ message: 'Product not found' });
 
     let inferInput = input;
@@ -220,7 +222,6 @@ router.post('/run', authenticate, async (req, res, next) => {
     // (upstream + markup) as cost, computed from output.cost when RunPod returns
     // one, otherwise from the formula on the model's docs page.
     const providerCost = Number(data.cost) || quote.providerCost || 0;
-    const upstreamCost = Number(data.upstream_cost) || quote.upstreamCost || 0;
     let cost = licenseCovered ? 0 : computeUsageCost(product, usage, inferInput, providerCost);
 
     const buyerId = req.user._id;
@@ -290,7 +291,6 @@ router.post('/run', authenticate, async (req, res, next) => {
       kind: isVoiceProduct(product) ? 'audio' : ai.raw?.kind,
       charged,
       providerCost,
-      upstreamCost,
       usage,
     });
 
@@ -314,25 +314,25 @@ router.post('/run', authenticate, async (req, res, next) => {
       }
     }
 
+    const publicOutput = await rehostMediaDeep(output, { baseUrl: requestOrigin(req) });
+
     res.json({
       ok: true,
       id: event._id.toString(),
       status: data.status || 'COMPLETED',
-      provider,
+      provider: publicProvider(provider),
       model: ai.model || model,
       endpointId: ai.raw?.endpointId || endpointId,
       delayTime: Number(ai.raw?.delayTime) || 0,
       executionTime: Number(ai.raw?.executionTime) || ai.latency_ms || latencyMs,
-      output,
+      output: publicOutput,
       usage,
       cost: charged,
       providerCost,
-      upstreamCost,
-      markup: Number(data.markup) || quote.markup || 0,
       platformFee,
       sellerNet,
       currency: 'USD',
-      warnings: ai.raw?.warnings?.length ? ai.raw.warnings : undefined,
+      warnings: ai.raw?.warnings?.length ? scrubVendorDeep(ai.raw.warnings) : undefined,
       sandbox: Boolean(ai.raw?.sandbox),
     });
   } catch (err) {
@@ -343,7 +343,7 @@ router.post('/run', authenticate, async (req, res, next) => {
       return res.status(504).json({ message: 'denglish-api timeout' });
     }
     if (err.status) {
-      return res.status(502).json({ message: err.message, detail: err.body });
+      return res.status(502).json({ message: scrubVendor(err.message), detail: scrubVendorDeep(err.body) });
     }
     next(err);
   }

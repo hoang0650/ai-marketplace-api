@@ -2,6 +2,7 @@ const express = require('express');
 const GameSession = require('../models/GameSession');
 const { authenticate, requireRoles } = require('../middleware/auth');
 const provider = require('../utils/denglish-providers');
+const { publicProvider } = require('../utils/white-label');
 const {
   assertServerOwner,
   newSessionId,
@@ -40,7 +41,7 @@ function publicGame(doc, req, extra = {}) {
     serverId: String(doc.server),
     productSlug: extra.productSlug,
     hosting: extra.hosting,
-    provider: doc.provider,
+    provider: publicProvider(doc.provider),
     status: doc.status,
     streamKind: doc.streamKind,
     playerMode: extra.playerMode || (doc.streamKind === 'terminal' ? 'terminal' : undefined),
@@ -130,7 +131,7 @@ router.post('/', authenticate, requireRoles('seller', 'admin', 'buyer'), async (
       if (!resolved) {
         return res.status(503).json({
           message:
-            'No compute node for this product. Seller must register external node or AI Markets hosted RunPod pod.',
+            'No compute node for this product. Seller must register an external node or an AI Markets hosted GPU pod.',
           code: 'NO_COMPUTE_NODE',
         });
       }

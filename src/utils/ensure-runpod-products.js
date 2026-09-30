@@ -5,12 +5,55 @@ const {
   CREATOR,
   buildRunpodMarketplaceProducts,
 } = require('../data/runpod-marketplace-products');
+const MarketplaceApiKey = require('../models/MarketplaceApiKey');
+const Deployment = require('../models/Deployment');
+const Conversation = require('../models/Conversation');
 const { deleteCachePattern } = require('./cache');
+const { LEGACY_PREFIX, canonicalProductSlug } = require('./product-slug');
+
+const LEGACY_SLUG_RE = new RegExp(`^${LEGACY_PREFIX}`);
+
+/** Rename platform catalog products `runpod-x` → `aim-x` and rewrite stored references. */
+async function migrateLegacyCatalogSlugs() {
+  const legacy = await Product.find(
+    {
+      slug: LEGACY_SLUG_RE,
+      $or: [{ infraProvider: 'runpod' }, { creatorSlug: { $in: [CREATOR.creatorSlug, 'runpod'] } }],
+    },
+    { slug: 1 }
+  ).lean();
+  const renamed = new Map();
+  for (const doc of legacy) {
+    const next = canonicalProductSlug(doc.slug);
+    if (await Product.exists({ slug: next })) {
+      await Product.updateOne({ _id: doc._id }, { $set: { published: false } });
+      continue;
+    }
+    await Product.updateOne({ _id: doc._id }, { $set: { slug: next } });
+    renamed.set(doc.slug, next);
+  }
+  if (!renamed.size) return 0;
+
+  const from = [...renamed.keys()];
+  for (const Model of [MarketplaceApiKey, Deployment, Conversation]) {
+    const rows = await Model.find({ productSlug: { $in: from } }, { productSlug: 1 }).lean();
+    if (!rows.length) continue;
+    await Model.bulkWrite(
+      rows.map((r) => ({
+        updateOne: { filter: { _id: r._id }, update: { $set: { productSlug: renamed.get(r.productSlug) } } },
+      }))
+    );
+  }
+  console.log(`[aimarkets] renamed ${renamed.size} legacy catalog slugs`);
+  return renamed.size;
+}
 
 /**
  * Upsert catalog model products into MongoDB with white-labeled aimarkets.vn URLs.
  */
 async function ensureRunpodMarketplaceProducts() {
+  await migrateLegacyCatalogSlugs();
+
   let creator =
     (await User.findOne({ creatorSlug: CREATOR.creatorSlug })) ||
     (await User.findOne({ email: CREATOR.email })) ||
@@ -73,7 +116,7 @@ async function ensureRunpodMarketplaceProducts() {
           moderationStatus: 'active',
           published: true,
           license: 'Platform managed GPU / endpoint access',
-          termsSummary: 'Platform Direct. RunPod is infrastructure provider, not a third-party seller.',
+          termsSummary: 'Platform Direct. The GPU infrastructure provider is not a third-party seller.',
           coverUrl: p.coverUrl,
           gallery: p.gallery,
           pricing: p.pricing,
@@ -102,4 +145,4 @@ async function ensureRunpodMarketplaceProducts() {
   return upserted;
 }
 
-module.exports = { ensureRunpodMarketplaceProducts };
+module.exports = { ensureRunpodMarketplaceProducts, migrateLegacyCatalogSlugs };

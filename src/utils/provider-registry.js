@@ -19,7 +19,7 @@ const FALLBACK = [
   },
   {
     provider: 'runpod',
-    label: 'RunPod',
+    label: 'AI Markets GPU',
     capabilities: [
       'GPU_COMPUTE',
       'SERVERLESS',
@@ -37,7 +37,7 @@ const FALLBACK = [
   },
   {
     provider: 'runpod_public',
-    label: 'RunPod Public Endpoints',
+    label: 'AI Markets Public Endpoints',
     capabilities: ['AI_API', 'MODEL_INFERENCE', 'SERVERLESS'],
     inference: true,
     compute: false,

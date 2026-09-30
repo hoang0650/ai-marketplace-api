@@ -31,6 +31,9 @@ const COPY = {
   'complaint.appeal': ['{caseRef}: kháng nghị', '{name} yêu cầu xem xét lại nội bộ.'],
   'complaint.askSeller': ['{caseRef}: yêu cầu seller phản hồi', 'Sàn yêu cầu bạn phản hồi khiếu nại này.'],
   'complaint.decision': ['{caseRef}: quyết định', 'Quyết định: {decision}. {detail}'],
+  'gpu.lowBalance': ['Số dư sắp hết', 'GPU "{name}" còn khoảng {minutes} phút theo số dư hiện tại. Nạp thêm để tránh bị dừng.'],
+  'gpu.stoppedNoFunds': ['GPU đã tạm dừng', 'GPU "{name}" đã dừng do hết số dư. Dữ liệu được giữ {hours} giờ; nạp tiền để tiếp tục.'],
+  'gpu.terminatedNoFunds': ['GPU đã bị xóa', 'GPU "{name}" và dữ liệu đã bị xóa do không nạp tiền trong thời hạn.'],
 };
 
 function fill(template, params) {

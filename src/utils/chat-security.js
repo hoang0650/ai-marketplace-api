@@ -2,6 +2,8 @@
  * Block user-supplied URLs / domains in buyer–seller chat (phishing).
  * Marketplace image URLs are allowed only on the dedicated imageUrl field.
  */
+const { minioEnv } = require('../config/minio');
+
 const PROTOCOL_RE = /(?:https?:\/\/|ftp:\/\/|ftps:\/\/|\/\/)/i;
 const WWW_RE = /\bwww\./i;
 const MD_LINK_RE = /\[[^\]]*]\(\s*[^)]+\)/;
@@ -23,7 +25,7 @@ function isAllowedChatImageUrl(url) {
     if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return false;
     const host = parsed.hostname.toLowerCase();
     const allowed = new Set(['minio.phhotel.vn']);
-    const publicBase = String(process.env.MINIO_PUBLIC_URL || '').trim();
+    const publicBase = minioEnv('MINIO_PUBLIC_URL');
     if (publicBase) {
       try {
         allowed.add(new URL(publicBase).hostname.toLowerCase());

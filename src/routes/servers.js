@@ -3,6 +3,7 @@ const { authenticate, requireRoles } = require('../middleware/auth');
 const provider = require('../utils/denglish-providers');
 const { assertServerOwner, newSessionId } = require('../terminal/permission.service');
 const { proxyToStream } = require('../terminal/stream-proxy');
+const { publicProvider, internalProvider } = require('../utils/white-label');
 
 const express = require('express');
 const router = express.Router();
@@ -12,7 +13,7 @@ function publicServer(doc, live = {}) {
     id: doc.id || String(doc._id),
     projectId: doc.projectId,
     name: doc.name,
-    provider: doc.provider,
+    provider: publicProvider(doc.provider),
     kind: doc.kind,
     status: live.status || doc.status,
     gpu: live.gpu || doc.gpu,
@@ -37,7 +38,7 @@ router.post('/', async (req, res, next) => {
     const name = String(req.body?.name || 'GPU server').slice(0, 120);
     const kind = req.body?.kind === 'game' ? 'game' : 'compute';
     const projectId = String(req.body?.projectId || 'default');
-    const providerName = String(req.body?.provider || 'runpod').toLowerCase();
+    const providerName = internalProvider(req.body?.provider);
     const created = await provider.createProviderServer(providerName, {
       name,
       kind,

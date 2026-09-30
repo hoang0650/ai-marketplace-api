@@ -28,7 +28,7 @@ function getRunpodPublicEndpoint(slugOrId) {
   const key = String(slugOrId || '')
     .trim()
     .toLowerCase()
-    .replace(/^runpod-/, '');
+    .replace(/^(?:aim|runpod)-/, '');
   const hit =
     catalog.find(
       (e) =>

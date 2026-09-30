@@ -7,6 +7,9 @@ const { chargeUsage } = require('../finance/charge-usage');
 const { resolveProviderForProduct, computeUsageCost } = require('./provider-resolve');
 const { inferWithFallback, fetchJobStatus } = require('./denglish-client');
 const { getRunpodPublicEndpoint } = require('../data/runpod-public-endpoints');
+const { catalogProductSlug, canonicalProductSlug, catalogModelSlug } = require('./product-slug');
+const { rehostMediaDeep, requestOrigin } = require('./media-rehost');
+const { publicProvider } = require('./white-label');
 
 function catalogInput(body) {
   if (!body || typeof body !== 'object') return {};
@@ -24,10 +27,10 @@ function catalogInput(body) {
 async function findCatalogProduct(identifier) {
   const raw = decodeURIComponent(String(identifier || '')).trim();
   if (!raw) return null;
-  const key = raw.toLowerCase().replace(/^runpod-/, '');
+  const key = catalogModelSlug(raw.toLowerCase());
   const ep = getRunpodPublicEndpoint(key) || getRunpodPublicEndpoint(raw);
-  const slugs = [raw.toLowerCase(), key, `runpod-${key}`];
-  if (ep) slugs.push(ep.slug, `runpod-${ep.slug}`);
+  const slugs = [canonicalProductSlug(raw), raw.toLowerCase(), key, catalogProductSlug(key)];
+  if (ep) slugs.push(ep.slug, catalogProductSlug(ep.slug));
   return Product.findOne({ slug: { $in: [...new Set(slugs)] }, published: { $ne: false } });
 }
 
@@ -138,7 +141,7 @@ function shapeRunpodResponse(out, action = 'runsync') {
     usage: ai.usage,
     delayTime: raw.delayTime,
     executionTime: raw.executionTime || ai.latency_ms,
-    marketplace: { cost: out.charged, provider: out.provider, model: out.model },
+    marketplace: { cost: out.charged, provider: publicProvider(out.provider), model: out.model },
   };
 }
 
@@ -152,7 +155,9 @@ async function runCatalogModel(req, identifier, action) {
   }
   assertKeyOwnsProduct(req, product);
   const out = await meterAndInfer(req, product, catalogInput(req.body), action);
-  return shapeRunpodResponse(out, action);
+  const shaped = shapeRunpodResponse(out, action);
+  shaped.output = await rehostMediaDeep(shaped.output, { baseUrl: requestOrigin(req) });
+  return shaped;
 }
 
 async function pollCatalogJob(req, identifier, jobId) {
@@ -171,7 +176,7 @@ async function pollCatalogJob(req, identifier, jobId) {
   return {
     id: jobId,
     status: data.status || raw.status || result.status || 'UNKNOWN',
-    output: data.output || data,
+    output: await rehostMediaDeep(data.output || data, { baseUrl: requestOrigin(req) }),
     usage: result.usage,
   };
 }

@@ -8,6 +8,7 @@ const { getAvailableBalance, requireAvailableFunds } = require('../utils/wallet'
 const { chargeUsage } = require('../finance/charge-usage');
 const provider = require('../utils/denglish-providers');
 const { assertSafeHttpUrl, assertSafeStreamHost } = require('./safe-http-url');
+const { publicProvider, internalProvider, publicNodeId } = require('./white-label');
 
 const COMPUTE_CATEGORIES = new Set(['gpu-compute', 'game-server']);
 
@@ -342,7 +343,7 @@ async function registerHostedNode(user, body) {
   const product = await resolveProduct(slug);
   await assertProductOwner(user, product);
   const kind = body?.kind === 'compute' ? 'compute' : 'game';
-  const providerName = String(body?.provider || 'runpod').toLowerCase();
+  const providerName = internalProvider(body?.provider);
   const created = await provider.createProviderServer(providerName, {
     name: String(body?.name || product.name).slice(0, 120),
     kind,
@@ -384,7 +385,7 @@ function publicNode(doc, product) {
     productName: product?.name,
     name: doc.name,
     kind: doc.kind,
-    provider: doc.provider,
+    provider: publicProvider(doc.provider),
     status: doc.status,
     external: !!doc.external,
     hosting,
@@ -395,7 +396,7 @@ function publicNode(doc, product) {
       !!doc.webhookUrl ||
       !!doc.iframeUrl ||
       (!doc.external && doc.provider === 'runpod'),
-    providerServerId: doc.providerServerId,
+    providerServerId: publicNodeId(doc.provider, doc.providerServerId),
     maxConcurrent: doc.maxConcurrent,
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,

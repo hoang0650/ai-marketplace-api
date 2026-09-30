@@ -35,7 +35,7 @@ function extractAimarketsModelId(url) {
 
 function catalogSlug(modelId) {
   return String(modelId || 'model')
-    .replace(/^runpod-/, '')
+    .replace(/^(?:aim|runpod)-/, '')
     .trim() || 'model';
 }
 

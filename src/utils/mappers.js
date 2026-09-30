@@ -1,6 +1,7 @@
 const { publicRuntime } = require('./runtime');
 const { isPayoutHeld, holdKind, holdUntil, canOpenDispute, roundMoney, effectiveSellerNet } = require('./payout-hold');
 const { inferLegacy } = require('./notify');
+const { publicProvider, scrubVendor } = require('./white-label');
 
 function mapProduct(doc, { includeSecrets = false } = {}) {
   if (!doc) return null;
@@ -18,10 +19,10 @@ function mapProduct(doc, { includeSecrets = false } = {}) {
     sellerSlug: o.creatorSlug,
     sellerName: o.creatorName,
     soldByPlatform: (o.ownershipType || 'THIRD_PARTY_SELLER') === 'PLATFORM_DIRECT',
-    infraProvider: o.infraProvider || o.provider || undefined,
-    provider: o.infraProvider || o.provider || undefined,
+    infraProvider: publicProvider(o.infraProvider || o.provider),
+    provider: publicProvider(o.infraProvider || o.provider),
     license: o.license || '',
-    termsSummary: o.termsSummary || '',
+    termsSummary: scrubVendor(o.termsSummary || ''),
     complianceStatus: o.complianceStatus || 'pending',
     moderationStatus: o.moderationStatus || 'active',
     creatorId: o.creator ? String(o.creator._id || o.creator) : '',

@@ -5,10 +5,11 @@
  */
 const catalog = require('./runpod-public-endpoints.json');
 const { publicGatewayUrls, withUpstreamEnv, upstreamRunpodUrls } = require('../utils/gateway-urls');
+const { catalogProductSlug } = require('../utils/product-slug');
 
 const CREATOR = {
-  mockUserId: 'u-runpod',
-  mockCreatorId: 'c-runpod',
+  mockUserId: 'u-aimarkets',
+  mockCreatorId: 'c-aimarkets',
   email: 'models@aimarkets.vn',
   name: 'AI Markets Models',
   creatorSlug: 'aimarkets',
@@ -53,7 +54,7 @@ function usageRateFromPricing(pricing) {
 }
 
 function productSlug(epSlug) {
-  return `runpod-${epSlug}`;
+  return catalogProductSlug(epSlug);
 }
 
 function buildApiDocs(ep) {
@@ -74,7 +75,7 @@ Prefer marketplace playground / \`POST /api/playground/run\` with your JWT (reco
 curl -X POST "https://api.aimarkets.vn/api/playground/run" \\
   -H "Authorization: Bearer $MARKETPLACE_JWT" \\
   -H "Content-Type: application/json" \\
-  -d '{"productSlug":"runpod-${ep.slug}","input":{"prompt":"A serene mountain landscape"}}'
+  -d '{"productSlug":"${productSlug(ep.slug)}","input":{"prompt":"A serene mountain landscape"}}'
 \`\`\`
 ${openai}`;
 }
@@ -86,7 +87,7 @@ function buildRunpodMarketplaceProducts() {
     const usageUnit = usageUnitFromPricing(ep.pricing, ep.kind);
     const usageRate = usageRateFromPricing(ep.pricing);
     return {
-      id: `p-runpod-${ep.slug}`,
+      id: `p-${productSlug(ep.slug)}`,
       slug: productSlug(ep.slug),
       name: ep.name,
       tagline: `${ep.pricing} · AI Markets endpoint`,

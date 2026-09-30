@@ -7,6 +7,7 @@ const { getAvailableBalance } = require('../utils/wallet');
 const { chargeUsage } = require('../finance/charge-usage');
 const { resolveProviderForProduct, computeUsageCost } = require('../utils/provider-resolve');
 const { agentTurnWithFallback } = require('../utils/denglish-client');
+const { productSlugQuery } = require('../utils/product-slug');
 
 const router = express.Router();
 
@@ -25,7 +26,7 @@ router.post('/chat', authenticate, async (req, res, next) => {
     let product = null;
     if (productId) product = await Product.findById(productId);
     if (!product && productSlug) {
-      product = await Product.findOne({ slug: String(productSlug).toLowerCase() });
+      product = await Product.findOne(productSlugQuery(productSlug));
     }
     if (!product) return res.status(404).json({ message: 'Product not found' });
 

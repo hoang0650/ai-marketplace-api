@@ -3,6 +3,9 @@ const Product = require('../models/Product');
 const { authenticate } = require('../middleware/auth');
 const { authenticateMarketplaceKey } = require('../middleware/marketplace-key');
 const { meterAndInfer } = require('../utils/gateway-infer');
+const { productSlugQuery } = require('../utils/product-slug');
+const { rehostMediaDeep, requestOrigin } = require('../utils/media-rehost');
+const { publicProvider, publicPayload } = require('../utils/white-label');
 
 const router = express.Router();
 
@@ -19,7 +22,7 @@ async function resolveProduct(req) {
   }
   const slug = String(req.body?.model || req.query?.model || '').toLowerCase();
   if (!slug) return null;
-  return Product.findOne({ slug });
+  return Product.findOne(productSlugQuery(slug));
 }
 
 function sendGatewayError(res, next, e) {
@@ -80,7 +83,7 @@ router.post('/chat/completions', authStack, async (req, res, next) => {
         },
       ],
       usage: out.ai?.usage,
-      marketplace: { cost: out.charged, provider: out.provider },
+      marketplace: { cost: out.charged, provider: publicProvider(out.provider) },
     });
   } catch (e) {
     sendGatewayError(res, next, e);
@@ -93,7 +96,7 @@ router.post('/embeddings', authStack, async (req, res, next) => {
     if (!product) return res.status(400).json({ message: 'model required' });
     const input = { prompt: req.body?.input || req.body?.prompt, action: 'embeddings' };
     const out = await meterAndInfer(req, product, input);
-    res.json({ object: 'list', data: out.ai?.data || [], model: product.slug, usage: out.ai?.usage });
+    res.json({ object: 'list', data: publicPayload(out.ai?.data) || [], model: product.slug, usage: out.ai?.usage });
   } catch (e) {
     sendGatewayError(res, next, e);
   }
@@ -105,7 +108,8 @@ router.post('/images', authStack, async (req, res, next) => {
     if (!product) return res.status(400).json({ message: 'model required' });
     const input = { prompt: req.body?.prompt, image: req.body?.image };
     const out = await meterAndInfer(req, product, input);
-    res.json({ data: out.ai?.data || out.ai, model: product.slug, usage: out.ai?.usage });
+    const data = await rehostMediaDeep(out.ai?.data || out.ai, { baseUrl: requestOrigin(req) });
+    res.json({ data, model: product.slug, usage: out.ai?.usage });
   } catch (e) {
     sendGatewayError(res, next, e);
   }
@@ -117,7 +121,8 @@ router.post('/audio', authStack, async (req, res, next) => {
     if (!product) return res.status(400).json({ message: 'model required' });
     const input = { prompt: req.body?.input || req.body?.prompt };
     const out = await meterAndInfer(req, product, input);
-    res.json({ data: out.ai?.data || out.ai, model: product.slug, usage: out.ai?.usage });
+    const data = await rehostMediaDeep(out.ai?.data || out.ai, { baseUrl: requestOrigin(req) });
+    res.json({ data, model: product.slug, usage: out.ai?.usage });
   } catch (e) {
     sendGatewayError(res, next, e);
   }

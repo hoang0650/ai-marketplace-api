@@ -3,6 +3,7 @@ const Product = require('../models/Product');
 const { authenticate, requireRoles } = require('../middleware/auth');
 const { mapProduct } = require('../utils/mappers');
 const { slugify } = require('../utils/serialize');
+const { productSlugQuery, isCatalogProductSlug } = require('../utils/product-slug');
 const { cached, deleteCachePattern } = require('../utils/cache');
 const { PRODUCT_CATEGORIES } = require('../data/categories');
 const { normalizeRuntime } = require('../utils/runtime');
@@ -92,7 +93,7 @@ router.get('/:slug', async (req, res, next) => {
   try {
     const slug = String(req.params.slug).toLowerCase();
     const result = await cached(`products:slug:${slug}`, DETAIL_TTL, async () => {
-      const product = await Product.findOne({ slug }).lean();
+      const product = await Product.findOne(productSlugQuery(slug)).lean();
       if (!product || !isCatalogVisible(product)) return null;
       return mapProduct(product);
     });
@@ -115,6 +116,7 @@ router.post('/', authenticate, requireRoles('seller', 'admin'), async (req, res,
     }
     let slug = slugify(body.slug || name);
     if (!slug) slug = `product-${Date.now()}`;
+    if (isCatalogProductSlug(slug) && req.user.role !== 'admin') slug = `p-${slug}`;
     const exists = await Product.findOne({ slug });
     if (exists) slug = `${slug}-${Date.now().toString(36)}`;
 
@@ -253,7 +255,10 @@ router.put('/:id', authenticate, requireRoles('seller', 'admin'), async (req, re
         defaults: product.runtime?.toObject?.() || product.runtime || {},
       });
     }
-    if (body.slug) product.slug = slugify(body.slug) || product.slug;
+    if (body.slug) {
+      const next = slugify(body.slug);
+      if (next && (req.user.role === 'admin' || !isCatalogProductSlug(next))) product.slug = next;
+    }
     if (isVoiceCategory(product.category)) {
       applyVoiceProduct(product);
     }

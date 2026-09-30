@@ -1,6 +1,7 @@
 const express = require('express');
 const { publicHttps, enabled, baseDomain } = require('../utils/proxvn');
 const { fetchRegistry } = require('../utils/provider-registry');
+const { publicRegistryRow } = require('../utils/white-label');
 
 const router = express.Router();
 
@@ -16,7 +17,7 @@ router.get('/', async (req, res, next) => {
         exampleStream: publicHttps('gs', 'demo') || null,
         exampleApi: publicHttps('api', 'demo-model') || null,
       },
-      providers,
+      providers: (providers || []).map(publicRegistryRow),
     });
   } catch (e) {
     next(e);

@@ -2,6 +2,7 @@ const express = require('express');
 const Product = require('../models/Product');
 const MarketplaceApiKey = require('../models/MarketplaceApiKey');
 const { authenticate } = require('../middleware/auth');
+const { productSlugQuery } = require('../utils/product-slug');
 
 const router = express.Router();
 
@@ -28,8 +29,7 @@ router.get('/', authenticate, async (req, res, next) => {
 
 router.post('/', authenticate, async (req, res, next) => {
   try {
-    const slug = String(req.body?.productSlug || '').toLowerCase();
-    const product = await Product.findOne({ slug });
+    const product = await Product.findOne(productSlugQuery(req.body?.productSlug));
     if (!product) return res.status(404).json({ message: 'Product not found' });
     const minted = MarketplaceApiKey.mintKey();
     const doc = await MarketplaceApiKey.create({

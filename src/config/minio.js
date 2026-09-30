@@ -11,10 +11,22 @@ function cleanPrefix(value, fallback) {
     .replace(/^\/+|\/+$/g, '') || fallback;
 }
 
+/**
+ * AI Markets settings win over the shared ones: `AIMARKETS_MINIO_BUCKET` before `MINIO_BUCKET`, etc.
+ * PHHotel services on the same MinIO keep using the plain `MINIO_*` names.
+ */
+function minioEnv(name, ...fallbacks) {
+  for (const key of [`AIMARKETS_${name}`, name, ...fallbacks]) {
+    const value = String(process.env[key] || '').trim();
+    if (value) return value;
+  }
+  return '';
+}
+
 function isMinioEnabled() {
-  const endpoint = String(process.env.MINIO_ENDPOINT || '').trim();
-  const accessKey = String(process.env.MINIO_ACCESS_KEY || process.env.MINIO_ROOT_USER || '').trim();
-  const secretKey = String(process.env.MINIO_SECRET_KEY || process.env.MINIO_ROOT_PASSWORD || '').trim();
+  const endpoint = minioEnv('MINIO_ENDPOINT');
+  const accessKey = minioEnv('MINIO_ACCESS_KEY', 'MINIO_ROOT_USER');
+  const secretKey = minioEnv('MINIO_SECRET_KEY', 'MINIO_ROOT_PASSWORD');
   return Boolean(endpoint && accessKey && secretKey);
 }
 
@@ -32,17 +44,18 @@ function parseEndpoint(raw) {
 }
 
 function getMinioConfig() {
-  const endpoint = parseEndpoint(process.env.MINIO_ENDPOINT || 'https://minio.phhotel.vn');
+  const endpoint = parseEndpoint(minioEnv('MINIO_ENDPOINT') || 'https://minio.phhotel.vn');
   return {
     ...endpoint,
-    accessKey: String(process.env.MINIO_ACCESS_KEY || process.env.MINIO_ROOT_USER || '').trim(),
-    secretKey: String(process.env.MINIO_SECRET_KEY || process.env.MINIO_ROOT_PASSWORD || '').trim(),
-    bucket: String(process.env.MINIO_BUCKET || 'phhotel').trim() || 'phhotel',
-    publicBaseUrl: trimSlash(process.env.MINIO_PUBLIC_URL || 'https://minio.phhotel.vn'),
-    playgroundPrefix: cleanPrefix(process.env.MINIO_PLAYGROUND_PREFIX, 'aimarkets/playground'),
-    voicePrefix: cleanPrefix(process.env.MINIO_VOICE_PREFIX, 'aimarkets/voices'),
-    contentPrefix: cleanPrefix(process.env.MINIO_CONTENT_PREFIX, 'aimarkets/content'),
-    kycPrefix: cleanPrefix(process.env.MINIO_KYC_PREFIX, 'aimarkets/kyc'),
+    accessKey: minioEnv('MINIO_ACCESS_KEY', 'MINIO_ROOT_USER'),
+    secretKey: minioEnv('MINIO_SECRET_KEY', 'MINIO_ROOT_PASSWORD'),
+    bucket: minioEnv('MINIO_BUCKET') || 'phhotel',
+    publicBaseUrl: trimSlash(minioEnv('MINIO_PUBLIC_URL') || 'https://minio.phhotel.vn'),
+    region: minioEnv('MINIO_REGION') || 'us-east-1',
+    playgroundPrefix: cleanPrefix(minioEnv('MINIO_PLAYGROUND_PREFIX'), 'aimarkets/playground'),
+    voicePrefix: cleanPrefix(minioEnv('MINIO_VOICE_PREFIX'), 'aimarkets/voices'),
+    contentPrefix: cleanPrefix(minioEnv('MINIO_CONTENT_PREFIX'), 'aimarkets/content'),
+    kycPrefix: cleanPrefix(minioEnv('MINIO_KYC_PREFIX'), 'aimarkets/kyc'),
   };
 }
 
@@ -72,7 +85,7 @@ async function ensurePlaygroundBucket() {
     const minio = getMinioClient();
     const exists = await minio.bucketExists(cfg.bucket).catch(() => false);
     if (!exists) {
-      await minio.makeBucket(cfg.bucket, process.env.MINIO_REGION || 'us-east-1');
+      await minio.makeBucket(cfg.bucket, cfg.region);
     }
 
     const policy = {
@@ -241,6 +254,7 @@ async function uploadPublicBuffer(buffer, { filename, contentType, prefix }) {
 }
 
 module.exports = {
+  minioEnv,
   isMinioEnabled,
   getMinioConfig,
   getMinioClient,
@@ -254,4 +268,5 @@ module.exports = {
   getKycObjectStream,
   getKycPresignedUrl,
   buildPublicObjectUrl,
+  extForMime,
 };

@@ -161,7 +161,7 @@ const SEED_TALENTS = [
     title: 'DevOps Engineer',
     bio: 'Triển khai GPU runtime, Docker, CI/CD cho marketplace AI và inference endpoints.',
     fieldIds: ['devops', 'ai-integration'],
-    skills: ['Docker', 'Kubernetes', 'RunPod', 'AWS', 'Terraform'],
+    skills: ['Docker', 'Kubernetes', 'GPU cloud', 'AWS', 'Terraform'],
     experienceYears: 4,
     hoursPerWeek: 40,
     rateAmount: 80000,

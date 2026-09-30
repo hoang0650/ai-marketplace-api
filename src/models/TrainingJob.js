@@ -12,7 +12,7 @@ const schema = new mongoose.Schema(
     gpuType: { type: String, default: '' },
     status: {
       type: String,
-      enum: ['queued', 'running', 'succeeded', 'failed', 'cancelled'],
+      enum: ['queued', 'running', 'paused', 'succeeded', 'failed', 'cancelled'],
       default: 'queued',
       index: true,
     },
@@ -22,6 +22,8 @@ const schema = new mongoose.Schema(
     artifact: { type: String, default: '' },
     config: { type: mongoose.Schema.Types.Mixed, default: {} },
     providerResourceId: { type: String, default: '' },
+    /** Billed GPU workspace the job runs on (per-minute wallet billing). */
+    rental: { type: mongoose.Schema.Types.ObjectId, ref: 'GpuRental', default: null, index: true },
   },
   { timestamps: true }
 );

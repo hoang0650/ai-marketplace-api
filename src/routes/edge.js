@@ -7,13 +7,16 @@ const { requireAvailableFunds } = require('../utils/wallet');
 const { chargeUsage } = require('../finance/charge-usage');
 const { resolveProviderForProduct, computeUsageCost } = require('../utils/provider-resolve');
 const { inferWithFallback } = require('../utils/denglish-client');
+const { productSlugQuery } = require('../utils/product-slug');
+const { publicProvider } = require('../utils/white-label');
+const { rehostMediaDeep, requestOrigin } = require('../utils/media-rehost');
 
 const router = express.Router();
 
 router.post('/infer/:slug', authenticate, async (req, res, next) => {
   try {
     const slug = String(req.params.slug || '').toLowerCase();
-    const product = await Product.findOne({ slug });
+    const product = await Product.findOne(productSlugQuery(slug));
     if (!product) return res.status(404).json({ message: 'Product not found', code: 'SERVER_NOT_FOUND' });
 
     const input =
@@ -98,10 +101,10 @@ router.post('/infer/:slug', authenticate, async (req, res, next) => {
 
     res.json({
       ok: !!ai.ok,
-      provider,
+      provider: publicProvider(provider),
       model,
-      productSlug: slug,
-      data: ai.data,
+      productSlug: product.slug,
+      data: await rehostMediaDeep(ai.data, { baseUrl: requestOrigin(req) }),
       usage,
       cost: charged,
       sandbox: !!ai.raw?.sandbox || !!ai.sandbox,
