@@ -24,6 +24,17 @@ const gpuServerSchema = new mongoose.Schema(
     streamTls: { type: Boolean, default: false },
     iframeUrl: { type: String, default: '', trim: true, maxlength: 500 },
     healthUrl: { type: String, default: '', trim: true, maxlength: 500 },
+    /** Optional mobile-app stream (lower bitrate / touch build). Falls back to the main stream. */
+    mobileStream: {
+      kind: { type: String, default: '', trim: true, maxlength: 40 },
+      host: { type: String, default: '', trim: true, maxlength: 200 },
+      port: { type: Number, default: 0, min: 0 },
+      path: { type: String, default: '', trim: true, maxlength: 200 },
+      tls: { type: Boolean, default: false },
+      iframeUrl: { type: String, default: '', trim: true, maxlength: 500 },
+    },
+    /** Buyer clients this node serves: pc (web/desktop) and/or mobile (Android/iOS app). */
+    devices: { type: [{ type: String, enum: ['pc', 'mobile'] }], default: () => ['pc', 'mobile'] },
     region: { type: String, default: '', trim: true, maxlength: 80 },
     maxConcurrent: { type: Number, default: 10, min: 1 },
   },

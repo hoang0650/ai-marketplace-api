@@ -13,7 +13,7 @@ const MAX_URLS = 16;
 const MAX_DEPTH = 6;
 const LINK_TTL_S = 7 * 24 * 3600;
 const MEDIA_TYPE_RE = /^(image|video|audio)\//i;
-const OWN_HOST_RE = /(^|\.)(aimarkets\.vn|phhotel\.vn)$/i;
+const OWN_HOST_RE = /(^|\.)aimarkets\.vn$/i;
 
 function maxBytes() {
   const mb = Number(process.env.MEDIA_REHOST_MAX_MB);
@@ -21,8 +21,8 @@ function maxBytes() {
 }
 
 function ownHosts() {
-  const hosts = new Set();
-  for (const raw of [minio.minioEnv('MINIO_PUBLIC_URL'), process.env.PUBLIC_API_URL, process.env.AIMARKETS_API_HOST]) {
+  const hosts = minio.mediaHosts();
+  for (const raw of [process.env.PUBLIC_API_URL, process.env.AIMARKETS_API_HOST]) {
     try {
       if (raw) hosts.add(new URL(String(raw).trim()).hostname.toLowerCase());
     } catch {

@@ -1,14 +1,11 @@
 const crypto = require('crypto');
-const mongoose = require('mongoose');
 const Product = require('../models/Product');
 const GpuServer = require('../models/GpuServer');
-const UsageEvent = require('../models/UsageEvent');
-const UsageStat = require('../models/UsageStat');
-const { getAvailableBalance, requireAvailableFunds } = require('../utils/wallet');
-const { chargeUsage } = require('../finance/charge-usage');
+const { getAvailableBalance } = require('../utils/wallet');
 const provider = require('../utils/denglish-providers');
 const { assertSafeHttpUrl, assertSafeStreamHost } = require('./safe-http-url');
 const { publicProvider, internalProvider, publicNodeId } = require('./white-label');
+const { deviceNodeFilter, normalizeDevices, nodeDevices } = require('./stream-clients');
 
 const COMPUTE_CATEGORIES = new Set(['gpu-compute', 'game-server']);
 
@@ -49,7 +46,26 @@ async function callSellerWebhook(server, event, payload) {
   return null;
 }
 
-function streamFromServer(server) {
+function mobileStreamFromServer(server) {
+  const m = server.mobileStream || {};
+  if (m.host && m.port) {
+    return {
+      kind: m.kind || server.streamKind || 'novnc',
+      host: m.host,
+      port: Number(m.port),
+      path: m.path || '/',
+      tls: !!m.tls,
+    };
+  }
+  if (m.iframeUrl) return { kind: 'iframe', host: '', port: 0, path: m.iframeUrl, tls: false };
+  return null;
+}
+
+function streamFromServer(server, device = 'pc') {
+  if (device === 'mobile') {
+    const mobile = mobileStreamFromServer(server);
+    if (mobile) return mobile;
+  }
   if (server.streamHost && server.streamPort) {
     return {
       kind: server.streamKind || (server.kind === 'game' ? 'novnc' : 'terminal'),
@@ -102,32 +118,64 @@ async function resolveProduct(slug) {
   return product;
 }
 
-async function findExternalNode(product) {
-  return GpuServer.findOne({ product: product._id, external: true, status: { $ne: 'offline' } }).sort({ updatedAt: -1 });
+function withDevice(query, device) {
+  return device ? { $and: [query, deviceNodeFilter(device)] } : query;
 }
 
-async function findHostedNode(product) {
-  return GpuServer.findOne({
-    product: product._id,
-    external: false,
-    provider: { $nin: ['external', ''] },
-    status: { $nin: ['offline', 'terminated'] },
-  }).sort({ updatedAt: -1 });
+async function findExternalNode(product, device) {
+  return GpuServer.findOne(
+    withDevice({ product: product._id, external: true, status: { $ne: 'offline' } }, device)
+  ).sort({ updatedAt: -1 });
+}
+
+async function findHostedNode(product, device) {
+  return GpuServer.findOne(
+    withDevice(
+      {
+        product: product._id,
+        external: false,
+        provider: { $nin: ['external', ''] },
+        status: { $nin: ['offline', 'terminated'] },
+      },
+      device
+    )
+  ).sort({ updatedAt: -1 });
 }
 
 const HOSTED_RUNNING = new Set(['running', 'online']);
 const HOSTED_STOPPED = new Set(['stopped', 'exited']);
 
-/** Prefer seller external node; fallback to AI Markets–hosted RunPod pod (denglish-api). */
-async function findComputeNode(product) {
-  const external = await findExternalNode(product);
-  if (external) return { node: external, hosting: 'external' };
+function isPlatformListing(product) {
+  return (product?.ownershipType || 'THIRD_PARTY_SELLER') === 'PLATFORM_DIRECT';
+}
 
-  const hosted = await findHostedNode(product);
-  if (!hosted) return null;
+/**
+ * Two supply flows share one catalog/play page:
+ *  - PLATFORM_DIRECT: platform-paid RunPod pod first (hosted), external/demo node as fallback.
+ *  - THIRD_PARTY_SELLER: seller's own machine (external) first, AI Markets hosted pod as fallback.
+ * Only nodes that serve the buyer's device (pc / mobile) are considered.
+ */
+async function findComputeNode(product, { device } = {}) {
+  const order = isPlatformListing(product) ? ['aimarkets', 'external'] : ['external', 'aimarkets'];
+  for (const hosting of order) {
+    const node = hosting === 'external' ? await findExternalNode(product, device) : await findHostedNode(product, device);
+    if (!node) continue;
+    if (hosting === 'aimarkets') await ensureHostedNodeReady(node);
+    return { node, hosting };
+  }
+  return null;
+}
 
-  await ensureHostedNodeReady(hosted);
-  return { node: hosted, hosting: 'aimarkets' };
+/** Product devices = union of devices served by its live nodes (unchanged when it has none). */
+async function syncProductDevices(productId) {
+  if (!productId) return null;
+  const nodes = await GpuServer.find({ product: productId, status: { $nin: ['offline', 'terminated'] } })
+    .select('devices')
+    .lean();
+  if (!nodes.length) return null;
+  const devices = normalizeDevices(nodes.flatMap((n) => nodeDevices(n)));
+  await Product.updateOne({ _id: productId }, { $set: { 'streaming.devices': devices } });
+  return devices;
 }
 
 async function ensureHostedNodeReady(server) {
@@ -178,13 +226,26 @@ async function ensureHostedNodeReady(server) {
   return server;
 }
 
+/** USD per hour of streaming for usage-priced listings (0 otherwise). */
+function usageRatePerHour(product) {
+  const pricing = product?.pricing || {};
+  if (pricing.model !== 'usage') return 0;
+  const rate = Number(pricing.usageRate) || 0;
+  if (rate <= 0) return 0;
+  const unit = String(pricing.usageUnit || 'hours').toLowerCase();
+  if (unit.startsWith('min')) return rate * 60;
+  if (unit.startsWith('sec')) return rate * 3600;
+  return rate;
+}
+
 async function assertBuyerAccess(user, product) {
   const pricing = product.pricing || {};
   if (pricing.model === 'free') return;
   if (pricing.model === 'one-time' || pricing.model === 'subscription') return;
   if (pricing.model === 'usage') {
-    const min = Number(pricing.usageRate) > 0 ? Math.max(pricing.usageRate / 60, 0.01) : 0;
-    if (min > 0) {
+    const perHour = usageRatePerHour(product);
+    const min = perHour > 0 ? Math.max(perHour / 60, 0.01) : 0;
+    if (min > 0 && String(product.creator) !== String(user._id)) {
       const { available, balance, held } = await getAvailableBalance(user._id);
       if (available < min) {
         const err = new Error('Insufficient available wallet balance for compute session');
@@ -197,13 +258,18 @@ async function assertBuyerAccess(user, product) {
   }
 }
 
+/**
+ * sessionMeta carries `client` (pc|android|ios), `device` (pc|mobile) and `profile`
+ * (resolution / fps / bitrate / inputs) so seller webhooks can start the matching build.
+ */
 async function resolveStreamForSession(server, sessionMeta) {
+  const device = sessionMeta?.device || 'pc';
   if (server.webhookUrl) {
     const data = await callSellerWebhook(server, 'session.start', sessionMeta);
     const fromHook = streamFromWebhook(data);
     if (fromHook) return fromHook;
   }
-  if (server.external) return streamFromServer(server);
+  if (server.external) return streamFromServer(server, device);
   const conn = await provider.getConnection(server.provider, server.providerServerId);
   const stream = conn?.connection?.stream || {};
   return {
@@ -215,82 +281,6 @@ async function resolveStreamForSession(server, sessionMeta) {
   };
 }
 
-function computeSessionCost(product, minutes) {
-  const pricing = product.pricing || {};
-  if (pricing.model !== 'usage') return 0;
-  const unit = String(pricing.usageUnit || 'hours').toLowerCase();
-  const rate = Number(pricing.usageRate) || 0;
-  if (!rate || minutes <= 0) return 0;
-  let quantity = minutes / 60;
-  if (unit.startsWith('min')) quantity = minutes;
-  if (unit.startsWith('sec')) quantity = minutes * 60;
-  return Math.round(quantity * rate * 1e6) / 1e6;
-}
-
-async function finalizeSessionBilling(session, product) {
-  if (!product || !session.billingStartedAt || session.billedCost > 0) return 0;
-  const ended = session.stoppedAt || new Date();
-  const minutes = Math.max(1, Math.ceil((ended - session.billingStartedAt) / 60000));
-  session.billedMinutes = minutes;
-  const cost = computeSessionCost(product, minutes);
-  if (cost <= 0) {
-    session.billedCost = 0;
-    await session.save();
-    return 0;
-  }
-  const buyerId = session.user;
-  const sellerId = product.creator;
-  const selfUse = String(buyerId) === String(sellerId);
-  if (selfUse) {
-    session.billedCost = 0;
-    await session.save();
-    return 0;
-  }
-  try {
-    await requireAvailableFunds(buyerId, cost);
-  } catch (err) {
-    if (err.status === 402) {
-      session.billedCost = cost;
-      await session.save();
-      return cost;
-    }
-    throw err;
-  }
-  const billed = await chargeUsage({
-    buyerId,
-    sellerId,
-    product,
-    cost,
-    note: `Compute: ${product.name} (${minutes}m)`,
-  });
-  const platformFee = billed.platformFee;
-  const sellerNet = billed.sellerNet;
-  await UsageEvent.create({
-    product: product._id,
-    buyer: buyerId,
-    seller: sellerId,
-    inputTokens: 0,
-    outputTokens: 0,
-    cost,
-    platformFee,
-    sellerNet,
-    unit: product.pricing?.usageUnit || 'hours',
-    quantity: minutes / 60,
-    rawUsage: { minutes, sessionId: session.sessionId },
-    source: 'gpu',
-    usageType: product.category === 'game-server' ? 'GAME_RUNTIME' : 'GPU_HOUR',
-  });
-  const day = new Date().toISOString().slice(0, 10);
-  await UsageStat.updateOne(
-    { creator: sellerId, date: day },
-    { $inc: { gpuHours: minutes / 60, requests: 1, revenue: sellerNet } },
-    { upsert: true }
-  ).catch(() => {});
-  session.billedCost = cost;
-  await session.save();
-  return cost;
-}
-
 async function assertProductOwner(user, product) {
   if (String(product.creator) !== String(user._id) && user.role !== 'admin') {
     const err = new Error('FORBIDDEN');
@@ -299,10 +289,26 @@ async function assertProductOwner(user, product) {
   }
 }
 
+/** Validated `mobileStream` override (same rules as the main stream fields). */
+async function parseMobileStream(raw) {
+  const m = raw && typeof raw === 'object' ? raw : {};
+  const iframeUrl = String(m.iframeUrl || '').trim().slice(0, 500);
+  if (iframeUrl) await assertSafeHttpUrl(iframeUrl, { httpsOnly: true });
+  return {
+    kind: String(m.kind || m.streamKind || '').slice(0, 40),
+    host: assertSafeStreamHost(String(m.host || m.streamHost || '').trim().slice(0, 200)),
+    port: Math.max(0, Math.min(65535, Number(m.port || m.streamPort) || 0)),
+    path: String(m.path || m.streamPath || '').slice(0, 200),
+    tls: !!(m.tls ?? m.streamTls),
+    iframeUrl,
+  };
+}
+
 async function registerExternalNode(user, body) {
   const slug = String(body?.productSlug || '').toLowerCase();
   const product = await resolveProduct(slug);
   await assertProductOwner(user, product);
+  const mobileStream = await parseMobileStream(body?.mobileStream);
   const kind = body?.kind === 'compute' ? 'compute' : 'game';
   const providerServerId = String(body?.nodeId || `ext_${crypto.randomBytes(6).toString('hex')}`).slice(0, 120);
   const webhookUrl = String(body?.webhookUrl || '').slice(0, 500);
@@ -331,9 +337,12 @@ async function registerExternalNode(user, body) {
     streamTls: !!body?.streamTls,
     iframeUrl,
     healthUrl,
+    mobileStream,
+    devices: normalizeDevices(body?.devices),
     region: String(body?.region || '').slice(0, 80),
     maxConcurrent: Math.min(100, Math.max(1, Number(body?.maxConcurrent) || 10)),
   });
+  await syncProductDevices(product._id);
   return { product, node: doc };
 }
 
@@ -363,9 +372,11 @@ async function registerHostedNode(user, body) {
     gpu: String(remote.gpu || body?.gpuType || '').slice(0, 120),
     product: product._id,
     external: false,
+    devices: normalizeDevices(body?.devices),
     region: String(body?.region || 'runpod').slice(0, 80),
     maxConcurrent: Math.min(100, Math.max(1, Number(body?.maxConcurrent) || 5)),
   });
+  await syncProductDevices(product._id);
   return { product, node: doc };
 }
 
@@ -396,6 +407,9 @@ function publicNode(doc, product) {
       !!doc.webhookUrl ||
       !!doc.iframeUrl ||
       (!doc.external && doc.provider === 'runpod'),
+    devices: nodeDevices(doc),
+    hasMobileStream: !!(doc.mobileStream?.iframeUrl || (doc.mobileStream?.host && doc.mobileStream?.port)),
+    supply: (product?.ownershipType || 'THIRD_PARTY_SELLER') === 'PLATFORM_DIRECT' ? 'platform' : 'seller',
     providerServerId: publicNodeId(doc.provider, doc.providerServerId),
     maxConcurrent: doc.maxConcurrent,
     createdAt: doc.createdAt,
@@ -409,10 +423,13 @@ module.exports = {
   findExternalNode,
   findHostedNode,
   findComputeNode,
+  isPlatformListing,
+  syncProductDevices,
+  usageRatePerHour,
   ensureHostedNodeReady,
   assertBuyerAccess,
   resolveStreamForSession,
-  finalizeSessionBilling,
+  parseMobileStream,
   registerExternalNode,
   registerHostedNode,
   registerComputeNode,

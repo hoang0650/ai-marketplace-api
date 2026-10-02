@@ -49,6 +49,17 @@ const runtimeSchema = new mongoose.Schema(
   { _id: false }
 );
 
+/** GPU / game stream listings (gpu-compute, game-server). */
+const streamingSchema = new mongoose.Schema(
+  {
+    /** Buyer clients served: pc = web/desktop, mobile = Android/iOS app. Synced from linked nodes. */
+    devices: { type: [{ type: String, enum: ['pc', 'mobile'] }], default: () => ['pc', 'mobile'] },
+    /** PLATFORM_DIRECT GPU listing rented as a platform workspace (/gpu) with this GPU offer id. */
+    rentalOfferId: { type: String, default: '', trim: true, maxlength: 120 },
+  },
+  { _id: false }
+);
+
 const contentMetaSchema = new mongoose.Schema(
   {
     kind: { type: String, enum: ['voice', 'series', 'story', 'skill', 'dataset', ''], default: '' },
@@ -111,6 +122,7 @@ const productSchema = new mongoose.Schema(
     gallery: { type: [String], default: [] },
     pricing: { type: pricingSchema, required: true },
     runtime: { type: runtimeSchema, default: () => ({}) },
+    streaming: { type: streamingSchema, default: () => ({}) },
     contentMeta: { type: contentMetaSchema, default: () => ({}) },
     rating: { type: Number, default: 0 },
     reviewCount: { type: Number, default: 0 },

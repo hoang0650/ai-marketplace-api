@@ -19,11 +19,25 @@ const gameSessionSchema = new mongoose.Schema(
     stoppedAt: { type: Date, default: null },
     product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', default: null, index: true },
     seller: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null, index: true },
+    /** Buyer client: pc = web/desktop, android / ios = mobile app. */
+    client: { type: String, enum: ['pc', 'android', 'ios'], default: 'pc' },
+    device: { type: String, enum: ['pc', 'mobile'], default: 'pc', index: true },
+    /** aimarkets = platform-paid RunPod pod; external = seller-hosted machine. */
+    hosting: { type: String, default: '' },
     billingStartedAt: { type: Date, default: null },
+    /** Per-minute billing cursor (compare-and-set by the worker) and sub-cent remainder. */
+    billedUntil: { type: Date, default: null },
+    billingCarry: { type: Number, default: 0, min: 0 },
     billedCost: { type: Number, default: 0, min: 0 },
     billedMinutes: { type: Number, default: 0, min: 0 },
+    /** Set once the client sends heartbeats; only then is the idle timeout enforced. */
+    heartbeatAt: { type: Date, default: null },
+    lowBalanceWarnedAt: { type: Date, default: null },
+    stopReason: { type: String, default: '' },
   },
   { timestamps: true }
 );
+
+gameSessionSchema.index({ status: 1, billedUntil: 1 });
 
 module.exports = mongoose.model('GameSession', gameSessionSchema);

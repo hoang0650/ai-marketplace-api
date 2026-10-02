@@ -15,9 +15,14 @@ const {
   findComputeNode,
   assertBuyerAccess,
   resolveStreamForSession,
-  finalizeSessionBilling,
-  callSellerWebhook,
 } = require('../utils/compute-session');
+const {
+  HEARTBEAT_MS,
+  gameBillingConfig,
+  stopGameSession,
+  sessionBillingState,
+} = require('../utils/game-billing');
+const { resolveClient, assertDeviceSupported, streamProfile, productDevices } = require('../utils/stream-clients');
 const { proxyToStream, setGameCookie } = require('../terminal/stream-proxy');
 const { setPlayerFrameHeaders } = require('../utils/frame-ancestors');
 const { publicHttps } = require('../utils/proxvn');
@@ -43,30 +48,20 @@ function publicGame(doc, req, extra = {}) {
     hosting: extra.hosting,
     provider: publicProvider(doc.provider),
     status: doc.status,
+    stopReason: doc.stopReason || undefined,
+    client: doc.client || 'pc',
+    device: doc.device || 'pc',
+    profile: streamProfile(doc.device || 'pc'),
     streamKind: doc.streamKind,
     playerMode: extra.playerMode || (doc.streamKind === 'terminal' ? 'terminal' : undefined),
     playerUrl: `${base}/player`,
     publicUrl: proxied || undefined,
+    heartbeatMs: HEARTBEAT_MS,
+    idleTimeoutMs: gameBillingConfig().idleMs,
+    billedMinutes: doc.billedMinutes || 0,
+    billedCost: Math.round((doc.billedCost || 0) * 100) / 100,
     createdAt: doc.createdAt,
   };
-}
-
-async function stopLiveGameSession(doc) {
-  if (!doc || doc.status === 'stopped') return doc;
-  doc.status = 'stopped';
-  doc.stoppedAt = new Date();
-  await doc.save();
-  const product = doc.product ? await require('../models/Product').findById(doc.product) : null;
-  const server = await require('../models/GpuServer').findById(doc.server);
-  if (server?.webhookUrl) {
-    callSellerWebhook(server, 'session.stop', {
-      sessionId: doc.sessionId,
-      buyerId: String(doc.user),
-      minutes: doc.billedMinutes,
-    }).catch(() => {});
-  }
-  if (product) await finalizeSessionBilling(doc, product);
-  return doc;
 }
 
 async function expireIdleGameSessions(userId) {
@@ -74,14 +69,19 @@ async function expireIdleGameSessions(userId) {
   const idle = await GameSession.find({
     user: userId,
     status: { $in: ['starting', 'live'] },
+    heartbeatAt: { $ne: null },
     lastActivityAt: { $lt: cutoff },
   });
   for (const doc of idle) {
-    await stopLiveGameSession(doc);
+    await stopGameSession(doc, 'idle');
   }
 }
 
-async function reuseLiveSession(userId, productId, serverId) {
+/**
+ * One seat per buyer per listing: same device → reuse the live stream; the other
+ * device (PC ↔ mobile) → stop it first so the buyer is never billed twice.
+ */
+async function reuseLiveSession(userId, productId, serverId, device) {
   const q = {
     user: userId,
     status: { $in: ['starting', 'live'] },
@@ -89,7 +89,12 @@ async function reuseLiveSession(userId, productId, serverId) {
   if (productId) q.product = productId;
   else if (serverId) q.server = serverId;
   else return null;
-  const existing = await GameSession.findOne(q).sort({ lastActivityAt: -1 });
+  const live = await GameSession.find(q).sort({ lastActivityAt: -1 });
+  let existing = null;
+  for (const doc of live) {
+    if (!existing && (doc.device || 'pc') === device) existing = doc;
+    else await stopGameSession(doc, 'switched_device');
+  }
   if (!existing) return null;
   existing.lastActivityAt = new Date();
   existing.status = 'live';
@@ -102,7 +107,7 @@ async function freeOldestGameSlot(userId) {
     user: userId,
     status: { $in: ['starting', 'live'] },
   }).sort({ lastActivityAt: 1, createdAt: 1 });
-  if (oldest) await stopLiveGameSession(oldest);
+  if (oldest) await stopGameSession(oldest, 'slot_reclaimed');
 }
 
 async function sessionPlayerMode(doc, product, server) {
@@ -120,25 +125,29 @@ router.post('/', authenticate, requireRoles('seller', 'admin', 'buyer'), async (
     const projectId = String(req.body?.projectId || 'default');
     const productSlug = String(req.body?.productSlug || '').toLowerCase();
     const serverId = String(req.body?.serverId || '');
+    const { client, device } = resolveClient(req.body?.client, req.get('user-agent'));
     let server;
     let product = null;
     let hosting = '';
 
     if (productSlug) {
       product = await resolveProduct(productSlug);
+      assertDeviceSupported(product, device);
       await assertBuyerAccess(req.user, product);
-      const resolved = await findComputeNode(product);
+      const resolved = await findComputeNode(product, { device });
       if (!resolved) {
         return res.status(503).json({
-          message:
-            'No compute node for this product. Seller must register an external node or an AI Markets hosted GPU pod.',
+          message: `No compute node serves ${device === 'mobile' ? 'the mobile app' : 'PC'} for this product yet.`,
           code: 'NO_COMPUTE_NODE',
+          device,
+          supportedDevices: productDevices(product),
         });
       }
       server = resolved.node;
       hosting = resolved.hosting;
       const liveOnNode = await GameSession.countDocuments({
         server: server._id,
+        user: { $ne: req.user._id },
         status: { $in: ['starting', 'live'] },
       });
       if (liveOnNode >= (server.maxConcurrent || 10)) {
@@ -151,7 +160,7 @@ router.post('/', authenticate, requireRoles('seller', 'admin', 'buyer'), async (
 
     await expireIdleGameSessions(req.user._id);
 
-    const reused = await reuseLiveSession(req.user._id, product?._id, server._id);
+    const reused = await reuseLiveSession(req.user._id, product?._id, server._id, device);
     if (reused) {
       const playerMode = await sessionPlayerMode(reused, product, server);
       return res.json(publicGame(reused, req, { productSlug: product?.slug, hosting: hosting || undefined, playerMode }));
@@ -182,8 +191,12 @@ router.post('/', authenticate, requireRoles('seller', 'admin', 'buyer'), async (
       buyerId: String(req.user._id),
       buyerEmail: req.user.email || '',
       nodeId: server.providerServerId,
+      client,
+      device,
+      profile: streamProfile(device),
     });
 
+    const now = new Date();
     const doc = await GameSession.create({
       sessionId,
       user: req.user._id,
@@ -199,7 +212,12 @@ router.post('/', authenticate, requireRoles('seller', 'admin', 'buyer'), async (
       streamPort: Number(stream.port || 0),
       streamPath: stream.path || '/',
       streamTls: !!stream.tls,
-      billingStartedAt: new Date(),
+      client,
+      device,
+      hosting,
+      lastActivityAt: now,
+      billingStartedAt: now,
+      billedUntil: now,
     });
     await audit({
       sessionId,
@@ -211,7 +229,40 @@ router.post('/', authenticate, requireRoles('seller', 'admin', 'buyer'), async (
     const playerMode = await sessionPlayerMode(doc, product, server);
     res.status(201).json(publicGame(doc, req, { productSlug: product?.slug, hosting: hosting || undefined, playerMode }));
   } catch (e) {
-    if (e.status === 402) return res.status(402).json({ message: e.message, ...e.body, code: e.code });
+    if (e.status === 402 || e.code === 'CLIENT_NOT_SUPPORTED') {
+      return res.status(e.status).json({ message: e.message, ...e.body, code: e.code });
+    }
+    next(e);
+  }
+});
+
+/** Client keep-alive (every `heartbeatMs`); also returns the running bill and minutes left. */
+router.post('/:sessionId/heartbeat', authenticate, async (req, res, next) => {
+  try {
+    const doc = await GameSession.findOne({ sessionId: req.params.sessionId, user: req.user._id });
+    if (!doc) return res.status(404).json({ message: 'SESSION_EXPIRED', code: 'SESSION_EXPIRED' });
+    const product = doc.product ? await Product.findById(doc.product).lean() : null;
+    if (doc.status === 'stopped' || doc.status === 'error') {
+      return res.status(410).json({
+        message: 'SESSION_STOPPED',
+        code: 'SESSION_STOPPED',
+        stopReason: doc.stopReason || 'user',
+        ...(await sessionBillingState(doc, product)),
+      });
+    }
+    const now = new Date();
+    await GameSession.updateOne(
+      { _id: doc._id, status: { $in: ['starting', 'live'] } },
+      { $set: { lastActivityAt: now, heartbeatAt: now, status: 'live' } }
+    );
+    res.json({
+      ok: true,
+      status: 'live',
+      device: doc.device || 'pc',
+      heartbeatMs: HEARTBEAT_MS,
+      ...(await sessionBillingState(doc, product)),
+    });
+  } catch (e) {
     next(e);
   }
 });
@@ -230,12 +281,24 @@ router.delete('/:sessionId', authenticate, async (req, res, next) => {
   try {
     const doc = await GameSession.findOne({ sessionId: req.params.sessionId, user: req.user._id });
     if (!doc) return res.status(404).json({ message: 'SESSION_EXPIRED', code: 'SESSION_EXPIRED' });
-    await stopLiveGameSession(doc);
-    res.json({ ok: true, billedCost: doc.billedCost || 0 });
+    await stopGameSession(doc, 'user');
+    res.json({ ok: true, billedCost: doc.billedCost || 0, billedMinutes: doc.billedMinutes || 0 });
   } catch (e) {
     next(e);
   }
 });
+
+/**
+ * Default upstream query per device. noVNC: PC keeps native resolution + best quality;
+ * mobile scales to the screen with stronger compression for cellular links.
+ */
+function profileQuery(kind, device) {
+  const base = { aim_client: device };
+  if (kind !== 'novnc') return base;
+  return device === 'mobile'
+    ? { ...base, autoconnect: '1', resize: 'scale', quality: '5', compression: '6', show_dot: 'true' }
+    : { ...base, autoconnect: '1', resize: 'remote', quality: '9', compression: '2' };
+}
 
 function livePlayerHtml(doc) {
   const kind = doc.streamKind || 'novnc';
@@ -266,9 +329,12 @@ ${viewportMeta}
     kind === 'hls'
       ? '<video id="v" controls autoplay playsinline webkit-playsinline muted></video>'
       : '<iframe id="f" title="GPU stream" allow="fullscreen; autoplay; encrypted-media" allowfullscreen></iframe>';
+  const device = doc.device === 'mobile' ? 'mobile' : 'pc';
   return shell(
-    `<div class="hud">AI Markets · ${kind}</div>${media}`,
-    `const q=location.search||'';
+    `<div class="hud">AI Markets · ${kind} · ${device === 'mobile' ? 'Mobile' : 'PC'}</div>${media}`,
+    `const p=new URLSearchParams(${JSON.stringify(profileQuery(kind, device))});
+new URLSearchParams(location.search).forEach((v,k)=>p.set(k,v));
+const q=p.toString()?'?'+p.toString():'';
 const path=${JSON.stringify(path)};
 const src='./proxy'+(path.startsWith('/')?path:'/'+path)+q;
 const el=document.getElementById('f')||document.getElementById('v');

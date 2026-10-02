@@ -2,6 +2,12 @@ const { publicRuntime } = require('./runtime');
 const { isPayoutHeld, holdKind, holdUntil, canOpenDispute, roundMoney, effectiveSellerNet } = require('./payout-hold');
 const { inferLegacy } = require('./notify');
 const { publicProvider, scrubVendor } = require('./white-label');
+const { normalizeDevices } = require('./stream-clients');
+
+const STREAM_CATEGORIES = new Set(['gpu-compute', 'game-server']);
+function isStreamCategory(category) {
+  return STREAM_CATEGORIES.has(String(category || ''));
+}
 
 function mapProduct(doc, { includeSecrets = false } = {}) {
   if (!doc) return null;
@@ -32,6 +38,14 @@ function mapProduct(doc, { includeSecrets = false } = {}) {
     gallery: o.gallery || [],
     pricing: o.pricing,
     contentMeta: o.contentMeta || null,
+    streaming: isStreamCategory(o.category)
+      ? {
+          devices: normalizeDevices(o.streaming?.devices),
+          platformRental:
+            (o.ownershipType || 'THIRD_PARTY_SELLER') === 'PLATFORM_DIRECT' && !!o.streaming?.rentalOfferId,
+          rentalOfferId: o.streaming?.rentalOfferId || '',
+        }
+      : undefined,
     runtime: publicRuntime(o.runtime, { includeSecrets, maskProviderUrls: true, modelId: o.slug }),
     rating: o.rating || 0,
     reviewCount: o.reviewCount || 0,

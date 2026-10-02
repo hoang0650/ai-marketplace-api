@@ -13,6 +13,7 @@ const { assertCanPublishProduct } = require('../utils/seller-compliance');
 const { writeAuditLog } = require('../utils/audit');
 const { normalizeContentMeta, isVoiceCategory } = require('../utils/license-keys');
 const { applyVoiceProduct } = require('../utils/voice-clone');
+const { normalizeDevices } = require('../utils/stream-clients');
 
 const router = express.Router();
 
@@ -29,6 +30,19 @@ function invalidateProductCaches() {
   } catch {
     /* categories route may not export helper in older deploys */
   }
+}
+
+/** GPU/game stream settings; only platform listings may route to a platform GPU workspace offer. */
+function normalizeStreaming(raw, { ownershipType, defaults = {} } = {}) {
+  const src = raw && typeof raw === 'object' ? raw : {};
+  const rentalOfferId =
+    ownershipType === 'PLATFORM_DIRECT'
+      ? String(src.rentalOfferId ?? defaults.rentalOfferId ?? '').trim().slice(0, 120)
+      : '';
+  return {
+    devices: normalizeDevices(src.devices ?? defaults.devices),
+    rentalOfferId,
+  };
 }
 
 /** Escape user input before embedding in a RegExp (prevents ReDoS / regex injection). */
@@ -185,6 +199,7 @@ router.post('/', authenticate, requireRoles('seller', 'admin'), async (req, res,
         defaults: { baseModel: name },
       }),
       contentMeta: normalizeContentMeta(body.category, body.contentMeta) || undefined,
+      streaming: normalizeStreaming(body.streaming, { ownershipType }),
       tags: Array.isArray(body.tags) ? body.tags : [],
       apiDocsMarkdown: body.apiDocsMarkdown || '',
       changelog: Array.isArray(body.changelog) ? body.changelog : [],
@@ -253,6 +268,12 @@ router.put('/:id', authenticate, requireRoles('seller', 'admin'), async (req, re
     if (body.runtime !== undefined) {
       product.runtime = normalizeRuntime(body.runtime, {
         defaults: product.runtime?.toObject?.() || product.runtime || {},
+      });
+    }
+    if (body.streaming !== undefined) {
+      product.streaming = normalizeStreaming(body.streaming, {
+        ownershipType: product.ownershipType,
+        defaults: product.streaming?.toObject?.() || product.streaming || {},
       });
     }
     if (body.slug) {

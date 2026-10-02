@@ -16,6 +16,7 @@ const { attachTerminalGateway } = require('./terminal/gateway');
 const { attachGameStreamProxy } = require('./terminal/stream-proxy');
 const { attachGpuWorkspaceProxy } = require('./terminal/gpu-proxy');
 const { startBillingWorker, stopBillingWorker } = require('./utils/gpu-rental/service');
+const { startGameBillingWorker, stopGameBillingWorker } = require('./utils/game-billing');
 
 connectDb()
   .then(() => ensureLegalDocuments())
@@ -63,6 +64,7 @@ attachTerminalGateway(server);
 attachGameStreamProxy(server);
 attachGpuWorkspaceProxy(server);
 if (process.env.GPU_RENTAL_WORKER !== 'off') startBillingWorker();
+if (process.env.GAME_BILLING_WORKER !== 'off') startGameBillingWorker();
 server.listen(config.port, () => {
   console.log(`[ai-marketplace-api] env=${config.nodeEnv} listening on http://localhost:${config.port}`);
   console.log(`[ai-marketplace-api] api v1 http://localhost:${config.port}/v1`);
@@ -88,6 +90,7 @@ async function shutdown(signal) {
   }, 10_000);
   forceExit.unref();
   stopBillingWorker();
+  stopGameBillingWorker();
 
   server.close(async () => {
     try {

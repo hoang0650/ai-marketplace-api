@@ -64,6 +64,10 @@ async function ensureComputeTestProducts() {
           featured: listing.featured,
           productType: listing.productType,
           taxCategory: listing.taxCategory,
+          streaming: {
+            devices: listing.streaming?.devices || ['pc', 'mobile'],
+            rentalOfferId: listing.streaming?.rentalOfferId || '',
+          },
           publishedAt: new Date('2026-09-15T00:00:00.000Z'),
         },
         $setOnInsert: {
@@ -97,6 +101,7 @@ async function ensureComputeTestProducts() {
           streamPath: '/',
           streamTls: false,
           region: 'test',
+          devices: listing.streaming?.devices || ['pc', 'mobile'],
           maxConcurrent: 20,
         },
       },

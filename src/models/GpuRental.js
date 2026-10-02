@@ -27,7 +27,7 @@ const gpuRentalSchema = new mongoose.Schema(
     billedMinutes: { type: Number, default: 0 },
     billedTotal: { type: Number, default: 0 },
     lowBalanceWarnedAt: { type: Date, default: null },
-    stoppedReason: { type: String, enum: ['', 'user', 'insufficient_funds', 'admin'], default: '' },
+    stoppedReason: { type: String, enum: ['', 'user', 'insufficient_funds', 'admin', 'job_done'], default: '' },
     stoppedAt: { type: Date, default: null },
     terminateAfter: { type: Date, default: null, index: true },
     terminatedAt: { type: Date, default: null },

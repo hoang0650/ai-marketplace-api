@@ -58,7 +58,18 @@ describe('white-label helpers', () => {
 });
 
 describe('minio settings', () => {
-  const KEYS = ['AIMARKETS_MINIO_BUCKET', 'MINIO_BUCKET', 'AIMARKETS_MINIO_ACCESS_KEY', 'MINIO_ACCESS_KEY', 'MINIO_ROOT_USER'];
+  const KEYS = [
+    'AIMARKETS_MINIO_BUCKET',
+    'MINIO_BUCKET',
+    'AIMARKETS_MINIO_ACCESS_KEY',
+    'MINIO_ACCESS_KEY',
+    'MINIO_ROOT_USER',
+    'AIMARKETS_MINIO_ENDPOINT',
+    'MINIO_ENDPOINT',
+    'AIMARKETS_MINIO_PUBLIC_URL',
+    'MINIO_PUBLIC_URL',
+    'MINIO_SERVER_URL',
+  ];
   const env = {};
   afterEach(() => {
     for (const k of KEYS) {
@@ -79,12 +90,39 @@ describe('minio settings', () => {
     assert.equal(minio.getMinioConfig().bucket, 'aimarkets');
   });
 
-  test('shared names and root fallbacks still work', () => {
-    setEnv({ MINIO_BUCKET: 'phhotel', MINIO_ROOT_USER: 'root' });
-    assert.equal(minio.getMinioConfig().bucket, 'phhotel');
+  test('plain names and root fallbacks work for a non-PHHotel MinIO', () => {
+    setEnv({ MINIO_ENDPOINT: 'https://cdn.aimarkets.vn', MINIO_BUCKET: 'media', MINIO_ROOT_USER: 'root' });
+    assert.equal(minio.getMinioConfig().bucket, 'media');
     assert.equal(minio.minioEnv('MINIO_ACCESS_KEY', 'MINIO_ROOT_USER'), 'root');
+  });
+
+  test('defaults to the AI Markets MinIO (cdn.aimarkets.vn, bucket aimarkets)', () => {
     setEnv({});
-    assert.equal(minio.getMinioConfig().bucket, 'phhotel');
+    const cfg = minio.getMinioConfig();
+    assert.equal(cfg.endPoint, 'cdn.aimarkets.vn');
+    assert.equal(cfg.useSSL, true);
+    assert.equal(cfg.bucket, 'aimarkets');
+    assert.equal(cfg.publicBaseUrl, 'https://cdn.aimarkets.vn');
+    assert.equal(minio.buildPublicObjectUrl('aimarkets/playground/a.png'), 'https://cdn.aimarkets.vn/aimarkets/aimarkets/playground/a.png');
+  });
+
+  test('PHHotel MinIO settings are never used', () => {
+    setEnv({
+      MINIO_ENDPOINT: 'https://minio.phhotel.vn',
+      MINIO_PUBLIC_URL: 'https://cdn.phhotel.vn',
+      MINIO_BUCKET: 'phhotel',
+      MINIO_ACCESS_KEY: 'phhotel-key',
+    });
+    const cfg = minio.getMinioConfig();
+    assert.equal(cfg.endPoint, 'cdn.aimarkets.vn');
+    assert.equal(cfg.bucket, 'aimarkets');
+    assert.equal(cfg.publicBaseUrl, 'https://cdn.aimarkets.vn');
+    assert.equal(cfg.accessKey, '');
+    assert.equal(minio.isMinioEnabled(), false);
+
+    setEnv({ AIMARKETS_MINIO_ENDPOINT: 'https://minio.phhotel.vn', AIMARKETS_MINIO_ACCESS_KEY: 'k' });
+    assert.equal(minio.getMinioConfig().endPoint, 'cdn.aimarkets.vn');
+    assert.deepEqual([...minio.mediaHosts()].sort(), ['cdn.aimarkets.vn', 'minio.aimarkets.vn']);
   });
 });
 
@@ -92,7 +130,8 @@ describe('media rehosting', () => {
   test('only foreign http(s) URLs are rehosted', () => {
     assert.equal(media.isForeignMediaUrl('https://files.example-cdn.net/out.png'), true);
     assert.equal(media.isForeignMediaUrl('https://api.aimarkets.vn/v1/media/abc'), false);
-    assert.equal(media.isForeignMediaUrl('https://minio.phhotel.vn/phhotel/a.png'), false);
+    assert.equal(media.isForeignMediaUrl('https://cdn.aimarkets.vn/aimarkets/a.png'), false);
+    assert.equal(media.isForeignMediaUrl('https://minio.phhotel.vn/phhotel/a.png'), true);
     assert.equal(media.isForeignMediaUrl('data:image/png;base64,AAAA'), false);
     assert.equal(media.isForeignMediaUrl('a sunset over the sea'), false);
   });

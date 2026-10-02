@@ -12,22 +12,72 @@ function cleanPrefix(value, fallback) {
 }
 
 /**
- * AI Markets settings win over the shared ones: `AIMARKETS_MINIO_BUCKET` before `MINIO_BUCKET`, etc.
- * PHHotel services on the same MinIO keep using the plain `MINIO_*` names.
+ * AI Markets runs its own MinIO: S3 API + public objects on cdn.aimarkets.vn,
+ * web console on minio.aimarkets.vn. PHHotel's MinIO (*.phhotel.vn) is never used.
+ */
+const DEFAULT_ENDPOINT = 'https://cdn.aimarkets.vn';
+const DEFAULT_PUBLIC_URL = 'https://cdn.aimarkets.vn';
+const DEFAULT_BUCKET = 'aimarkets';
+const OWN_MEDIA_HOSTS = ['cdn.aimarkets.vn', 'minio.aimarkets.vn'];
+const PHHOTEL_HOST_RE = /(^|\.)phhotel\.vn$/i;
+
+function hostOf(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  try {
+    return new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`).hostname.toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+function isPhhotelUrl(value) {
+  return PHHOTEL_HOST_RE.test(hostOf(value));
+}
+
+let warned = false;
+function warnOnce(message) {
+  if (warned) return;
+  warned = true;
+  console.warn(`[minio] ${message}`);
+}
+
+/** Plain `MINIO_*` names pointing at *.phhotel.vn belong to PHHotel's MinIO — ignore all of them. */
+function sharedEnvIsPhhotel() {
+  return ['MINIO_ENDPOINT', 'MINIO_PUBLIC_URL', 'MINIO_SERVER_URL'].some((k) => isPhhotelUrl(process.env[k]));
+}
+
+/**
+ * `AIMARKETS_MINIO_*` first, then the plain `MINIO_*` names (unless those are PHHotel's).
  */
 function minioEnv(name, ...fallbacks) {
-  for (const key of [`AIMARKETS_${name}`, name, ...fallbacks]) {
+  const own = String(process.env[`AIMARKETS_${name}`] || '').trim();
+  if (own) return own;
+  if (sharedEnvIsPhhotel()) {
+    warnOnce('Ignoring MINIO_* (points at phhotel.vn); set AIMARKETS_MINIO_* for the AI Markets MinIO.');
+    return '';
+  }
+  for (const key of [name, ...fallbacks]) {
     const value = String(process.env[key] || '').trim();
     if (value) return value;
   }
   return '';
 }
 
+function ownUrl(name, fallback) {
+  const value = minioEnv(name);
+  if (!value) return fallback;
+  if (isPhhotelUrl(value)) {
+    warnOnce(`${name} points at phhotel.vn; using ${fallback} (AI Markets MinIO).`);
+    return fallback;
+  }
+  return value;
+}
+
 function isMinioEnabled() {
-  const endpoint = minioEnv('MINIO_ENDPOINT');
   const accessKey = minioEnv('MINIO_ACCESS_KEY', 'MINIO_ROOT_USER');
   const secretKey = minioEnv('MINIO_SECRET_KEY', 'MINIO_ROOT_PASSWORD');
-  return Boolean(endpoint && accessKey && secretKey);
+  return Boolean(accessKey && secretKey);
 }
 
 function parseEndpoint(raw) {
@@ -44,18 +94,19 @@ function parseEndpoint(raw) {
 }
 
 function getMinioConfig() {
-  const endpoint = parseEndpoint(minioEnv('MINIO_ENDPOINT') || 'https://minio.phhotel.vn');
+  const endpoint = parseEndpoint(ownUrl('MINIO_ENDPOINT', DEFAULT_ENDPOINT));
   return {
     ...endpoint,
     accessKey: minioEnv('MINIO_ACCESS_KEY', 'MINIO_ROOT_USER'),
     secretKey: minioEnv('MINIO_SECRET_KEY', 'MINIO_ROOT_PASSWORD'),
-    bucket: minioEnv('MINIO_BUCKET') || 'phhotel',
-    publicBaseUrl: trimSlash(minioEnv('MINIO_PUBLIC_URL') || 'https://minio.phhotel.vn'),
+    bucket: minioEnv('MINIO_BUCKET') || DEFAULT_BUCKET,
+    publicBaseUrl: trimSlash(ownUrl('MINIO_PUBLIC_URL', DEFAULT_PUBLIC_URL)),
     region: minioEnv('MINIO_REGION') || 'us-east-1',
     playgroundPrefix: cleanPrefix(minioEnv('MINIO_PLAYGROUND_PREFIX'), 'aimarkets/playground'),
     voicePrefix: cleanPrefix(minioEnv('MINIO_VOICE_PREFIX'), 'aimarkets/voices'),
     contentPrefix: cleanPrefix(minioEnv('MINIO_CONTENT_PREFIX'), 'aimarkets/content'),
     kycPrefix: cleanPrefix(minioEnv('MINIO_KYC_PREFIX'), 'aimarkets/kyc'),
+    trainingPrefix: cleanPrefix(minioEnv('MINIO_TRAINING_PREFIX'), 'aimarkets/training'),
   };
 }
 
@@ -229,6 +280,62 @@ async function getKycPresignedUrl(objectName, expirySeconds = 900) {
   return minio.presignedGetObject(cfg.bucket, objectName, expirySeconds);
 }
 
+/**
+ * Private training data under aimarkets/training/{userId}/… (dataset files + job bundles).
+ * Never public: browsers upload and GPU pods download through presigned URLs only.
+ */
+function trainingObjectName(userId, ...parts) {
+  const uid = String(userId || '').replace(/[^\w-]+/g, '');
+  if (!uid) throw new Error('userId required for training objects');
+  const rest = parts.map((p) => String(p || '').replace(/^\/+|\/+$/g, '')).filter(Boolean);
+  return [getMinioConfig().trainingPrefix, uid, ...rest].join('/');
+}
+
+function isTrainingObjectForUser(objectName, userId) {
+  const uid = String(userId || '').trim();
+  const key = String(objectName || '').replace(/^\/+/, '');
+  if (!uid || !key || key.includes('..')) return false;
+  return key.startsWith(`${getMinioConfig().trainingPrefix}/${uid}/`);
+}
+
+async function presignTrainingPut(objectName, expirySeconds = 3600) {
+  const cfg = await ensurePlaygroundBucket();
+  return getMinioClient().presignedPutObject(cfg.bucket, objectName, expirySeconds);
+}
+
+/** MinIO caps presigned links at 7 days. */
+async function presignTrainingGet(objectName, expirySeconds = 7 * 24 * 3600) {
+  const cfg = await ensurePlaygroundBucket();
+  return getMinioClient().presignedGetObject(cfg.bucket, objectName, Math.min(expirySeconds, 7 * 24 * 3600));
+}
+
+async function statTrainingObject(objectName) {
+  const cfg = await ensurePlaygroundBucket();
+  try {
+    const st = await getMinioClient().statObject(cfg.bucket, objectName);
+    return { size: Number(st.size) || 0, contentType: st.metaData?.['content-type'] || '' };
+  } catch (err) {
+    if (err && (err.code === 'NotFound' || err.code === 'NoSuchKey')) return null;
+    throw err;
+  }
+}
+
+async function putTrainingObject(objectName, buffer, contentType = 'application/octet-stream') {
+  const cfg = await ensurePlaygroundBucket();
+  await getMinioClient().putObject(cfg.bucket, objectName, buffer, buffer.length, {
+    'Content-Type': contentType,
+    'Cache-Control': 'private, no-store',
+  });
+  return objectName;
+}
+
+async function removeTrainingObjects(objectNames) {
+  const keys = (objectNames || []).filter(Boolean);
+  if (!keys.length || !isMinioEnabled()) return;
+  const cfg = await ensurePlaygroundBucket();
+  await getMinioClient().removeObjects(cfg.bucket, keys);
+}
+
 async function uploadPublicBuffer(buffer, { filename, contentType, prefix }) {
   const cfg = await ensurePlaygroundBucket();
   const minio = getMinioClient();
@@ -253,8 +360,21 @@ async function uploadPublicBuffer(buffer, { filename, contentType, prefix }) {
   };
 }
 
+/** Hostnames that serve AI Markets media (defaults + configured public URL). */
+function mediaHosts() {
+  const hosts = new Set(OWN_MEDIA_HOSTS);
+  const publicHost = hostOf(getMinioConfig().publicBaseUrl);
+  if (publicHost) hosts.add(publicHost);
+  return hosts;
+}
+
 module.exports = {
+  DEFAULT_ENDPOINT,
+  DEFAULT_PUBLIC_URL,
+  DEFAULT_BUCKET,
   minioEnv,
+  mediaHosts,
+  isPhhotelUrl,
   isMinioEnabled,
   getMinioConfig,
   getMinioClient,
@@ -267,6 +387,13 @@ module.exports = {
   isKycObjectForUser,
   getKycObjectStream,
   getKycPresignedUrl,
+  trainingObjectName,
+  isTrainingObjectForUser,
+  presignTrainingPut,
+  presignTrainingGet,
+  statTrainingObject,
+  putTrainingObject,
+  removeTrainingObjects,
   buildPublicObjectUrl,
   extForMime,
 };

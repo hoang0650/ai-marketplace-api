@@ -26,13 +26,11 @@ function roundMoney(n) {
   return Math.round(x * 100) / 100;
 }
 
-async function buildHomeFeed() {
+/** Every shop with visible listings, ranked by paid revenue (orders + metered usage). */
+async function buildShopRanking() {
   const filter = catalogFilter();
 
-  const [newArrivals, promoted, bestsellers, orderRev, usageRev, productStats] = await Promise.all([
-    Product.find(filter).sort({ publishedAt: -1, createdAt: -1 }).limit(RAIL).lean(),
-    Product.find({ ...filter, featured: true }).sort({ publishedAt: -1 }).limit(RAIL).lean(),
-    Product.find(filter).sort({ salesCount: -1, rating: -1, publishedAt: -1 }).limit(RAIL).lean(),
+  const [orderRev, usageRev, productStats] = await Promise.all([
     Order.aggregate([
       { $match: { status: 'paid' } },
       {
@@ -92,7 +90,7 @@ async function buildHomeFeed() {
         .lean()
     : [];
 
-  const shops = users
+  return users
     .map((u) => {
       const id = String(u._id);
       const stats = statsByCreator.get(id);
@@ -117,11 +115,21 @@ async function buildHomeFeed() {
         b.revenue - a.revenue ||
         b.totalSales - a.totalSales ||
         b.productCount - a.productCount,
-    )
-    .slice(0, SHOP_LIMIT);
+    );
+}
+
+async function buildHomeFeed() {
+  const filter = catalogFilter();
+
+  const [newArrivals, promoted, bestsellers, shops] = await Promise.all([
+    Product.find(filter).sort({ publishedAt: -1, createdAt: -1 }).limit(RAIL).lean(),
+    Product.find({ ...filter, featured: true }).sort({ publishedAt: -1 }).limit(RAIL).lean(),
+    Product.find(filter).sort({ salesCount: -1, rating: -1, publishedAt: -1 }).limit(RAIL).lean(),
+    cached('home:shops:v1', HOME_TTL, buildShopRanking),
+  ]);
 
   return {
-    shops,
+    shops: shops.slice(0, SHOP_LIMIT),
     newArrivals: newArrivals.map((p) => mapProduct(p)),
     promoted: promoted.map((p) => mapProduct(p)),
     bestsellers: bestsellers.map((p) => mapProduct(p)),
@@ -137,5 +145,14 @@ router.get('/', async (_req, res, next) => {
   }
 });
 
+router.get('/shops', async (_req, res, next) => {
+  try {
+    res.json(await cached('home:shops:v1', HOME_TTL, buildShopRanking));
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;
 module.exports.buildHomeFeed = buildHomeFeed;
+module.exports.buildShopRanking = buildShopRanking;

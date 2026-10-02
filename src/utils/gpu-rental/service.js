@@ -76,13 +76,30 @@ function publicRental(doc) {
  * Container start command: scrub vendor env vars so a user shell never sees them, then run
  * JupyterLab under our proxy path. Token auth is added by our proxy, never by the browser.
  */
-function buildDockerArgs(rentalId) {
+/**
+ * Training jobs: keep the job credentials in /workspace/aim (0600, survives stop/start), then run the
+ * recipe bootstrap in the background so JupyterLab still comes up. Restarts reuse the saved bootstrap
+ * once its presigned link has expired.
+ */
+const TRAINING_PRELUDE = [
+  'if [ -n "$AIM_TRAINING_BOOTSTRAP_URL" ]; then',
+  'mkdir -p /workspace/aim',
+  '&& printf "%s\\n" "AIM_TRAINING_MANIFEST_URL=$AIM_TRAINING_MANIFEST_URL" "AIM_JOB_TOKEN=$AIM_JOB_TOKEN" > /workspace/aim/job.env',
+  '&& chmod 600 /workspace/aim/job.env',
+  '&& (curl -fsSL "$AIM_TRAINING_BOOTSTRAP_URL" -o /workspace/aim/bootstrap.py.new && mv /workspace/aim/bootstrap.py.new /workspace/aim/bootstrap.py || true)',
+  '&& (nohup python3 /workspace/aim/bootstrap.py >> /workspace/aim/bootstrap.log 2>&1 &);',
+  'fi',
+].join(' ');
+
+function buildDockerArgs(rentalId, { training = false } = {}) {
   const script = [
     'for v in $(env | grep -o "^RUNPOD_[A-Za-z0-9_]*"); do unset "$v"; done',
     'unset PUBLIC_KEY JUPYTER_PASSWORD',
     'T="$AIM_ACCESS_TOKEN"; unset AIM_ACCESS_TOKEN',
     'export SHELL=/bin/bash',
     'mkdir -p /workspace && cd /workspace',
+    ...(training ? [TRAINING_PRELUDE] : []),
+    'unset AIM_TRAINING_BOOTSTRAP_URL AIM_TRAINING_MANIFEST_URL AIM_JOB_TOKEN',
     'command -v jupyter >/dev/null 2>&1 || pip install -q jupyterlab',
     [
       'exec jupyter lab --allow-root --no-browser --ip=0.0.0.0',
@@ -97,6 +114,16 @@ function buildDockerArgs(rentalId) {
     ].join(' '),
   ].join('; ');
   return `bash -c '${script}'`;
+}
+
+/** Whitelist of variables a training job may add to the pod environment. */
+function trainingEnv(env) {
+  if (!env || typeof env !== 'object') return {};
+  const out = {};
+  for (const key of ['AIM_TRAINING_BOOTSTRAP_URL', 'AIM_TRAINING_MANIFEST_URL', 'AIM_JOB_TOKEN']) {
+    if (env[key]) out[key] = String(env[key]);
+  }
+  return out;
 }
 
 // ---------- balance ----------
@@ -196,7 +223,8 @@ async function listForUser(userId) {
   }).sort({ createdAt: -1 });
 }
 
-async function createRental(user, body = {}) {
+/** `internal` is for server-side callers only (training jobs); never pass request data into it. */
+async function createRental(user, body = {}, internal = {}) {
   const cfg = gpuRentalConfig();
   const offerId = String(body.offerId || body.gpuId || '').trim();
   const offers = await listOffers();
@@ -240,8 +268,8 @@ async function createRental(user, body = {}) {
       volumeGb,
       volumeMountPath: '/workspace',
       ports: `${JUPYTER_PORT}/http`,
-      env: { AIM_ACCESS_TOKEN: rental.accessToken },
-      dockerArgs: buildDockerArgs(String(rental._id)),
+      env: { ...trainingEnv(internal.trainingEnv), AIM_ACCESS_TOKEN: rental.accessToken },
+      dockerArgs: buildDockerArgs(String(rental._id), { training: Boolean(internal.trainingEnv) }),
     });
     if (!server.id) throw provider.providerError(502, 'PROVIDER_ERROR');
     rental.providerServerId = server.id;

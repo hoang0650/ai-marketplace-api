@@ -17,7 +17,8 @@ test('allows normal product questions', () => {
 });
 
 test('only marketplace image hosts are allowed as imageUrl', () => {
-  assert.equal(isAllowedChatImageUrl('https://minio.phhotel.vn/playground/a.jpg'), true);
+  assert.equal(isAllowedChatImageUrl('https://cdn.aimarkets.vn/aimarkets/aimarkets/playground/a.jpg'), true);
+  assert.equal(isAllowedChatImageUrl('https://minio.phhotel.vn/playground/a.jpg'), false);
   assert.equal(isAllowedChatImageUrl('https://evil.com/a.jpg'), false);
   assert.equal(isAllowedChatImageUrl('javascript:alert(1)'), false);
 });

@@ -53,6 +53,8 @@ const { v1: modelGatewayV1, v2: modelGatewayV2 } = require('./routes/model-gatew
 const apiKeyRoutes = require('./routes/api-keys');
 const agentTemplateRoutes = require('./routes/agent-templates');
 const trainingJobRoutes = require('./routes/training-jobs');
+const trainingDatasetRoutes = require('./routes/training-datasets');
+const builderRoutes = require('./routes/builder');
 const workRoutes = require('./routes/work');
 const uploadRoutes = require('./routes/uploads');
 const sellerRoutes = require('./routes/sellers');
@@ -232,6 +234,8 @@ function createApp() {
   app.use('/v1/api-keys', apiKeyRoutes);
   app.use('/v1/agent-templates', agentTemplateRoutes);
   app.use('/v1/training-jobs', trainingJobRoutes);
+  app.use('/v1/training-datasets', trainingDatasetRoutes);
+  app.use('/v1/builder', builderRoutes);
   app.use('/v1/work', workRoutes);
   app.use('/v1/uploads', uploadRoutes);
   app.use('/v1/sellers', sellerRoutes);

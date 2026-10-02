@@ -12,7 +12,10 @@ const {
   publicNode,
   ensureHostedNodeReady,
   isComputeCategory,
+  parseMobileStream,
+  syncProductDevices,
 } = require('../utils/compute-session');
+const { normalizeDevices, PROFILES } = require('../utils/stream-clients');
 const provider = require('../utils/denglish-providers');
 
 const router = express.Router();
@@ -92,6 +95,7 @@ router.patch('/nodes/:id', async (req, res, next) => {
       if (body.maxConcurrent !== undefined) {
         node.maxConcurrent = Math.min(100, Math.max(1, Number(body.maxConcurrent) || 10));
       }
+      if (body.mobileStream !== undefined) node.mobileStream = await parseMobileStream(body.mobileStream);
     } else {
       const body = req.body || {};
       if (body.name) node.name = String(body.name).slice(0, 120);
@@ -100,7 +104,9 @@ router.patch('/nodes/:id', async (req, res, next) => {
       }
       if (body.status === 'offline') node.status = 'offline';
     }
+    if (req.body?.devices !== undefined) node.devices = normalizeDevices(req.body.devices);
     await node.save();
+    await syncProductDevices(node.product);
     const product = node.product ? await Product.findById(node.product).lean() : null;
     res.json(publicNode(node, product));
   } catch (e) {
@@ -125,6 +131,7 @@ router.delete('/nodes/:id', async (req, res, next) => {
     }
     node.status = 'offline';
     await node.save();
+    await syncProductDevices(node.product);
     res.json({ ok: true });
   } catch (e) {
     next(e);
@@ -182,6 +189,8 @@ router.get('/schema', (_req, res) => {
       webhookSecret: 'whsec_...',
       streamHost: '10.0.0.5',
       streamPort: 6080,
+      devices: ['pc', 'mobile'],
+      mobileStream: { host: '10.0.0.5', port: 6081, path: '/', kind: 'novnc' },
     },
     registerHostedNode: {
       hosting: 'aimarkets',
@@ -189,10 +198,30 @@ router.get('/schema', (_req, res) => {
       name: 'Hosted Game Box',
       kind: 'game',
       gpuType: 'NVIDIA GeForce RTX 4090',
+      devices: ['pc', 'mobile'],
       note: 'Provisions an AI Markets hosted GPU pod (ai.aimarkets.vn)',
     },
-    buyerResolveOrder: ['external seller node', 'AI Markets hosted GPU pod'],
+    buyerResolveOrder: {
+      THIRD_PARTY_SELLER: ['external seller node', 'AI Markets hosted GPU pod'],
+      PLATFORM_DIRECT: ['AI Markets hosted GPU pod', 'external node'],
+    },
+    devices: {
+      pc: 'Web / desktop browser — keyboard + mouse',
+      mobile: 'Android / iOS app — touch + virtual gamepad, landscape',
+    },
+    deviceProfiles: PROFILES,
+    billing: {
+      model: 'per-minute wallet debit while the session is live; seller receives net after platform fee',
+      autoStop: ['insufficient_funds', 'idle (no client heartbeat)'],
+    },
     webhookEvents: ['session.start', 'session.stop', 'session.ping'],
+    webhookStartPayload: {
+      sessionId: 'gs_…',
+      productSlug: 'your-product-slug',
+      client: 'android',
+      device: 'mobile',
+      profile: PROFILES.mobile,
+    },
     webhookResponse: {
       streamHost: '10.0.0.5',
       streamPort: 6080,
@@ -203,7 +232,8 @@ router.get('/schema', (_req, res) => {
     buyerSession: {
       method: 'POST',
       path: '/v1/game-sessions',
-      body: { productSlug: 'your-product-slug' },
+      body: { productSlug: 'your-product-slug', client: 'pc | android | ios' },
+      heartbeat: { method: 'POST', path: '/v1/game-sessions/:sessionId/heartbeat', everyMs: 30000 },
     },
     categories: ['gpu-compute', 'game-server'],
   });

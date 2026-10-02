@@ -34,6 +34,10 @@ const COPY = {
   'gpu.lowBalance': ['Số dư sắp hết', 'GPU "{name}" còn khoảng {minutes} phút theo số dư hiện tại. Nạp thêm để tránh bị dừng.'],
   'gpu.stoppedNoFunds': ['GPU đã tạm dừng', 'GPU "{name}" đã dừng do hết số dư. Dữ liệu được giữ {hours} giờ; nạp tiền để tiếp tục.'],
   'gpu.terminatedNoFunds': ['GPU đã bị xóa', 'GPU "{name}" và dữ liệu đã bị xóa do không nạp tiền trong thời hạn.'],
+  'stream.lowBalance': ['Số dư sắp hết', 'Phiên stream "{name}" còn khoảng {minutes} phút theo số dư hiện tại. Nạp thêm để tránh bị ngắt.'],
+  'stream.stoppedNoFunds': ['Phiên stream đã dừng', 'Phiên stream "{name}" đã dừng do hết số dư. Nạp tiền để chơi tiếp.'],
+  'training.succeeded': ['Train model hoàn tất', 'Job "{name}" đã train xong. Tải model tại trang Train model.'],
+  'training.failed': ['Train model thất bại', 'Job "{name}" bị lỗi. Xem log để biết chi tiết.'],
 };
 
 function fill(template, params) {
