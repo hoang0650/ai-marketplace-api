@@ -12,6 +12,7 @@
     "seed:compute": "node src/scripts/seed-compute.js",
     "seed:banners": "node src/scripts/seed-banners.js",
     "seed:builder": "node src/scripts/seed-builder.js",
+    "seed:builder-market": "node src/scripts/seed-builder-market.js",
     "migrate:roles": "node src/scripts/migrate-roles.js",
     "test": "node --test test/**/*.test.js"
   },
