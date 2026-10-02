@@ -55,6 +55,8 @@ const agentTemplateRoutes = require('./routes/agent-templates');
 const trainingJobRoutes = require('./routes/training-jobs');
 const trainingDatasetRoutes = require('./routes/training-datasets');
 const builderRoutes = require('./routes/builder');
+const builderTemplateRoutes = require('./routes/builder-templates');
+const builderGitRoutes = require('./routes/builder-git');
 const workRoutes = require('./routes/work');
 const uploadRoutes = require('./routes/uploads');
 const sellerRoutes = require('./routes/sellers');
@@ -235,6 +237,8 @@ function createApp() {
   app.use('/v1/agent-templates', agentTemplateRoutes);
   app.use('/v1/training-jobs', trainingJobRoutes);
   app.use('/v1/training-datasets', trainingDatasetRoutes);
+  app.use('/v1/builder/templates', builderTemplateRoutes);
+  app.use('/v1/builder/git', builderGitRoutes);
   app.use('/v1/builder', builderRoutes);
   app.use('/v1/work', workRoutes);
   app.use('/v1/uploads', uploadRoutes);

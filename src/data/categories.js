@@ -25,7 +25,12 @@ const AI_CATEGORIES = [
   { id: 'hire-workflow', label: 'Workflow automation', description: 'Hire specialists to automate ops with n8n, Zapier, Make, OpenClaw.', hubPath: '/hire-workflow', group: 'hire', navGroup: 'talent', lane: 'ai' },
   { id: 'hire-build-app', label: 'Build app', description: 'Hire teams to design and ship mobile / desktop apps.', hubPath: '/hire-build-app', group: 'hire', navGroup: 'talent', lane: 'ai' },
   { id: 'hire-build-web', label: 'Build web', description: 'Hire teams to build marketing sites, dashboards, and web apps.', hubPath: '/hire-build-web', group: 'hire', navGroup: 'talent', lane: 'ai' },
+  { id: 'template-web', label: 'Web templates', description: 'Seller-made website templates. Open one in AI App Builder and restyle it with your own AI key.', hubPath: '/template-web', group: 'models', navGroup: 'platform', lane: 'ai' },
+  { id: 'template-app', label: 'App templates', description: 'Seller-made React Native app templates. Run them in the phone simulator and customise with AI.', hubPath: '/template-app', group: 'models', navGroup: 'platform', lane: 'ai' },
 ];
+
+/** Builder template listings → project kind. */
+const TEMPLATE_CATEGORY_KIND = { 'template-web': 'web', 'template-app': 'app' };
 
 const DIGITAL_CATEGORIES = [];
 const CATEGORY_META = [...AI_CATEGORIES];
@@ -36,4 +41,5 @@ module.exports = {
   DIGITAL_CATEGORIES,
   CATEGORY_META,
   PRODUCT_CATEGORIES,
+  TEMPLATE_CATEGORY_KIND,
 };

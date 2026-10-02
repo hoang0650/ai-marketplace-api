@@ -1,5 +1,6 @@
 const express = require('express');
 const Product = require('../models/Product');
+const BuilderTemplate = require('../models/BuilderTemplate');
 const { authenticate, requireRoles } = require('../middleware/auth');
 const { mapProduct } = require('../utils/mappers');
 const { slugify } = require('../utils/serialize');
@@ -302,6 +303,7 @@ router.delete('/:id', authenticate, requireRoles('seller', 'admin'), async (req,
       return res.status(403).json({ message: 'Forbidden' });
     }
     await product.deleteOne();
+    await BuilderTemplate.deleteOne({ product: product._id });
     invalidateProductCaches();
     res.json({ ok: true });
   } catch (err) {

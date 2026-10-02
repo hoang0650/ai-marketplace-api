@@ -39,6 +39,8 @@ const CATEGORY_MAP = {
   dataset: 'DATASET',
   'hire-agent': 'AI_AGENT',
   'skill-pack': 'SOFTWARE_LICENSE',
+  'template-web': 'SOFTWARE_LICENSE',
+  'template-app': 'SOFTWARE_LICENSE',
   'voice-clone': 'VOICE',
   'voice-preset': 'VOICE',
   'ai-film-series': 'MEDIA_LICENSE',

@@ -47,6 +47,40 @@ const MESSAGES = {
   FILE_NOT_FOUND: 'Không tìm thấy file.',
   PROJECT_TOO_MANY_FILES: 'Project có quá nhiều file.',
   PROJECT_TOO_LARGE: 'Project vượt dung lượng cho phép.',
+  TEMPLATE_NOT_FOUND: 'Không tìm thấy template.',
+  TEMPLATE_FORBIDDEN: 'Chỉ seller sở hữu template mới được cập nhật file.',
+  TEMPLATE_EMPTY: 'Template chưa có file hợp lệ (web: html/css/js…, app: tsx/ts/jsx/js/json).',
+  TEMPLATE_ENTRY_MISSING: 'Template thiếu file chính (web cần index.html, app cần App.tsx).',
+  TEMPLATE_PURCHASE_REQUIRED: 'Bạn cần mua template này trước khi dùng để build.',
+  TEMPLATE_KIND_MISMATCH: 'Project không cùng loại với template (web / app).',
+  ZIP_INVALID: 'File ZIP bị lỗi hoặc không đúng định dạng.',
+  ZIP_UNSUPPORTED: 'ZIP dùng định dạng chưa hỗ trợ (ZIP64 / nén lạ). Hãy nén lại bằng ZIP thường.',
+  ZIP_ENCRYPTED: 'Không hỗ trợ ZIP có mật khẩu.',
+  ZIP_TOO_MANY_FILES: 'ZIP có quá nhiều file.',
+  ZIP_TOO_LARGE: 'File upload quá lớn.',
+  UPLOAD_INVALID: 'Upload không hợp lệ.',
+  GIT_NOT_CONFIGURED: 'Đăng nhập GitHub (OAuth) chưa được cấu hình trên server. Hãy dùng Personal Access Token.',
+  GIT_NOT_CONNECTED: 'Bạn chưa kết nối tài khoản GitHub.',
+  GIT_TOKEN_FORMAT: 'Token GitHub không hợp lệ.',
+  GIT_TOKEN_INVALID: 'GitHub từ chối token (sai, hết hạn hoặc đã bị thu hồi). Hãy kết nối lại.',
+  GIT_FORBIDDEN: 'Token GitHub không đủ quyền. Cần quyền repo (classic) hoặc Contents + Administration: Read & write (fine-grained).',
+  GIT_REPO_NO_PUSH: 'Tài khoản GitHub này không có quyền push vào repo đã chọn.',
+  GIT_NOT_FOUND: 'Không tìm thấy repo trên GitHub (hoặc token không được cấp quyền truy cập repo này).',
+  GIT_REPO_EXISTS: 'Tên repo đã tồn tại trên tài khoản GitHub của bạn. Chọn tên khác hoặc dùng repo có sẵn.',
+  GIT_REPO_INVALID: 'Tên repo không hợp lệ (chỉ chữ, số, dấu gạch ngang, gạch dưới, chấm).',
+  GIT_REPO_REQUIRED: 'Chọn repo có sẵn hoặc tạo repo mới để push.',
+  GIT_BRANCH_INVALID: 'Tên branch không hợp lệ.',
+  GIT_MESSAGE_INVALID: 'Commit message tối đa 200 ký tự.',
+  GIT_RATE_LIMITED: 'GitHub đang giới hạn tần suất gọi API. Thử lại sau ít phút.',
+  GIT_CONFLICT: 'Branch trên GitHub vừa thay đổi trong lúc push. Hãy thử lại.',
+  GIT_UNPROCESSABLE: 'GitHub từ chối yêu cầu',
+  GIT_ERROR: 'GitHub trả lỗi',
+  GIT_BUSY: 'Project đang được push lên Git. Đợi xong rồi thử lại.',
+  GIT_NOTHING_TO_PUSH: 'Hãy build project (có preview) trước khi đẩy lên Git.',
+  GIT_OAUTH_STATE: 'Phiên kết nối GitHub không hợp lệ hoặc đã hết hạn. Hãy thử lại.',
+  GIT_OAUTH_DENIED: 'Bạn đã huỷ cấp quyền GitHub.',
+  GIT_CONNECT_EXPIRED: 'Phiên kết nối GitHub đã hết hạn hoặc không thuộc tài khoản này. Hãy kết nối lại.',
+  GIT_RETURN_INVALID: 'Địa chỉ quay lại không được phép.',
 };
 
 function httpError(status, code, extra) {
@@ -56,7 +90,8 @@ function httpError(status, code, extra) {
 function errorBody(err) {
   const code = err.code || 'PROVIDER_ERROR';
   const known = MESSAGES[code];
-  const detail = code === 'PROVIDER_ERROR' && err.message && err.message !== code ? `: ${err.message}` : '';
+  const withDetail = code === 'PROVIDER_ERROR' || code === 'GIT_ERROR' || code === 'GIT_UNPROCESSABLE';
+  const detail = withDetail && err.message && err.message !== code ? `: ${err.message}` : '';
   return { code, message: `${known || err.message || code}${detail}`, ...(err.extra || {}) };
 }
 
@@ -95,6 +130,24 @@ function publicProject(doc, full = false) {
     fileCount: (doc.files || []).length,
     previewUrl: previewUrl(doc),
     lastGeneratedAt: doc.lastGeneratedAt,
+    template: doc.template?.product
+      ? { productId: String(doc.template.product), name: doc.template.name || '', version: doc.template.version || 0 }
+      : null,
+    git: doc.git?.repo
+      ? {
+          provider: doc.git.provider,
+          owner: doc.git.owner,
+          repo: doc.git.repo,
+          fullName: `${doc.git.owner}/${doc.git.repo}`,
+          branch: doc.git.branch,
+          repoUrl: doc.git.repoUrl,
+          private: !!doc.git.private,
+          lastCommitSha: doc.git.lastCommitSha || '',
+          lastCommitUrl: doc.git.lastCommitUrl || '',
+          lastPushedAt: doc.git.lastPushedAt || null,
+          lastPushedVersion: doc.git.lastPushedVersion || 0,
+        }
+      : null,
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,
   };
@@ -458,3 +511,6 @@ module.exports = router;
 module.exports.applyGeneration = applyGeneration;
 module.exports.publicProject = publicProject;
 module.exports.MESSAGES = MESSAGES;
+module.exports.errorBody = errorBody;
+module.exports.newPreviewToken = newPreviewToken;
+module.exports.maxProjects = maxProjects;

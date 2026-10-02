@@ -38,6 +38,27 @@ const schema = new mongoose.Schema(
     version: { type: Number, default: 0 },
     /** Unguessable capability for the public preview link (phones, sharing). */
     previewToken: { type: String, required: true },
+    /** Seller template this project was started from (attribution; files are a copy). */
+    template: {
+      product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', default: null },
+      name: { type: String, default: '', maxlength: 200 },
+      version: { type: Number, default: 0 },
+    },
+    /** Buyer's own Git repository this project is pushed to (see routes/builder-git). */
+    git: {
+      provider: { type: String, default: '' },
+      owner: { type: String, default: '', maxlength: 100 },
+      repo: { type: String, default: '', maxlength: 100 },
+      branch: { type: String, default: '', maxlength: 100 },
+      repoUrl: { type: String, default: '', maxlength: 300 },
+      private: { type: Boolean, default: true },
+      lastCommitSha: { type: String, default: '' },
+      lastCommitUrl: { type: String, default: '', maxlength: 400 },
+      lastPushedAt: { type: Date, default: null },
+      lastPushedVersion: { type: Number, default: 0 },
+      /** Paths written by the last push; files removed in Builder are deleted from the repo next time. */
+      pushedPaths: { type: [String], default: [] },
+    },
     generating: { type: Boolean, default: false },
     lastGeneratedAt: { type: Date, default: null },
   },
