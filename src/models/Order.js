@@ -64,6 +64,9 @@ const orderSchema = new mongoose.Schema(
       termsVersion: { type: String, default: '' },
       infraProvider: { type: String, default: '' },
     },
+    /** Set when the order pays one phase of a quoted hire project. */
+    hireProject: { type: mongoose.Schema.Types.ObjectId, ref: 'HireProject', default: null, index: true },
+    hireMilestone: { type: Number, default: null },
     disputeStatus: {
       type: String,
       enum: ['none', 'open', 'seller_win', 'buyer_win'],

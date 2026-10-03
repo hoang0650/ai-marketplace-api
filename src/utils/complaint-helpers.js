@@ -23,6 +23,7 @@ function mapComplaint(doc) {
     jobId: o.job ? String(o.job._id || o.job) : null,
     jobTitle: o.jobTitle || '',
     jobSlug: o.jobSlug || '',
+    hireProjectId: o.hireProject ? String(o.hireProject._id || o.hireProject) : null,
     body: o.body || '',
     requestedAction: o.requestedAction || '',
     evidenceUrls: Array.isArray(o.evidenceUrls) ? o.evidenceUrls : [],

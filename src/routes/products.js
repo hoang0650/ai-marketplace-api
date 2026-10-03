@@ -1,12 +1,14 @@
 const express = require('express');
 const Product = require('../models/Product');
 const BuilderTemplate = require('../models/BuilderTemplate');
-const { authenticate, requireRoles } = require('../middleware/auth');
+const User = require('../models/User');
+const { authenticate, requireRoles, invalidateAuthUserCache } = require('../middleware/auth');
+const { ROLE } = require('../utils/roles');
 const { mapProduct } = require('../utils/mappers');
 const { slugify } = require('../utils/serialize');
 const { productSlugQuery, isCatalogProductSlug } = require('../utils/product-slug');
 const { cached, deleteCachePattern } = require('../utils/cache');
-const { PRODUCT_CATEGORIES } = require('../data/categories');
+const { PRODUCT_CATEGORIES, HIRE_REQUEST_CATEGORIES } = require('../data/categories');
 const { normalizeRuntime } = require('../utils/runtime');
 const { inferProductType } = require('../data/marketplace-types');
 const { catalogVisibleFilter, isCatalogVisible } = require('../utils/moderation');
@@ -119,7 +121,45 @@ router.get('/:slug', async (req, res, next) => {
   }
 });
 
-router.post('/', authenticate, requireRoles('seller', 'admin'), async (req, res, next) => {
+/** Talent may only offer custom work (quote + milestones); sellers may list every category. */
+function talentCategoryError(user, category) {
+  if (user.role !== ROLE.TALENT || HIRE_REQUEST_CATEGORIES.includes(String(category))) return null;
+  return {
+    message: 'Talent chỉ được tạo listing thuê theo yêu cầu: Làm web, Làm app, Marketing, SEO, Creator, Tự động hóa.',
+    code: 'CATEGORY_NOT_ALLOWED',
+    allowed: HIRE_REQUEST_CATEGORIES,
+  };
+}
+
+/** Hire listings are always quoted: `price` is the starting quote, never a checkout price. */
+function hirePricing(category, pricing) {
+  if (!HIRE_REQUEST_CATEGORIES.includes(String(category))) return pricing;
+  const src = pricing && typeof pricing === 'object' ? pricing : {};
+  return {
+    model: 'one-time',
+    price: Math.max(0, Number(src.price) || 0),
+    currency: String(src.currency || 'USD'),
+    interval: null,
+    compareAtPrice: 0,
+    negotiable: src.negotiable !== false,
+  };
+}
+
+async function ensureCreatorSlug(user) {
+  if (user.creatorSlug) return user.creatorSlug;
+  const fresh = await User.findById(user._id).select('creatorSlug').lean();
+  let slug = fresh?.creatorSlug;
+  if (!slug) {
+    slug = slugify(user.name) || `talent-${Date.now().toString(36)}`;
+    if (await User.exists({ creatorSlug: slug })) slug = `${slug}-${Date.now().toString(36)}`;
+    await User.updateOne({ _id: user._id }, { $set: { creatorSlug: slug } });
+    await invalidateAuthUserCache(user._id);
+  }
+  user.creatorSlug = slug;
+  return slug;
+}
+
+router.post('/', authenticate, requireRoles('seller', 'talent', 'admin'), async (req, res, next) => {
   try {
     const body = req.body || {};
     const name = String(body.name || '').trim();
@@ -129,6 +169,8 @@ router.post('/', authenticate, requireRoles('seller', 'admin'), async (req, res,
     if (!PRODUCT_CATEGORIES.includes(String(body.category))) {
       return res.status(400).json({ message: 'AI marketplace category required' });
     }
+    const forbidden = talentCategoryError(req.user, body.category);
+    if (forbidden) return res.status(403).json(forbidden);
     let slug = slugify(body.slug || name);
     if (!slug) slug = `product-${Date.now()}`;
     if (isCatalogProductSlug(slug) && req.user.role !== 'admin') slug = `p-${slug}`;
@@ -139,6 +181,7 @@ router.post('/', authenticate, requireRoles('seller', 'admin'), async (req, res,
     if (user.role === 'seller' && !user.creatorSlug) {
       return res.status(400).json({ message: 'Seller profile missing slug' });
     }
+    if (user.role === ROLE.TALENT) await ensureCreatorSlug(user);
 
     const requestedOwnership =
       body.ownershipType === 'PLATFORM_DIRECT' ? 'PLATFORM_DIRECT' : 'THIRD_PARTY_SELLER';
@@ -195,7 +238,7 @@ router.post('/', authenticate, requireRoles('seller', 'admin'), async (req, res,
       complianceStatus: ownershipType === 'PLATFORM_DIRECT' ? 'approved' : 'pending',
       coverUrl: body.coverUrl || '',
       gallery: Array.isArray(body.gallery) ? body.gallery : [],
-      pricing: body.pricing,
+      pricing: hirePricing(body.category, body.pricing),
       runtime: normalizeRuntime(body.runtime || {}, {
         defaults: { baseModel: name },
       }),
@@ -234,7 +277,7 @@ router.post('/', authenticate, requireRoles('seller', 'admin'), async (req, res,
   }
 });
 
-router.put('/:id', authenticate, requireRoles('seller', 'admin'), async (req, res, next) => {
+router.put('/:id', authenticate, requireRoles('seller', 'talent', 'admin'), async (req, res, next) => {
   try {
     const product = await Product.findById(req.params.id);
     if (!product) return res.status(404).json({ message: 'Not found' });
@@ -246,6 +289,11 @@ router.put('/:id', authenticate, requireRoles('seller', 'admin'), async (req, re
     }
 
     const body = req.body || {};
+    if (body.category !== undefined && !PRODUCT_CATEGORIES.includes(String(body.category))) {
+      return res.status(400).json({ message: 'AI marketplace category required' });
+    }
+    const forbidden = talentCategoryError(req.user, body.category ?? product.category);
+    if (forbidden) return res.status(403).json(forbidden);
     const fields = [
       'name',
       'tagline',
@@ -262,6 +310,10 @@ router.put('/:id', authenticate, requireRoles('seller', 'admin'), async (req, re
     ];
     for (const key of fields) {
       if (body[key] !== undefined) product[key] = body[key];
+    }
+    if (body.pricing !== undefined || body.category !== undefined) {
+      const plain = product.pricing?.toObject?.() || product.pricing;
+      product.pricing = hirePricing(product.category, plain);
     }
     if (body.contentMeta !== undefined || body.category) {
       product.contentMeta = normalizeContentMeta(product.category, body.contentMeta || product.contentMeta) || product.contentMeta;
@@ -292,7 +344,7 @@ router.put('/:id', authenticate, requireRoles('seller', 'admin'), async (req, re
   }
 });
 
-router.delete('/:id', authenticate, requireRoles('seller', 'admin'), async (req, res, next) => {
+router.delete('/:id', authenticate, requireRoles('seller', 'talent', 'admin'), async (req, res, next) => {
   try {
     const product = await Product.findById(req.params.id);
     if (!product) return res.status(404).json({ message: 'Not found' });
@@ -312,3 +364,5 @@ router.delete('/:id', authenticate, requireRoles('seller', 'admin'), async (req,
 });
 
 module.exports = router;
+module.exports.talentCategoryError = talentCategoryError;
+module.exports.hirePricing = hirePricing;

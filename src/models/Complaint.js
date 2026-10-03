@@ -48,6 +48,7 @@ const complaintSchema = new mongoose.Schema(
     job: { type: mongoose.Schema.Types.ObjectId, ref: 'JobPosting', default: null, index: true },
     jobTitle: { type: String, default: '', maxlength: 300 },
     jobSlug: { type: String, default: '', maxlength: 200 },
+    hireProject: { type: mongoose.Schema.Types.ObjectId, ref: 'HireProject', default: null, index: true },
     body: { type: String, required: true, maxlength: 4000 },
     requestedAction: { type: String, default: '', maxlength: 1000 },
     evidenceUrls: { type: [String], default: [] },

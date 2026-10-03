@@ -41,6 +41,8 @@ const schema = new mongoose.Schema(
     /** Seller template this project was started from (attribution; files are a copy). */
     template: {
       product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', default: null },
+      /** Seller of that template — only they may re-list a project built from it. */
+      creator: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
       name: { type: String, default: '', maxlength: 200 },
       version: { type: Number, default: 0 },
     },

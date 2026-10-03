@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const express = require('express');
 const mongoose = require('mongoose');
 const BuilderProject = require('../models/BuilderProject');
+const Product = require('../models/Product');
 const ProviderApiKey = require('../models/ProviderApiKey');
 const { authenticate } = require('../middleware/auth');
 const { openSecret } = require('../utils/secret-box');
@@ -53,6 +54,7 @@ const MESSAGES = {
   TEMPLATE_ENTRY_MISSING: 'Template thiếu file chính (web cần index.html, app cần App.tsx).',
   TEMPLATE_PURCHASE_REQUIRED: 'Bạn cần mua template này trước khi dùng để build.',
   TEMPLATE_KIND_MISMATCH: 'Project không cùng loại với template (web / app).',
+  TEMPLATE_RESALE_FORBIDDEN: 'Project này tạo từ template của người bán khác nên không thể đăng bán lại làm template.',
   ZIP_INVALID: 'File ZIP bị lỗi hoặc không đúng định dạng.',
   ZIP_UNSUPPORTED: 'ZIP dùng định dạng chưa hỗ trợ (ZIP64 / nén lạ). Hãy nén lại bằng ZIP thường.',
   ZIP_ENCRYPTED: 'Không hỗ trợ ZIP có mật khẩu.',
@@ -137,7 +139,12 @@ function publicProject(doc, full = false) {
     previewUrl: previewUrl(doc),
     lastGeneratedAt: doc.lastGeneratedAt,
     template: doc.template?.product
-      ? { productId: String(doc.template.product), name: doc.template.name || '', version: doc.template.version || 0 }
+      ? {
+          productId: String(doc.template.product),
+          name: doc.template.name || '',
+          version: doc.template.version || 0,
+          own: !!doc.template.creator && String(doc.template.creator) === String(doc.owner),
+        }
       : null,
     git: doc.git?.repo
       ? {
@@ -191,6 +198,24 @@ async function findOwned(req) {
   const doc = await BuilderProject.findOne({ _id: id, owner: req.user._id });
   if (!doc) throw httpError(404, 'PROJECT_NOT_FOUND');
   return doc;
+}
+
+/** Projects started from a template before `template.creator` was stored: look it up once. */
+async function fillTemplateCreators(docs) {
+  const missing = docs.filter((d) => d.template?.product && !d.template.creator);
+  if (!missing.length) return docs;
+  const ids = [...new Set(missing.map((d) => String(d.template.product)))];
+  const products = await Product.find({ _id: { $in: ids } }).select('creator').lean();
+  const creators = new Map(products.map((p) => [String(p._id), p.creator]));
+  await Promise.all(
+    missing.map((d) => {
+      const creator = creators.get(String(d.template.product));
+      if (!creator) return null;
+      d.template.creator = creator;
+      return BuilderProject.updateOne({ _id: d._id }, { $set: { 'template.creator': creator } });
+    })
+  );
+  return docs;
 }
 
 // ---------- public preview (capability link, sandboxed) ----------
@@ -250,7 +275,7 @@ router.get(
   wrap(async (req, res) => {
     const filter = { owner: req.user._id };
     if (KINDS.includes(req.query.kind)) filter.kind = req.query.kind;
-    const rows = await BuilderProject.find(filter).select('-messages').sort({ updatedAt: -1 }).limit(200);
+    const rows = await fillTemplateCreators(await BuilderProject.find(filter).select('-messages').sort({ updatedAt: -1 }).limit(200));
     res.json({ projects: rows.map((d) => publicProject(d)), limits: { ...files.limits(), maxProjects: maxProjects() } });
   })
 );
@@ -281,7 +306,8 @@ router.post(
 router.get(
   '/projects/:id',
   wrap(async (req, res) => {
-    res.json({ project: publicProject(await findOwned(req), true) });
+    const [doc] = await fillTemplateCreators([await findOwned(req)]);
+    res.json({ project: publicProject(doc, true) });
   })
 );
 

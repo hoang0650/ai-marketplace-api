@@ -38,6 +38,17 @@ const COPY = {
   'stream.stoppedNoFunds': ['Phiên stream đã dừng', 'Phiên stream "{name}" đã dừng do hết số dư. Nạp tiền để chơi tiếp.'],
   'training.succeeded': ['Train model hoàn tất', 'Job "{name}" đã train xong. Tải model tại trang Train model.'],
   'training.failed': ['Train model thất bại', 'Job "{name}" bị lỗi. Xem log để biết chi tiết.'],
+  'hire.requested': ['Yêu cầu thuê mới', '{buyer} gửi yêu cầu cho {product}. Hãy báo giá.'],
+  'hire.quoted': ['Đã có báo giá', '{seller} báo giá {amount} {currency} cho {product}.'],
+  'hire.countered': ['Khách đề xuất giá khác', '{buyer} đề xuất {amount} {currency} cho {product}.'],
+  'hire.declined': ['Yêu cầu bị từ chối', '{seller} đã từ chối yêu cầu {product}.'],
+  'hire.cancelled': ['Yêu cầu đã hủy', '{buyer} đã hủy yêu cầu {product}.'],
+  'hire.accepted': ['Khách chấp nhận báo giá', '{buyer} chấp nhận {amount} {currency} cho {product} với {count} giai đoạn. Bắt đầu giai đoạn 1.'],
+  'hire.submitted': ['Có demo cần nghiệm thu', '{seller} gửi demo giai đoạn {phase} của {product}.'],
+  'hire.revision': ['Khách yêu cầu chỉnh sửa', 'Giai đoạn {phase} của {product} cần chỉnh sửa.'],
+  'hire.approved': ['Giai đoạn đã nghiệm thu', 'Giai đoạn {phase} của {product} đã nghiệm thu: {amount} {currency} được ghi có, tạm giữ 48 giờ.'],
+  'hire.completed': ['Dự án hoàn tất', 'Tất cả giai đoạn của {product} đã được nghiệm thu.'],
+  'hire.terminated': ['Dự án bị chấm dứt', '{buyer} đã chấm dứt {product}. {reason}'],
 };
 
 function fill(template, params) {

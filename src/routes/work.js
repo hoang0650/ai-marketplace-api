@@ -7,6 +7,7 @@ const { ROLE } = require('../utils/roles');
 const { slugify } = require('../utils/serialize');
 const { WORK_FIELDS } = require('../data/work-fields');
 const { isDbReady } = require('../config/db');
+const { listingFee, assertCanPayListingFee, chargeListingFee } = require('../finance/work-listing-fee');
 
 const router = express.Router();
 
@@ -600,6 +601,36 @@ router.get('/contracts/mine', authenticate, async (req, res, next) => {
   }
 });
 
+function feeError(res, err, fee) {
+  return res.status(402).json({
+    message: `Phí đăng tin ${fee.vnd.toLocaleString('vi-VN')}đ — số dư ví khả dụng không đủ. Hãy nạp thêm.`,
+    code: err.code || 'INSUFFICIENT_WALLET',
+    feeVnd: fee.vnd,
+    amount: fee.amount,
+    currency: fee.currency,
+    ...(err.body || {}),
+  });
+}
+
+/** Pre-checks the wallet, creates the listing, then debits the fee. */
+async function withListingFee(req, res, listingType, create) {
+  let fee;
+  try {
+    fee = await assertCanPayListingFee(req.user);
+  } catch (err) {
+    if (err.status === 402) return feeError(res, err, listingFee());
+    throw err;
+  }
+  const doc = await create();
+  const charged = await chargeListingFee(req.user, { listingType, listingId: doc._id, title: doc.title });
+  return { doc, fee: { vnd: fee.vnd, amount: fee.amount, currency: fee.currency, charged: charged.charged } };
+}
+
+router.get('/listing-fee', (_req, res) => {
+  const fee = listingFee();
+  res.json({ vnd: fee.vnd, amount: fee.amount, currency: fee.currency });
+});
+
 router.post('/jobs', authenticate, requireRoles(ROLE.EMPLOYER, ROLE.ADMIN), async (req, res, next) => {
   try {
     const body = req.body || {};
@@ -609,34 +640,39 @@ router.post('/jobs', authenticate, requireRoles(ROLE.EMPLOYER, ROLE.ADMIN), asyn
     if (!title || !company || !description) {
       return res.status(400).json({ message: 'title, company, and description are required' });
     }
-    let slug = slugify(title);
-    const exists = await JobPosting.findOne({ slug });
-    if (exists) slug = `${slug}-${Date.now().toString(36)}`;
-
-    const doc = await JobPosting.create({
-      slug,
-      title,
-      company,
-      description,
-      location: String(body.location || 'Remote').trim(),
-      remote: body.remote !== false,
-      fieldIds: Array.isArray(body.fieldIds) ? body.fieldIds.map(String) : [],
-      skills: Array.isArray(body.skills) ? body.skills.map(String) : [],
-      employmentType: body.employmentType || 'freelance',
-      salaryMin: Number(body.salaryMin) || 0,
-      salaryMax: Number(body.salaryMax) || 0,
-      salaryCurrency: String(body.salaryCurrency || 'VND'),
-      salaryPeriod: body.salaryPeriod || 'hour',
-      salaryNegotiable: !!body.salaryNegotiable,
-      status: 'open',
-      postedBy: req.user._id,
-      postedByName: req.user.name || '',
-    });
-    res.status(201).json(mapJob(doc));
+    const result = await withListingFee(req, res, 'job', () => createJob(req, { title, company, description, body }));
+    if (!result) return;
+    res.status(201).json({ ...mapJob(result.doc), listingFee: result.fee });
   } catch (err) {
     next(err);
   }
 });
+
+async function createJob(req, { title, company, description, body }) {
+  let slug = slugify(title);
+  const exists = await JobPosting.findOne({ slug });
+  if (exists) slug = `${slug}-${Date.now().toString(36)}`;
+
+  return JobPosting.create({
+    slug,
+    title,
+    company,
+    description,
+    location: String(body.location || 'Remote').trim(),
+    remote: body.remote !== false,
+    fieldIds: Array.isArray(body.fieldIds) ? body.fieldIds.map(String) : [],
+    skills: Array.isArray(body.skills) ? body.skills.map(String) : [],
+    employmentType: body.employmentType || 'freelance',
+    salaryMin: Number(body.salaryMin) || 0,
+    salaryMax: Number(body.salaryMax) || 0,
+    salaryCurrency: String(body.salaryCurrency || 'VND'),
+    salaryPeriod: body.salaryPeriod || 'hour',
+    salaryNegotiable: !!body.salaryNegotiable,
+    status: 'open',
+    postedBy: req.user._id,
+    postedByName: req.user.name || '',
+  });
+}
 
 router.get('/talents', async (req, res, next) => {
   try {
@@ -674,27 +710,64 @@ router.post('/talents', authenticate, requireRoles(ROLE.TALENT, ROLE.ADMIN), asy
     if (!name || !title) {
       return res.status(400).json({ message: 'name and title are required' });
     }
-    let slug = slugify(`${name}-${title}`);
-    const exists = await TalentProfile.findOne({ slug });
-    if (exists) slug = `${slug}-${Date.now().toString(36)}`;
-
-    const doc = await TalentProfile.create({
-      slug,
-      user: req.user._id,
-      name,
-      title,
-      avatarUrl: body.avatarUrl || req.user.avatarUrl || '',
-      bio: String(body.bio || '').trim(),
-      fieldIds: Array.isArray(body.fieldIds) ? body.fieldIds.map(String) : [],
-      skills: Array.isArray(body.skills) ? body.skills.map(String) : [],
-      experienceYears: Number(body.experienceYears) || 0,
-      hoursPerWeek: Number(body.hoursPerWeek) || 40,
-      rateAmount: Number(body.rateAmount) || 0,
-      rateCurrency: String(body.rateCurrency || 'VND'),
-      rateNegotiable: body.rateNegotiable !== false,
-      available: body.available !== false,
+    const result = await withListingFee(req, res, 'talent', async () => {
+      let slug = slugify(`${name}-${title}`);
+      const exists = await TalentProfile.findOne({ slug });
+      if (exists) slug = `${slug}-${Date.now().toString(36)}`;
+      return TalentProfile.create({
+        slug,
+        user: req.user._id,
+        name,
+        title,
+        avatarUrl: body.avatarUrl || req.user.avatarUrl || '',
+        ...talentFields(body),
+      });
     });
-    res.status(201).json(mapTalent(doc));
+    if (!result) return;
+    res.status(201).json({ ...mapTalent(result.doc), listingFee: result.fee });
+  } catch (err) {
+    next(err);
+  }
+});
+
+function talentFields(body) {
+  return {
+    bio: String(body.bio || '').trim().slice(0, 4000),
+    fieldIds: Array.isArray(body.fieldIds) ? body.fieldIds.map(String) : [],
+    skills: Array.isArray(body.skills) ? body.skills.map(String).slice(0, 40) : [],
+    experienceYears: Number(body.experienceYears) || 0,
+    hoursPerWeek: Number(body.hoursPerWeek) || 40,
+    rateAmount: Number(body.rateAmount) || 0,
+    rateCurrency: String(body.rateCurrency || 'VND'),
+    rateNegotiable: body.rateNegotiable !== false,
+    available: body.available !== false,
+  };
+}
+
+router.get('/my/talents', authenticate, async (req, res, next) => {
+  try {
+    const docs = await TalentProfile.find({ user: req.user._id }).sort({ createdAt: -1 }).lean();
+    res.json(docs.map(mapTalent));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Editing an existing profile is free; only new listings pay the fee. */
+router.put('/talents/:slug', authenticate, requireRoles(ROLE.TALENT, ROLE.ADMIN), async (req, res, next) => {
+  try {
+    const doc = await TalentProfile.findOne({ slug: String(req.params.slug).toLowerCase() });
+    if (!doc) return res.status(404).json({ message: 'Talent not found' });
+    if (req.user.role !== ROLE.ADMIN && String(doc.user) !== String(req.user._id)) {
+      return res.status(403).json({ message: 'Forbidden' });
+    }
+    const body = req.body || {};
+    const name = String(body.name ?? doc.name).trim();
+    const title = String(body.title ?? doc.title).trim();
+    if (!name || !title) return res.status(400).json({ message: 'name and title are required' });
+    Object.assign(doc, { name, title, ...talentFields({ ...doc.toObject(), ...body }) });
+    await doc.save();
+    res.json(mapTalent(doc));
   } catch (err) {
     next(err);
   }

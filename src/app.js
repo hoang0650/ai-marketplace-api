@@ -58,6 +58,7 @@ const builderRoutes = require('./routes/builder');
 const builderTemplateRoutes = require('./routes/builder-templates');
 const builderGitRoutes = require('./routes/builder-git');
 const workRoutes = require('./routes/work');
+const hireRoutes = require('./routes/hire');
 const uploadRoutes = require('./routes/uploads');
 const sellerRoutes = require('./routes/sellers');
 const legalRoutes = require('./routes/legal');
@@ -241,6 +242,7 @@ function createApp() {
   app.use('/v1/builder/git', builderGitRoutes);
   app.use('/v1/builder', builderRoutes);
   app.use('/v1/work', workRoutes);
+  app.use('/v1/hire', hireRoutes);
   app.use('/v1/uploads', uploadRoutes);
   app.use('/v1/sellers', sellerRoutes);
   app.use('/v1/legal', legalRoutes);

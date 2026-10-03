@@ -313,9 +313,14 @@ async function entriesFromRequest(req, kind) {
   const fromProject = String(req.body?.fromProject || '').trim();
   if (fromProject) {
     if (!mongoose.isValidObjectId(fromProject)) throw httpError(404, 'PROJECT_NOT_FOUND');
-    const project = await BuilderProject.findOne({ _id: fromProject, owner: req.user._id }).select('kind files').lean();
+    const project = await BuilderProject.findOne({ _id: fromProject, owner: req.user._id }).select('kind files template').lean();
     if (!project) throw httpError(404, 'PROJECT_NOT_FOUND');
     if (project.kind !== kind) throw httpError(400, 'TEMPLATE_KIND_MISMATCH');
+    if (project.template?.product) {
+      const creator =
+        project.template.creator || (await Product.findById(project.template.product).select('creator').lean())?.creator;
+      if (String(creator || '') !== String(req.user._id)) throw httpError(403, 'TEMPLATE_RESALE_FORBIDDEN');
+    }
     return { entries: project.files.map((f) => ({ path: f.path, data: f.content })), skipped: [] };
   }
   const uploads = req.files || [];
@@ -494,7 +499,7 @@ router.post(
       name,
       kind: template.kind,
       files: template.files.map((f) => ({ path: f.path, content: f.content })),
-      template: { product: product._id, name: product.name.slice(0, 200), version: template.version },
+      template: { product: product._id, creator: product.creator || null, name: product.name.slice(0, 200), version: template.version },
       previewToken: newPreviewToken(),
     });
     await BuilderTemplate.updateOne({ _id: template._id }, { $inc: { useCount: 1 } });

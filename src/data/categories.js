@@ -32,6 +32,16 @@ const AI_CATEGORIES = [
 /** Builder template listings → project kind. */
 const TEMPLATE_CATEGORY_KIND = { 'template-web': 'web', 'template-app': 'app' };
 
+/** Custom work ordered through a quote + milestone project (no direct checkout). Talent may list only these. */
+const HIRE_REQUEST_CATEGORIES = [
+  'hire-build-web',
+  'hire-build-app',
+  'hire-marketing',
+  'hire-seo',
+  'hire-creator',
+  'hire-workflow',
+];
+
 const DIGITAL_CATEGORIES = [];
 const CATEGORY_META = [...AI_CATEGORIES];
 const PRODUCT_CATEGORIES = CATEGORY_META.map((c) => c.id);
@@ -42,4 +52,5 @@ module.exports = {
   CATEGORY_META,
   PRODUCT_CATEGORIES,
   TEMPLATE_CATEGORY_KIND,
+  HIRE_REQUEST_CATEGORIES,
 };

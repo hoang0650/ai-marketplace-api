@@ -7,6 +7,7 @@ const { readZip, isZip } = require('../../src/utils/builder/zip');
 const tpl = require('../../src/utils/builder/templates');
 const { previewResponse } = require('../../src/utils/builder/preview');
 const { templateMeta } = require('../../src/routes/builder-templates');
+const { publicProject } = require('../../src/routes/builder');
 const { taxCategoryFromProduct } = require('../../src/finance/tax-category');
 const { WEB_CASE, APP_CASE } = require('../../src/scripts/builder-demo-cases');
 const { parseOutput } = require('../../src/utils/builder/files');
@@ -151,6 +152,23 @@ describe('template access and demo', () => {
     assert.match(web.headers['Content-Security-Policy'], /^sandbox allow-scripts/);
     const app = previewResponse({ name: 'T', kind: 'app', files: appFiles }, '');
     assert.match(app.body, /react-native-web@/);
+  });
+
+  test('projects built from another seller\'s template are not marked resellable', () => {
+    const owner = new mongoose.Types.ObjectId();
+    const project = (creator) => ({
+      _id: new mongoose.Types.ObjectId(),
+      owner,
+      name: 'P',
+      kind: 'web',
+      files: webFiles,
+      previewToken: 'x'.repeat(32),
+      template: { product: new mongoose.Types.ObjectId(), creator, name: 'T', version: 1 },
+    });
+    assert.equal(publicProject(project(owner)).template.own, true);
+    assert.equal(publicProject(project(new mongoose.Types.ObjectId())).template.own, false);
+    assert.equal(publicProject(project(null)).template.own, false);
+    assert.equal(publicProject({ ...project(owner), template: {} }).template, null);
   });
 
   test('template sales are taxed as software licenses', () => {

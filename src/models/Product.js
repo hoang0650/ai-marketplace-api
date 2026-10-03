@@ -11,6 +11,8 @@ const pricingSchema = new mongoose.Schema(
     usageRate: { type: Number },
     /** List price before sale. When > price, listing shows as discounted. */
     compareAtPrice: { type: Number, default: 0, min: 0 },
+    /** Hire listings: `price` is the starting quote and the buyer may counter-offer. */
+    negotiable: { type: Boolean, default: true },
   },
   { _id: false }
 );
