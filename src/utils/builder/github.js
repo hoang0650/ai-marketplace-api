@@ -246,6 +246,53 @@ async function pushFiles(token, { owner, repo, branch, files, deletes = [], mess
   throw httpError(409, 'GIT_CONFLICT');
 }
 
+const BLOB_CONCURRENCY = 6;
+
+/**
+ * Reads files of `owner/repo` at `ref` (only under `dir` when given) for template imports.
+ * `classify(path, size)` returns '' to download the file, 'junk' to drop it silently,
+ * or a skip reason reported back to the seller. Paths are relative to `dir`.
+ * @returns {{ sha: string, entries: Array<{ path: string, data: Buffer }>, skipped: Array<{ path: string, reason: string }> }}
+ */
+async function fetchRepoFiles(token, { owner, repo, ref, dir = '', classify, maxFiles }) {
+  const base = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
+  const commit = await request(token, 'GET', `${base}/commits/${refPath(ref)}`);
+  const sha = commit?.sha || '';
+  const treeSha = commit?.commit?.tree?.sha || '';
+  if (!sha || !treeSha) throw httpError(404, 'GIT_NOT_FOUND');
+  const tree = await request(token, 'GET', `${base}/git/trees/${treeSha}?recursive=1`);
+  if (tree?.truncated) throw httpError(400, 'GIT_IMPORT_TOO_LARGE');
+
+  const prefix = dir ? `${dir}/` : '';
+  const picked = [];
+  const skipped = [];
+  let inDir = 0;
+  for (const e of tree?.tree || []) {
+    if (e?.type !== 'blob' || typeof e.path !== 'string' || !e.path.startsWith(prefix)) continue;
+    inDir += 1;
+    const path = e.path.slice(prefix.length);
+    const verdict = classify(path, Number(e.size) || 0);
+    if (verdict === 'junk') continue;
+    if (verdict) skipped.push({ path: path.slice(0, 160), reason: verdict });
+    else picked.push({ path, sha: e.sha });
+  }
+  if (prefix && !inDir) throw httpError(404, 'GIT_PATH_NOT_FOUND');
+  if (maxFiles && picked.length > maxFiles) throw httpError(400, 'PROJECT_TOO_MANY_FILES', { max: maxFiles });
+
+  const entries = new Array(picked.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < picked.length) {
+      const i = next++;
+      const blob = await request(token, 'GET', `${base}/git/blobs/${picked[i].sha}`);
+      const encoding = blob?.encoding === 'base64' ? 'base64' : 'utf8';
+      entries[i] = { path: picked[i].path, data: Buffer.from(String(blob?.content || ''), encoding) };
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(BLOB_CONCURRENCY, picked.length) }, worker));
+  return { sha, entries, skipped };
+}
+
 // ---------- OAuth app ----------
 
 function oauthConfig() {
@@ -306,6 +353,7 @@ module.exports = {
   getRepo,
   createRepo,
   pushFiles,
+  fetchRepoFiles,
   oauthConfig,
   authorizeUrl,
   exchangeCode,

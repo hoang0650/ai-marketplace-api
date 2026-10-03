@@ -421,3 +421,5 @@ module.exports = router;
 module.exports.allowedReturn = allowedReturn;
 module.exports.hasBuild = hasBuild;
 module.exports.stateKey = stateKey;
+module.exports.useConnection = useConnection;
+module.exports.guard = guard;

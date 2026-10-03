@@ -13,7 +13,9 @@ const files = require('../utils/builder/files');
 const { readZip, isZip } = require('../utils/builder/zip');
 const { previewResponse } = require('../utils/builder/preview');
 const tpl = require('../utils/builder/templates');
+const gh = require('../utils/builder/github');
 const { publicProject, errorBody, newPreviewToken, maxProjects } = require('./builder');
+const { useConnection, guard } = require('./builder-git');
 
 /**
  * Seller templates for AI App Builder. A template is a regular Product (category
@@ -26,6 +28,8 @@ const router = express.Router();
 const TEMPLATE_CATEGORIES = Object.keys(TEMPLATE_CATEGORY_KIND);
 const UPLOAD_MAX_BYTES = 8 * 1024 * 1024;
 const UPLOAD_MAX_FILES = 300;
+const REPO_DIR_RE = /^[A-Za-z0-9_.\- /]{1,200}$/;
+const importing = new Set();
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -64,7 +68,22 @@ function isOwner(user, product) {
   return !!user && (user.role === 'admin' || String(product.creator) === String(user._id));
 }
 
-function templateMeta(product, template, { access = false, paths = false } = {}) {
+/** Seller-only: where the files were imported from (the repo may be private). */
+function gitSource(template) {
+  const s = template?.source;
+  if (!s?.repo) return null;
+  return {
+    provider: s.provider || 'github',
+    repo: s.repo,
+    branch: s.branch || '',
+    path: s.path || '',
+    commitSha: s.commitSha || '',
+    repoUrl: s.repoUrl || `https://github.com/${s.repo}`,
+    syncedAt: s.syncedAt || null,
+  };
+}
+
+function templateMeta(product, template, { access = false, paths = false, git = false } = {}) {
   const list = template?.files || [];
   return {
     productId: String(product._id),
@@ -78,6 +97,7 @@ function templateMeta(product, template, { access = false, paths = false } = {})
     updatedAt: template?.updatedAt || null,
     access,
     ...(paths ? { paths: list.map((f) => f.path) } : {}),
+    ...(git ? { git: gitSource(template) } : {}),
   };
 }
 
@@ -143,13 +163,13 @@ router.get(
     if (req.user.role !== 'admin' || req.query.all !== 'true') filter.creator = req.user._id;
     const products = await Product.find(filter).sort({ updatedAt: -1 }).limit(200).lean();
     const templates = await BuilderTemplate.find({ product: { $in: products.map((p) => p._id) } })
-      .select('product version demoEnabled useCount updatedAt files.path')
+      .select('product version demoEnabled useCount updatedAt files.path source')
       .lean();
     const byProduct = new Map(templates.map((t) => [String(t.product), t]));
     res.json({
       templates: products.map((p) => ({
         product: { ...mapProduct(p), moderationStatus: p.moderationStatus || 'active', published: p.published !== false },
-        template: templateMeta(p, byProduct.get(String(p._id)), { access: true, paths: true }),
+        template: templateMeta(p, byProduct.get(String(p._id)), { access: true, paths: true, git: true }),
       })),
     });
   })
@@ -168,6 +188,7 @@ router.get(
       template: templateMeta(product, template, {
         access: await tpl.hasTemplateAccess(req.user, product),
         paths: true,
+        git: owner,
       }),
       isOwner: owner,
     });
@@ -176,14 +197,67 @@ router.get(
 
 // ---------- seller: files + settings ----------
 
-async function entriesFromRequest(req, kind) {
+function cleanRepoDir(raw) {
+  const dir = String(raw || '').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+  if (!dir) return '';
+  if (!REPO_DIR_RE.test(dir) || dir.split('/').some((s) => !s.trim() || s === '.' || s === '..')) {
+    throw httpError(400, 'GIT_PATH_INVALID');
+  }
+  return dir;
+}
+
+/** fromGit: { repo: "owner/name", branch?, path? } or { sync: true } to re-import the saved source. */
+async function gitEntries(req, kind, template) {
+  const body = req.body.fromGit;
+  const saved = template?.source?.repo ? template.source : null;
+  const sync = body === true || body?.sync === true;
+  if (sync && !saved) throw httpError(400, 'GIT_REPO_REQUIRED');
+  const src = sync ? saved : body || {};
+  const ref = gh.parseFullName(src.repo);
+  if (!ref) throw httpError(400, 'GIT_REPO_INVALID');
+  const wanted = String(src.branch || '').trim();
+  if (wanted && !gh.validBranch(wanted)) throw httpError(400, 'GIT_BRANCH_INVALID');
+  const dir = cleanRepoDir(src.path);
+  const lim = files.limits();
+  const classify = (path, size) => {
+    if (path.split('/').some((s) => s.startsWith('.')) || tpl.JUNK_RE.test(path)) return 'junk';
+    if (!files.cleanPath(kind, path)) return 'type';
+    return size > lim.fileMaxBytes ? 'size' : '';
+  };
+
+  const { conn, token } = await useConnection(req.user._id);
+  const out = await guard(conn, async () => {
+    const info = await gh.getRepo(token, ref.owner, ref.repo);
+    const branch = wanted || info.default_branch || 'main';
+    const owner = info.owner?.login || ref.owner;
+    const pulled = await gh.fetchRepoFiles(token, { owner, repo: info.name, ref: branch, dir, classify, maxFiles: lim.maxFiles });
+    return { ...pulled, branch, fullName: info.full_name || `${owner}/${info.name}`, htmlUrl: info.html_url };
+  });
+  return {
+    entries: out.entries,
+    skipped: out.skipped,
+    source: {
+      provider: 'github',
+      repo: out.fullName,
+      branch: out.branch,
+      path: dir,
+      commitSha: out.sha,
+      repoUrl: out.htmlUrl,
+      syncedAt: new Date(),
+    },
+  };
+}
+
+/** → { entries, skipped (dropped before normalising), source (git only) } */
+async function entriesFromRequest(req, kind, template) {
+  if (req.body?.fromGit) return gitEntries(req, kind, template);
   const fromProject = String(req.body?.fromProject || '').trim();
   if (fromProject) {
     if (!mongoose.isValidObjectId(fromProject)) throw httpError(404, 'PROJECT_NOT_FOUND');
     const project = await BuilderProject.findOne({ _id: fromProject, owner: req.user._id }).select('kind files').lean();
     if (!project) throw httpError(404, 'PROJECT_NOT_FOUND');
     if (project.kind !== kind) throw httpError(400, 'TEMPLATE_KIND_MISMATCH');
-    return project.files.map((f) => ({ path: f.path, data: f.content }));
+    return { entries: project.files.map((f) => ({ path: f.path, data: f.content })), skipped: [] };
   }
   const uploads = req.files || [];
   if (!uploads.length) throw httpError(400, 'TEMPLATE_EMPTY');
@@ -192,12 +266,13 @@ async function entriesFromRequest(req, kind) {
     if (isZip(f.buffer)) entries.push(...readZip(f.buffer));
     else entries.push({ path: f.originalname, data: f.buffer });
   }
-  return entries;
+  return { entries, skipped: [] };
 }
 
 /**
  * PUT /v1/builder/templates/:productId/files — replaces the template's files.
- * multipart `files` (a .zip, or many files with folder-relative names) or { fromProject }.
+ * multipart `files` (a .zip, or many files with folder-relative names), { fromProject }
+ * or { fromGit } (seller's linked GitHub; remembered so later imports can just sync).
  */
 router.put(
   '/:productId/files',
@@ -207,15 +282,33 @@ router.put(
     const product = await loadTemplateProduct(req.params.productId);
     if (!isOwner(req.user, product)) throw httpError(403, 'TEMPLATE_FORBIDDEN');
     const kind = tpl.templateKind(product.category);
-    const { files: clean, skipped } = tpl.normalizeUpload(kind, await entriesFromRequest(req, kind));
-    const template =
-      (await BuilderTemplate.findOne({ product: product._id })) ||
-      new BuilderTemplate({ product: product._id, owner: product.creator, kind });
-    template.kind = kind;
-    template.files = clean;
-    template.version += 1;
-    await template.save();
-    res.json({ template: templateMeta(product, template, { access: true, paths: true }), skipped });
+    const key = String(product._id);
+    if (importing.has(key)) throw httpError(409, 'TEMPLATE_BUSY');
+    importing.add(key);
+    try {
+      const template =
+        (await BuilderTemplate.findOne({ product: product._id })) ||
+        new BuilderTemplate({ product: product._id, owner: product.creator, kind });
+      const { entries, skipped: dropped, source } = await entriesFromRequest(req, kind, template);
+      let normalized;
+      try {
+        normalized = tpl.normalizeUpload(kind, entries);
+      } catch (err) {
+        if (dropped.length && err.extra) err.extra.skipped = [...dropped, ...(err.extra.skipped || [])];
+        throw err;
+      }
+      template.kind = kind;
+      template.files = normalized.files;
+      template.source = source || undefined;
+      template.version += 1;
+      await template.save();
+      res.json({
+        template: templateMeta(product, template, { access: true, paths: true, git: true }),
+        skipped: [...dropped, ...normalized.skipped],
+      });
+    } finally {
+      importing.delete(key);
+    }
   })
 );
 
@@ -229,8 +322,9 @@ router.patch(
     const template = await BuilderTemplate.findOne({ product: product._id });
     if (!template) throw httpError(404, 'TEMPLATE_EMPTY');
     if (req.body?.demoEnabled !== undefined) template.demoEnabled = !!req.body.demoEnabled;
+    if (req.body?.unlinkGit) template.source = undefined;
     await template.save();
-    res.json({ template: templateMeta(product, template, { access: true, paths: true }) });
+    res.json({ template: templateMeta(product, template, { access: true, paths: true, git: true }) });
   })
 );
 

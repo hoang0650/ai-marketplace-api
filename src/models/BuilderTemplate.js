@@ -23,6 +23,16 @@ const schema = new mongoose.Schema(
     /** Public sandboxed live demo on the product page (source is visible to visitors). */
     demoEnabled: { type: Boolean, default: true },
     useCount: { type: Number, default: 0, min: 0 },
+    /** Set when the files were imported from the seller's GitHub repo; "sync" re-imports from here. */
+    source: {
+      provider: { type: String, enum: ['github'] },
+      repo: { type: String, maxlength: 140 },
+      branch: { type: String, maxlength: 100 },
+      path: { type: String, maxlength: 200 },
+      commitSha: { type: String, maxlength: 40 },
+      repoUrl: { type: String, maxlength: 300 },
+      syncedAt: Date,
+    },
   },
   { timestamps: true }
 );

@@ -231,3 +231,57 @@ test('listRepos keeps only pushable, non-archived repositories', async () => {
   const repos = await gh.listRepos('tok');
   assert.deepEqual(repos.map((r) => r.fullName), ['nova/a']);
 });
+
+test('fetchRepoFiles: reads only accepted files under the folder, reports skipped ones', async () => {
+  const b64 = (s) => Buffer.from(s, 'utf8').toString('base64');
+  const calls = fakeGithub({
+    'GET /repos/nova/site/commits/main': () => reply(200, { sha: 'c1', commit: { tree: { sha: 't1' } } }),
+    'GET /repos/nova/site/git/trees/t1?recursive=1': () =>
+      reply(200, {
+        truncated: false,
+        tree: [
+          { type: 'blob', path: 'README.md', sha: 'r0', size: 10 },
+          { type: 'tree', path: 'web', sha: 'd1' },
+          { type: 'blob', path: 'web/index.html', sha: 'b1', size: 20 },
+          { type: 'blob', path: 'web/css/a.css', sha: 'b2', size: 8 },
+          { type: 'blob', path: 'web/logo.png', sha: 'b3', size: 900 },
+          { type: 'blob', path: 'web/.env', sha: 'b4', size: 5 },
+          { type: 'blob', path: 'web/node_modules/x/index.js', sha: 'b5', size: 5 },
+        ],
+      }),
+    'GET /repos/nova/site/git/blobs/b1': () => reply(200, { encoding: 'base64', content: b64('<h1>hi</h1>') }),
+    'GET /repos/nova/site/git/blobs/b2': () => reply(200, { encoding: 'base64', content: b64('h1{}') }),
+  });
+  const classify = (path) => {
+    if (path.split('/').some((s) => s.startsWith('.')) || /node_modules/.test(path)) return 'junk';
+    return /\.(html|css)$/.test(path) ? '' : 'type';
+  };
+  const out = await gh.fetchRepoFiles('tok', { owner: 'nova', repo: 'site', ref: 'main', dir: 'web', classify, maxFiles: 60 });
+  assert.equal(out.sha, 'c1');
+  assert.deepEqual(
+    out.entries.map((e) => [e.path, e.data.toString('utf8')]),
+    [['index.html', '<h1>hi</h1>'], ['css/a.css', 'h1{}']]
+  );
+  assert.deepEqual(out.skipped, [{ path: 'logo.png', reason: 'type' }]);
+  assert.ok(!calls.some((c) => /blobs\/(b3|b4|b5|r0)/.test(c.path)));
+
+  await assert.rejects(
+    gh.fetchRepoFiles('tok', { owner: 'nova', repo: 'site', ref: 'main', dir: 'missing', classify }),
+    (err) => err.code === 'GIT_PATH_NOT_FOUND'
+  );
+  await assert.rejects(
+    gh.fetchRepoFiles('tok', { owner: 'nova', repo: 'site', ref: 'main', dir: 'web', classify, maxFiles: 1 }),
+    (err) => err.code === 'PROJECT_TOO_MANY_FILES'
+  );
+});
+
+test('fetchRepoFiles: truncated trees ask for a sub folder', async () => {
+  fakeGithub({
+    'GET /repos/nova/big/commits/main': () => reply(200, { sha: 'c1', commit: { tree: { sha: 't1' } } }),
+    'GET /repos/nova/big/git/trees/t1?recursive=1': () => reply(200, { truncated: true, tree: [] }),
+  });
+  await assert.rejects(
+    gh.fetchRepoFiles('tok', { owner: 'nova', repo: 'big', ref: 'main', classify: () => '' }),
+    (err) => err.code === 'GIT_IMPORT_TOO_LARGE'
+  );
+});

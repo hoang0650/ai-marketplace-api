@@ -110,6 +110,7 @@ function demoVisible(product, template) {
 
 module.exports = {
   ENTRY,
+  JUNK_RE,
   templateKind,
   isTemplateCategory,
   stripCommonRoot,

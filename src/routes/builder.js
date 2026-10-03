@@ -81,6 +81,10 @@ const MESSAGES = {
   GIT_OAUTH_DENIED: 'Bạn đã huỷ cấp quyền GitHub.',
   GIT_CONNECT_EXPIRED: 'Phiên kết nối GitHub đã hết hạn hoặc không thuộc tài khoản này. Hãy kết nối lại.',
   GIT_RETURN_INVALID: 'Địa chỉ quay lại không được phép.',
+  GIT_PATH_INVALID: 'Thư mục trong repo không hợp lệ.',
+  GIT_PATH_NOT_FOUND: 'Không tìm thấy thư mục này trong repo (hoặc thư mục không có file).',
+  GIT_IMPORT_TOO_LARGE: 'Repo quá lớn để đọc một lần. Hãy chọn thư mục con chứa template.',
+  TEMPLATE_BUSY: 'Template đang được cập nhật file. Đợi xong rồi thử lại.',
 };
 
 function httpError(status, code, extra) {
