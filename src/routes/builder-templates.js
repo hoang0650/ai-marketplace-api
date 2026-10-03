@@ -4,6 +4,7 @@ const multer = require('multer');
 const Product = require('../models/Product');
 const BuilderProject = require('../models/BuilderProject');
 const BuilderTemplate = require('../models/BuilderTemplate');
+const TemplateBuild = require('../models/TemplateBuild');
 const { authenticate, optionalAuth } = require('../middleware/auth');
 const { mapProduct } = require('../utils/mappers');
 const { catalogVisibleFilter, isCatalogVisible } = require('../utils/moderation');
@@ -14,6 +15,7 @@ const { readZip, isZip } = require('../utils/builder/zip');
 const { previewResponse } = require('../utils/builder/preview');
 const tpl = require('../utils/builder/templates');
 const gh = require('../utils/builder/github');
+const { runBuild, createLog } = require('../utils/builder/template-build');
 const { publicProject, errorBody, newPreviewToken, maxProjects } = require('./builder');
 const { useConnection, guard } = require('./builder-git');
 
@@ -29,6 +31,7 @@ const TEMPLATE_CATEGORIES = Object.keys(TEMPLATE_CATEGORY_KIND);
 const UPLOAD_MAX_BYTES = 8 * 1024 * 1024;
 const UPLOAD_MAX_FILES = 300;
 const REPO_DIR_RE = /^[A-Za-z0-9_.\- /]{1,200}$/;
+const BUILD_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const importing = new Set();
 
 const upload = multer({
@@ -206,18 +209,44 @@ function cleanRepoDir(raw) {
   return dir;
 }
 
-/** fromGit: { repo: "owner/name", branch?, path? } or { sync: true } to re-import the saved source. */
-async function gitEntries(req, kind, template) {
-  const body = req.body.fromGit;
-  const saved = template?.source?.repo ? template.source : null;
-  const sync = body === true || body?.sync === true;
-  if (sync && !saved) throw httpError(400, 'GIT_REPO_REQUIRED');
-  const src = sync ? saved : body || {};
-  const ref = gh.parseFullName(src.repo);
+function describe(err) {
+  return errorBody(err).message;
+}
+
+/** { repo: "owner/name", branch?, path? } → validated pick (bad input is a 400, not a failed build). */
+function gitPick(src) {
+  const ref = gh.parseFullName(src?.repo);
   if (!ref) throw httpError(400, 'GIT_REPO_INVALID');
-  const wanted = String(src.branch || '').trim();
-  if (wanted && !gh.validBranch(wanted)) throw httpError(400, 'GIT_BRANCH_INVALID');
-  const dir = cleanRepoDir(src.path);
+  const branch = String(src.branch || '').trim();
+  if (branch && !gh.validBranch(branch)) throw httpError(400, 'GIT_BRANCH_INVALID');
+  return { ...ref, branch, dir: cleanRepoDir(src.path) };
+}
+
+function publicBuild(b) {
+  const ok = b.status === 'success';
+  return {
+    id: String(b._id),
+    kind: b.kind,
+    status: b.status,
+    source: b.source?.repo ? { ...b.source } : null,
+    log: b.log || [],
+    fileCount: (b.files || []).length,
+    paths: (b.files || []).map((f) => f.path),
+    skipped: b.skipped || [],
+    durationMs: b.durationMs || 0,
+    createdAt: b.createdAt || null,
+    previewUrl: ok ? `${apiBase()}/v1/builder/templates/builds/${b._id}/${b.previewToken}/` : '',
+    productId: b.product ? String(b.product) : null,
+  };
+}
+
+/** Fetches the repo and runs the template checks; always stores a TemplateBuild with its log. */
+async function runGitBuild(user, kind, src) {
+  const pick = gitPick(src);
+  const { conn, token } = await useConnection(user._id);
+  const log = createLog();
+  const where = `${pick.owner}/${pick.repo}${pick.branch ? `@${pick.branch}` : ''}${pick.dir ? ` /${pick.dir}` : ''}`;
+  log.info(`Nguồn: github.com/${where}`);
   const lim = files.limits();
   const classify = (path, size) => {
     if (path.split('/').some((s) => s.startsWith('.')) || tpl.JUNK_RE.test(path)) return 'junk';
@@ -225,32 +254,62 @@ async function gitEntries(req, kind, template) {
     return size > lim.fileMaxBytes ? 'size' : '';
   };
 
-  const { conn, token } = await useConnection(req.user._id);
-  const out = await guard(conn, async () => {
-    const info = await gh.getRepo(token, ref.owner, ref.repo);
-    const branch = wanted || info.default_branch || 'main';
-    const owner = info.owner?.login || ref.owner;
-    const pulled = await gh.fetchRepoFiles(token, { owner, repo: info.name, ref: branch, dir, classify, maxFiles: lim.maxFiles });
-    return { ...pulled, branch, fullName: info.full_name || `${owner}/${info.name}`, htmlUrl: info.html_url };
+  let fetched = null;
+  try {
+    fetched = await guard(conn, async () => {
+      const info = await gh.getRepo(token, pick.owner, pick.repo);
+      const branch = pick.branch || info.default_branch || 'main';
+      const owner = info.owner?.login || pick.owner;
+      log.info(`Đang tải branch ${branch}${pick.dir ? `, thư mục /${pick.dir}` : ''}…`);
+      const pulled = await gh.fetchRepoFiles(token, { owner, repo: info.name, ref: branch, dir: pick.dir, classify, maxFiles: lim.maxFiles });
+      log.info(`Commit ${pulled.sha.slice(0, 7)}${pulled.message ? `: ${pulled.message}` : ''}`);
+      return { ...pulled, branch, fullName: info.full_name || `${owner}/${info.name}`, htmlUrl: info.html_url };
+    });
+  } catch (err) {
+    if (err?.code === 'GIT_TOKEN_INVALID' || !err?.code) throw err;
+    log.error(describe(err));
+  }
+
+  const result = runBuild({ kind, entries: fetched ? fetched.entries : null, dropped: fetched?.skipped || [], describe }, log);
+  return TemplateBuild.create({
+    owner: user._id,
+    kind,
+    status: result.ok ? 'success' : 'failed',
+    source: fetched
+      ? {
+          provider: 'github',
+          repo: fetched.fullName,
+          branch: fetched.branch,
+          path: pick.dir,
+          commitSha: fetched.sha,
+          commitMessage: fetched.message,
+          repoUrl: fetched.htmlUrl,
+        }
+      : { provider: 'github', repo: `${pick.owner}/${pick.repo}`, branch: pick.branch, path: pick.dir },
+    log: result.log,
+    files: result.files,
+    skipped: result.skipped.slice(0, 200),
+    durationMs: result.durationMs,
+    previewToken: newPreviewToken(),
+    expiresAt: new Date(Date.now() + BUILD_TTL_MS),
   });
-  return {
-    entries: out.entries,
-    skipped: out.skipped,
-    source: {
-      provider: 'github',
-      repo: out.fullName,
-      branch: out.branch,
-      path: dir,
-      commitSha: out.sha,
-      repoUrl: out.htmlUrl,
-      syncedAt: new Date(),
-    },
-  };
 }
 
-/** → { entries, skipped (dropped before normalising), source (git only) } */
-async function entriesFromRequest(req, kind, template) {
-  if (req.body?.fromGit) return gitEntries(req, kind, template);
+/** Copies a successful build onto the listing's template (new version, remembered source). */
+async function applyBuild(product, template, build) {
+  template.kind = build.kind;
+  template.files = build.files.map((f) => ({ path: f.path, content: f.content }));
+  const plain = typeof build.toObject === 'function' ? build.toObject() : build;
+  const source = { ...(plain.source || {}) };
+  delete source.commitMessage;
+  template.source = source.repo ? { ...source, syncedAt: new Date() } : undefined;
+  template.version += 1;
+  await template.save();
+  await TemplateBuild.updateOne({ _id: build._id }, { $set: { product: product._id } });
+}
+
+/** → { entries, skipped } from an upload or a builder project. */
+async function entriesFromRequest(req, kind) {
   const fromProject = String(req.body?.fromProject || '').trim();
   if (fromProject) {
     if (!mongoose.isValidObjectId(fromProject)) throw httpError(404, 'PROJECT_NOT_FOUND');
@@ -269,10 +328,77 @@ async function entriesFromRequest(req, kind, template) {
   return { entries, skipped: [] };
 }
 
+// ---------- builds (GitHub → checks → publish) ----------
+
+/** Sandboxed preview of a successful build, so sellers can look before publishing. */
+router.get(/^\/builds\/([a-f0-9]{24})\/([A-Za-z0-9_-]{16,64})(?:\/(.*))?$/, async (req, res, next) => {
+  try {
+    const [id, token, rest] = [req.params[0], req.params[1], req.params[2]];
+    if (rest === undefined) return res.redirect(302, `${req.baseUrl}/builds/${id}/${token}/`);
+    const build = await TemplateBuild.findById(id).lean();
+    if (!build || build.status !== 'success' || build.previewToken !== token) {
+      return res.status(404).type('text/plain').send('Build not found');
+    }
+    const out = previewResponse({ name: build.source?.repo || 'Template build', kind: build.kind, files: build.files }, rest);
+    res.status(out.status).set(out.headers).send(out.body);
+  } catch (err) {
+    next(err);
+  }
+});
+
 /**
- * PUT /v1/builder/templates/:productId/files — replaces the template's files.
- * multipart `files` (a .zip, or many files with folder-relative names), { fromProject }
- * or { fromGit } (seller's linked GitHub; remembered so later imports can just sync).
+ * POST /v1/builder/templates/builds
+ * body { kind: 'web'|'app', fromGit: { repo, branch?, path? } } — new listing, or
+ * { productId, fromGit? } — rebuild an existing listing (defaults to its saved GitHub source).
+ * Always 201 with the build; `status: 'failed'` carries the log explaining what to fix.
+ */
+router.post(
+  '/builds',
+  authenticate,
+  wrap(async (req, res) => {
+    const body = req.body || {};
+    let kind = String(body.kind || '');
+    let src = body.fromGit;
+    if (body.productId) {
+      const product = await loadTemplateProduct(String(body.productId));
+      if (!isOwner(req.user, product)) throw httpError(403, 'TEMPLATE_FORBIDDEN');
+      kind = tpl.templateKind(product.category);
+      if (!src) {
+        const saved = await BuilderTemplate.findOne({ product: product._id }).select('source').lean();
+        if (!saved?.source?.repo) throw httpError(400, 'GIT_REPO_REQUIRED');
+        src = saved.source;
+      }
+    }
+    if (!['web', 'app'].includes(kind)) throw httpError(400, 'PROJECT_KIND_INVALID');
+    const key = `user:${req.user._id}`;
+    if (importing.has(key)) throw httpError(409, 'TEMPLATE_BUSY');
+    importing.add(key);
+    try {
+      const build = await runGitBuild(req.user, kind, src);
+      res.status(201).json({ build: publicBuild(build) });
+    } finally {
+      importing.delete(key);
+    }
+  })
+);
+
+/** GET /v1/builder/templates/builds/:id — the seller's own build (log + status). */
+router.get(
+  '/builds/:id',
+  authenticate,
+  wrap(async (req, res) => {
+    if (!mongoose.isValidObjectId(req.params.id)) throw httpError(404, 'TEMPLATE_BUILD_NOT_FOUND');
+    const build = await TemplateBuild.findOne({ _id: req.params.id, owner: req.user._id }).lean();
+    if (!build) throw httpError(404, 'TEMPLATE_BUILD_NOT_FOUND');
+    res.json({ build: publicBuild(build) });
+  })
+);
+
+/**
+ * PUT /v1/builder/templates/:productId/files — replaces the template's files from
+ * multipart `files` (a .zip, or many files with folder-relative names), { fromProject },
+ * { fromBuild } (a successful build) or { fromGit } (build now; { sync: true } = saved source).
+ * A failed GitHub build answers 422 TEMPLATE_BUILD_FAILED with `build` (log) and changes nothing.
  */
 router.put(
   '/:productId/files',
@@ -289,17 +415,34 @@ router.put(
       const template =
         (await BuilderTemplate.findOne({ product: product._id })) ||
         new BuilderTemplate({ product: product._id, owner: product.creator, kind });
-      const { entries, skipped: dropped, source } = await entriesFromRequest(req, kind, template);
-      let normalized;
-      try {
-        normalized = tpl.normalizeUpload(kind, entries);
-      } catch (err) {
-        if (dropped.length && err.extra) err.extra.skipped = [...dropped, ...(err.extra.skipped || [])];
-        throw err;
+      const body = req.body || {};
+
+      if (body.fromBuild || body.fromGit) {
+        let build;
+        if (body.fromBuild) {
+          if (!mongoose.isValidObjectId(String(body.fromBuild))) throw httpError(404, 'TEMPLATE_BUILD_NOT_FOUND');
+          build = await TemplateBuild.findOne({ _id: String(body.fromBuild), owner: req.user._id });
+          if (!build) throw httpError(404, 'TEMPLATE_BUILD_NOT_FOUND');
+        } else {
+          const sync = body.fromGit === true || body.fromGit?.sync === true;
+          if (sync && !template.source?.repo) throw httpError(400, 'GIT_REPO_REQUIRED');
+          build = await runGitBuild(req.user, kind, sync ? template.source : body.fromGit);
+        }
+        if (build.kind !== kind) throw httpError(400, 'TEMPLATE_KIND_MISMATCH');
+        if (build.status !== 'success') throw httpError(422, 'TEMPLATE_BUILD_FAILED', { build: publicBuild(build) });
+        await applyBuild(product, template, build);
+        return res.json({
+          template: templateMeta(product, template, { access: true, paths: true, git: true }),
+          skipped: build.skipped || [],
+          build: publicBuild(build),
+        });
       }
+
+      const { entries, skipped: dropped } = await entriesFromRequest(req, kind);
+      const normalized = tpl.normalizeUpload(kind, entries);
       template.kind = kind;
       template.files = normalized.files;
-      template.source = source || undefined;
+      template.source = undefined;
       template.version += 1;
       await template.save();
       res.json({

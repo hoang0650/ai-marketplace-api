@@ -85,6 +85,8 @@ const MESSAGES = {
   GIT_PATH_NOT_FOUND: 'Không tìm thấy thư mục này trong repo (hoặc thư mục không có file).',
   GIT_IMPORT_TOO_LARGE: 'Repo quá lớn để đọc một lần. Hãy chọn thư mục con chứa template.',
   TEMPLATE_BUSY: 'Template đang được cập nhật file. Đợi xong rồi thử lại.',
+  TEMPLATE_BUILD_FAILED: 'Build template thất bại — xem log bên dưới, sửa trong repo rồi build lại.',
+  TEMPLATE_BUILD_NOT_FOUND: 'Không tìm thấy bản build (bản build chỉ giữ 7 ngày). Hãy bấm Build lại.',
 };
 
 function httpError(status, code, extra) {

@@ -38,8 +38,152 @@ function securityHeaders(isDocument) {
   return headers;
 }
 
+/**
+ * Device emulation when the builder shows the preview inside a phone/tablet frame (?device=…):
+ * touch cursor, drag-to-scroll with inertia, no scrollbars/text selection, and the colours at the
+ * top/bottom edge are posted to the parent so the status bar / home indicator blend in.
+ * window.name keeps the device across in-frame navigations (the sandbox has no storage).
+ */
+const EMULATOR = `(function () {
+  var m = /[?&]device=(iphone|android|tablet)/.exec(location.search);
+  var dev = m ? m[1] : '';
+  try {
+    if (dev) window.name = 'aim-device:' + dev;
+    else if (/^aim-device:(iphone|android|tablet)$/.test(window.name)) dev = window.name.slice(11);
+  } catch (e) {}
+  window.__aimDevice = dev;
+  if (!dev || window.parent === window) return;
+
+  function post(data) {
+    data.source = 'aim-preview';
+    try { window.parent.postMessage(data, '*'); } catch (e) {}
+  }
+  var svg = "<svg xmlns='http://www.w3.org/2000/svg' width='28' height='28'><circle cx='14' cy='14' r='11' fill='rgba(40,40,40,0.25)' stroke='rgba(255,255,255,0.9)' stroke-width='2'/></svg>";
+  var cursor = 'url("data:image/svg+xml,' + encodeURIComponent(svg) + '") 14 14, pointer';
+  var css = [
+    'html, body { overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }',
+    '* { scrollbar-width: none !important; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }',
+    '*::-webkit-scrollbar { display: none !important; width: 0 !important; height: 0 !important; }',
+    'html, body, body * { cursor: ' + cursor + ' !important; }',
+    'input, textarea, [contenteditable], [contenteditable] * { -webkit-user-select: text; user-select: text; cursor: text !important; }',
+    'img, a { -webkit-user-drag: none; }',
+  ].join('');
+
+  function alpha(c) {
+    if (!c || c === 'transparent') return 0;
+    var p = c.match(/[0-9.]+/g);
+    return !p ? 0 : p.length > 3 ? parseFloat(p[3]) : 1;
+  }
+  function bgAt(y) {
+    for (var el = document.elementFromPoint(window.innerWidth / 2, y); el; el = el.parentElement) {
+      var c = getComputedStyle(el).backgroundColor;
+      if (alpha(c) >= 0.5) return c;
+    }
+    return 'rgb(255, 255, 255)';
+  }
+  var last = '';
+  function sample() {
+    if (!document.body) return;
+    var top = bgAt(1);
+    var bottom = bgAt(window.innerHeight - 2);
+    if (top + '|' + bottom === last) return;
+    last = top + '|' + bottom;
+    post({ type: 'chrome', top: top, bottom: bottom });
+  }
+
+  function scrollable(el, axis) {
+    for (; el && el !== document.body && el !== document.documentElement; el = el.parentElement) {
+      var s = getComputedStyle(el);
+      if (axis === 'y' && /(auto|scroll)/.test(s.overflowY) && el.scrollHeight > el.clientHeight + 1) return el;
+      if (axis === 'x' && /(auto|scroll)/.test(s.overflowX) && el.scrollWidth > el.clientWidth + 1) return el;
+    }
+    var se = document.scrollingElement || document.documentElement;
+    if (axis === 'y') return se.scrollHeight > se.clientHeight + 1 ? se : null;
+    return se.scrollWidth > se.clientWidth + 1 ? se : null;
+  }
+  var drag = null;
+  var glide = 0;
+  var swallowClick = false;
+  function stopGlide() { if (glide) cancelAnimationFrame(glide); glide = 0; }
+  function move(d, delta) {
+    if (d.axis === 'y') d.el.scrollTop += delta;
+    else d.el.scrollLeft += delta;
+  }
+
+  function boot() {
+    var st = document.createElement('style');
+    st.textContent = css;
+    (document.head || document.documentElement).appendChild(st);
+
+    window.addEventListener('pointerdown', function (e) {
+      stopGlide();
+      if (e.pointerType !== 'mouse' || e.button !== 0) return;
+      if (e.target.closest && e.target.closest('input, textarea, select, [contenteditable]')) return;
+      drag = { x: e.clientX, y: e.clientY, t: performance.now(), v: 0, id: e.pointerId, target: e.target, el: null };
+    }, true);
+    window.addEventListener('pointermove', function (e) {
+      if (!drag || e.pointerId !== drag.id) return;
+      var dx = e.clientX - drag.x;
+      var dy = e.clientY - drag.y;
+      if (!drag.el) {
+        if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
+        drag.axis = Math.abs(dy) >= Math.abs(dx) ? 'y' : 'x';
+        drag.el = scrollable(drag.target, drag.axis);
+        if (!drag.el) { drag = null; return; }
+        try { document.documentElement.setPointerCapture(e.pointerId); } catch (err) {}
+      }
+      var now = performance.now();
+      var delta = -(drag.axis === 'y' ? dy : dx);
+      move(drag, delta);
+      drag.v = 0.7 * (delta / Math.max(1, now - drag.t)) + 0.3 * drag.v;
+      drag.x = e.clientX;
+      drag.y = e.clientY;
+      drag.t = now;
+      e.preventDefault();
+    }, true);
+    function release(e) {
+      if (!drag || e.pointerId !== drag.id) return;
+      var d = drag;
+      drag = null;
+      if (!d.el) return;
+      swallowClick = true;
+      setTimeout(function () { swallowClick = false; }, 60);
+      if (performance.now() - d.t > 80) return;
+      var v = d.v * 16;
+      (function step() {
+        v *= 0.95;
+        if (Math.abs(v) < 0.4) { glide = 0; return; }
+        move(d, v);
+        glide = requestAnimationFrame(step);
+      })();
+    }
+    window.addEventListener('pointerup', release, true);
+    window.addEventListener('pointercancel', release, true);
+    window.addEventListener('click', function (e) {
+      if (!swallowClick) return;
+      swallowClick = false;
+      e.preventDefault();
+      e.stopPropagation();
+    }, true);
+    window.addEventListener('wheel', stopGlide, { passive: true, capture: true });
+    window.addEventListener('dragstart', function (e) { e.preventDefault(); }, true);
+
+    var queued = false;
+    window.addEventListener('scroll', function () {
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(function () { queued = false; sample(); });
+    }, true);
+    setInterval(sample, 500);
+    sample();
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+  else boot();
+})();`;
+
 /** Forwards runtime errors to the builder page (postMessage) and shows them when opened standalone. */
 const REPORTER = `<script>
+${EMULATOR}
 (function () {
   var sent = 0;
   function post(type, message) {
@@ -132,11 +276,70 @@ try {
   RN.Alert.alert = (title, message) => window.alert([title, message].filter(Boolean).join('\\n\\n'));
 } catch (e) {}
 
+const device = window.__aimDevice || '';
+const platform = device === 'android' || (!device && /android/i.test(navigator.userAgent)) ? 'android' : 'ios';
+const FONT = platform === 'android'
+  ? 'Roboto, "Noto Sans", system-ui, sans-serif'
+  : '-apple-system, "SF Pro Text", Inter, system-ui, sans-serif';
+document.body.style.fontFamily = FONT;
+
+const withFont = (Base, name) => {
+  const C = React.forwardRef((props, ref) => React.createElement(Base, { ...props, ref, style: [{ fontFamily: FONT }, props.style] }));
+  C.displayName = name;
+  if (Base.State) C.State = Base.State;
+  return C;
+};
+
+const bar = { style: 'auto', background: '' };
+const postBar = (next) => {
+  Object.assign(bar, next);
+  try {
+    if (window.parent !== window) window.parent.postMessage({ source: 'aim-preview', type: 'statusbar', ...bar }, '*');
+  } catch (e) {}
+};
+const barStyle = (s) => (s === 'light-content' || s === 'light' ? 'light' : s === 'dark-content' || s === 'dark' ? 'dark' : 'auto');
+function StatusBar(props) {
+  const style = barStyle(props.style || props.barStyle);
+  const background = props.backgroundColor || '';
+  React.useEffect(() => postBar({ style, background }), [style, background]);
+  return null;
+}
+Object.assign(StatusBar, {
+  setBarStyle: (s) => postBar({ style: barStyle(s) }),
+  setBackgroundColor: (c) => postBar({ background: c || '' }),
+  setHidden: () => {},
+  setTranslucent: () => {},
+  setNetworkActivityIndicatorVisible: () => {},
+  currentHeight: 0,
+});
+
+const Platform = {
+  ...RN.Platform,
+  OS: platform,
+  Version: platform === 'android' ? 34 : '17.0',
+  isPad: device === 'tablet',
+  isTV: false,
+  select: (o) => (o && platform in o ? o[platform] : o && 'native' in o ? o.native : o && o.default),
+};
+
 const passthrough = ({ children }) => children ?? null;
 const externals = {
   react: asModule(React),
-  'react-native': asModule(RN),
-  'expo-status-bar': { __esModule: true, StatusBar: () => null, default: () => null },
+  'react-native': asModule({
+    ...RN,
+    Platform,
+    StatusBar,
+    Text: withFont(RN.Text, 'Text'),
+    TextInput: withFont(RN.TextInput, 'TextInput'),
+  }),
+  'expo-status-bar': {
+    __esModule: true,
+    StatusBar,
+    default: StatusBar,
+    setStatusBarStyle: (s) => postBar({ style: barStyle(s) }),
+    setStatusBarBackgroundColor: (c) => postBar({ background: c || '' }),
+    setStatusBarHidden: () => {},
+  },
   'react-native-safe-area-context': {
     __esModule: true,
     SafeAreaProvider: passthrough,
@@ -266,6 +469,9 @@ function appDocument(project) {
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>${escapeHtml(project.name)}</title>
 ${REPORTER}
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Roboto:wght@400;500;700;900&display=swap" />
 <style>
 html, body { height: 100%; margin: 0; }
 body { background: #fff; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }

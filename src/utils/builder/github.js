@@ -252,12 +252,13 @@ const BLOB_CONCURRENCY = 6;
  * Reads files of `owner/repo` at `ref` (only under `dir` when given) for template imports.
  * `classify(path, size)` returns '' to download the file, 'junk' to drop it silently,
  * or a skip reason reported back to the seller. Paths are relative to `dir`.
- * @returns {{ sha: string, entries: Array<{ path: string, data: Buffer }>, skipped: Array<{ path: string, reason: string }> }}
+ * @returns {{ sha: string, message: string, entries: Array<{ path: string, data: Buffer }>, skipped: Array<{ path: string, reason: string }> }}
  */
 async function fetchRepoFiles(token, { owner, repo, ref, dir = '', classify, maxFiles }) {
   const base = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
   const commit = await request(token, 'GET', `${base}/commits/${refPath(ref)}`);
   const sha = commit?.sha || '';
+  const message = String(commit?.commit?.message || '').split('\n')[0].slice(0, 200);
   const treeSha = commit?.commit?.tree?.sha || '';
   if (!sha || !treeSha) throw httpError(404, 'GIT_NOT_FOUND');
   const tree = await request(token, 'GET', `${base}/git/trees/${treeSha}?recursive=1`);
@@ -290,7 +291,7 @@ async function fetchRepoFiles(token, { owner, repo, ref, dir = '', classify, max
     }
   };
   await Promise.all(Array.from({ length: Math.min(BLOB_CONCURRENCY, picked.length) }, worker));
-  return { sha, entries, skipped };
+  return { sha, message, entries, skipped };
 }
 
 // ---------- OAuth app ----------
