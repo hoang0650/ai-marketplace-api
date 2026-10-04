@@ -62,6 +62,8 @@ NANOCLAW_DASHBOARD_SECRET=<shared-secret-min-24-chars>
 # Optional — only if you expose aimarkets-proxy :3200 behind ProxVN
 # NANOCLAW_USE_LOGIN_PROXY=1
 AIMARKETS_SERVICE_SECRET=<shared with OpenClaw/Hermes aimarkets-usage plugins>
+# Cùng giá trị trên OpenClaw gateway — ký market ticket + suy ra gateway token AI Markets
+OPENCLAW_MARKET_TICKET_SECRET=<min-32-chars>
 OPENCLAW_AIMARKETS_MARKUP=0.25
 # Open WebUI / Paperclip SSO — cùng giá trị trên service tương ứng (thiếu → launch 503)
 OPENWEBUI_SSO_SECRET=<min-32-chars>
@@ -70,7 +72,7 @@ OPENWEBUI_AIMARKETS_PUBLIC_URL_TEMPLATE=https://{userId}.openwebui.aimarkets.vn
 PAPERCLIP_AIMARKETS_PUBLIC_URL_TEMPLATE=https://{userId}.paperclip.aimarkets.vn
 ```
 
-**OpenClaw auto-login / auto-approve:** Launch trả URL hash `#gatewayUrl&token&autoConnect` (giống hotelapp). Gateway + API + PHGroup-AI phải cùng `OPENCLAW_GATEWAY_TOKEN`. Thiếu/sai token → Control UI `unauthorized` / `token_mismatch`, không tới bước device pairing approve.
+**OpenClaw auto-login / auto-approve:** Launch trả URL hash `#gatewayUrl&token&autoConnect` (giống hotelapp). Khi API có cả `AIMARKETS_SERVICE_SECRET` và `OPENCLAW_MARKET_TICKET_SECRET`, token trong URL là token AI Markets suy ra từ hai secret này (gateway cũng tự suy ra, chỉ chấp nhận trên `*.openclaw.aimarkets.vn`), nên API không cần `OPENCLAW_GATEWAY_TOKEN` của PHHotel. Gateway và PHGroup-AI vẫn phải cùng `OPENCLAW_GATEWAY_TOKEN` cho PHHotel và cho auto-approve device pairing. Thiếu/sai token → Control UI `unauthorized` / `token_mismatch`, không tới bước device pairing approve.
 
 **NanoClaw Launch:** `POST /v1/nanoclaw/launch` → `https://{userId}.nanoclaw.aimarkets.vn/dashboard?…`. Chi tiết: `nanoclaw/deploy/DOKPLOY-AIMARKETS.md`.
 

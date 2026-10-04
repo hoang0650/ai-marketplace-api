@@ -16,7 +16,7 @@ const {
   computeOpenClawSellCost,
   isPhhotelModelId,
 } = require('../utils/openclaw-pricing');
-const { issueMarketTicket } = require('../utils/openclaw-ticket');
+const { issueMarketTicket, aimarketsGatewayToken } = require('../utils/openclaw-ticket');
 const { serviceSecretOk } = require('../utils/service-secret');
 const byokRoutes = require('./openclaw-byok');
 
@@ -72,6 +72,16 @@ function withMarketTicket(url, userId) {
   const [base, hash = ''] = String(url).split('#');
   const params = new URLSearchParams(hash);
   params.set('marketTicket', ticket);
+  return `${base}#${params.toString()}`;
+}
+
+/** Swaps the shared gateway token in a launch URL fragment for the AI Markets one. */
+function withAimarketsGatewayToken(url) {
+  const token = aimarketsGatewayToken();
+  if (!token || !url) return url;
+  const [base, hash = ''] = String(url).split('#');
+  const params = new URLSearchParams(hash);
+  for (const key of ['token', 'gatewayToken', 'password']) params.set(key, token);
   return `${base}#${params.toString()}`;
 }
 
@@ -196,7 +206,7 @@ router.post('/launch', authenticate, async (req, res, next) => {
         if (upstream.ok && data?.success && data?.url) {
           return res.json({
             success: true,
-            url: withMarketTicket(data.url, userId),
+            url: withMarketTicket(withAimarketsGatewayToken(data.url), userId),
             audience: 'aimarkets',
             userId,
             message: data.message,
@@ -209,15 +219,16 @@ router.post('/launch', authenticate, async (req, res, next) => {
 
     const uiBase = aimarketsPublicBase(userId);
     const gatewayUrl = uiBase.replace(/^https:/i, 'wss:').replace(/^http:/i, 'ws:');
-    const token = resolveGatewayToken(userId);
+    const marketToken = aimarketsGatewayToken();
+    const token = marketToken || resolveGatewayToken(userId);
     if (!token) {
       return res.status(503).json({
         success: false,
         message:
-          'OpenClaw gateway token missing. Set OPENCLAW_GATEWAY_TOKEN on aimarketplace-api AND the OpenClaw gateway (same value as hotelapp).',
+          'OpenClaw gateway token missing. Set AIMARKETS_SERVICE_SECRET and OPENCLAW_MARKET_TICKET_SECRET (same values) on aimarketplace-api AND the OpenClaw gateway.',
       });
     }
-    const password = String(process.env.OPENCLAW_GATEWAY_PASSWORD || token).trim() || token;
+    const password = marketToken || String(process.env.OPENCLAW_GATEWAY_PASSWORD || token).trim() || token;
     const url = withMarketTicket(
       buildHashUrl({
         uiBaseUrl: uiBase,

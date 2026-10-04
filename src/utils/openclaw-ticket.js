@@ -55,4 +55,20 @@ function verifyMarketTicket(ticket) {
   }
 }
 
-module.exports = { issueMarketTicket, verifyMarketTicket, ticketSecret };
+/**
+ * Gateway token for AI Markets Control UI connections. The gateway accepts it
+ * on AI Markets hosts only (openclaw src/gateway/aimarkets-ticket.ts), so the
+ * token PHHotel uses is never handed to buyers. Empty unless both secrets are set.
+ */
+function aimarketsGatewayToken() {
+  const serviceSecret = String(process.env.AIMARKETS_SERVICE_SECRET || '').trim();
+  const ticketSecretValue = String(process.env.OPENCLAW_MARKET_TICKET_SECRET || '').trim();
+  if (!serviceSecret || !ticketSecretValue) return '';
+  return crypto
+    .createHmac('sha256', ticketSecretValue)
+    .update(`aimarkets-openclaw-gateway:v1:${serviceSecret}`, 'utf8')
+    .digest('hex')
+    .slice(0, 48);
+}
+
+module.exports = { issueMarketTicket, verifyMarketTicket, ticketSecret, aimarketsGatewayToken };
