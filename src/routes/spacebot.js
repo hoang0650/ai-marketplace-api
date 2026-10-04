@@ -5,6 +5,11 @@ const { authenticate } = require('../middleware/auth');
 const SshSession = require('../models/SshSession');
 const WalletTx = require('../models/WalletTx');
 const { getAvailableBalance } = require('../utils/wallet');
+const {
+  assertActiveSubscription,
+  getSubscriptionStatus,
+  hasActiveSubscriptionByUserId,
+} = require('../finance/agent-subscription');
 const { generateSshKeyPair } = require('../utils/ssh-keys');
 const {
   AIMARKETS_PROVIDER_MARKUP,
@@ -199,6 +204,7 @@ router.post('/launch', authenticate, async (req, res, next) => {
         message: 'SpaceBot AI Markets needs a signed-in marketplace user id.',
       });
     }
+    await assertActiveSubscription(req.user, 'spacebot');
 
     const token = resolveDashboardToken();
     const uiBase = aimarketsPublicBase(userId);
@@ -235,6 +241,7 @@ router.post('/device-pairings/approve', authenticate, async (_req, res) => {
 
 router.post('/ssh/generate', authenticate, async (req, res, next) => {
   try {
+    await assertActiveSubscription(req.user, 'spacebot');
     const agentId = String(req.body?.agentId || 'spacebot');
     const { host, port, username } = resolveSshTarget(req.user, req.body || {});
 
@@ -377,8 +384,10 @@ router.get('/usage/check', async (req, res, next) => {
         try {
           const uid = String(req.user._id);
           const { available, balance, held } = await getAvailableBalance(req.user._id);
+          const subscription = await getSubscriptionStatus(req.user, 'spacebot');
           return res.json({
-            allowed: available >= 0,
+            allowed: available >= 0 && subscription.active,
+            subscription,
             available,
             balance,
             held,
@@ -396,8 +405,10 @@ router.get('/usage/check', async (req, res, next) => {
     const { available, balance, held } = await getAvailableBalance(
       new mongoose.Types.ObjectId(userId),
     );
+    const subscribed = await hasActiveSubscriptionByUserId(userId, 'spacebot');
     return res.json({
-      allowed: true,
+      allowed: subscribed,
+      ...(subscribed ? {} : { reason: 'subscription_required' }),
       available,
       balance,
       held,

@@ -1,6 +1,7 @@
 const express = require('express');
 const { authenticate } = require('../middleware/auth');
 const { issueRuntimeTicket } = require('../utils/runtime-sso-ticket');
+const { assertActiveSubscription } = require('../finance/agent-subscription');
 
 const USER_ID_RE = /^[a-f0-9]{24}$/i;
 
@@ -45,6 +46,7 @@ function createRuntimeSsoRouter({ runtime, label, envPrefix, defaultTemplate, de
           message: `${label} AI Markets needs a signed-in marketplace user id.`,
         });
       }
+      await assertActiveSubscription(req.user, runtime);
 
       const base = applyTemplate(publicTemplate(), userId);
       const ticket = issueRuntimeTicket({ runtime, envPrefix, user: req.user });

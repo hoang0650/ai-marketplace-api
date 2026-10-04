@@ -6,6 +6,11 @@ const SshSession = require('../models/SshSession');
 const WalletTx = require('../models/WalletTx');
 const { getAvailableBalance } = require('../utils/wallet');
 const {
+  assertActiveSubscription,
+  getSubscriptionStatus,
+  hasActiveSubscriptionByUserId,
+} = require('../finance/agent-subscription');
+const {
   AIMARKETS_PROVIDER_MARKUP,
   computeOpenClawSellCost,
   isPhhotelModelId,
@@ -186,6 +191,7 @@ router.post('/launch', authenticate, async (req, res, next) => {
         message: 'NanoClaw AI Markets needs a signed-in marketplace user id.',
       });
     }
+    await assertActiveSubscription(req.user, 'nanoclaw');
 
     const token = resolveDashboardToken();
     // Token optional when dashboard has no DASHBOARD_SECRET (open tunnel via ProxVN).
@@ -223,6 +229,7 @@ router.post('/device-pairings/approve', authenticate, async (_req, res) => {
 
 router.post('/ssh/generate', authenticate, async (req, res, next) => {
   try {
+    await assertActiveSubscription(req.user, 'nanoclaw');
     const agentId = String(req.body?.agentId || 'nano-claw');
     const { host, port, username } = resolveSshTarget(req.user, req.body || {});
 
@@ -342,8 +349,10 @@ router.get('/usage/check', async (req, res, next) => {
         try {
           const uid = String(req.user._id);
           const { available, balance, held } = await getAvailableBalance(req.user._id);
+          const subscription = await getSubscriptionStatus(req.user, 'nanoclaw');
           return res.json({
-            allowed: available >= 0,
+            allowed: available >= 0 && subscription.active,
+            subscription,
             available,
             balance,
             held,
@@ -361,8 +370,10 @@ router.get('/usage/check', async (req, res, next) => {
     const { available, balance, held } = await getAvailableBalance(
       new mongoose.Types.ObjectId(userId),
     );
+    const subscribed = await hasActiveSubscriptionByUserId(userId, 'nanoclaw');
     return res.json({
-      allowed: true,
+      allowed: subscribed,
+      ...(subscribed ? {} : { reason: 'subscription_required' }),
       available,
       balance,
       held,

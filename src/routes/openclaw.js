@@ -7,6 +7,11 @@ const WalletTx = require('../models/WalletTx');
 const { AI_GATEWAY } = require('../utils/gateway-urls');
 const { getAvailableBalance } = require('../utils/wallet');
 const {
+  assertActiveSubscription,
+  getSubscriptionStatus,
+  hasActiveSubscriptionByUserId,
+} = require('../finance/agent-subscription');
+const {
   AIMARKETS_PROVIDER_MARKUP,
   computeOpenClawSellCost,
   isPhhotelModelId,
@@ -175,6 +180,7 @@ router.post('/launch', authenticate, async (req, res, next) => {
         message: 'OpenClaw AI Markets needs a signed-in marketplace user id.',
       });
     }
+    await assertActiveSubscription(req.user, 'openclaw');
 
     const aiUrl = aiBaseUrl();
     if (aiUrl) {
@@ -279,6 +285,7 @@ router.post('/device-pairings/approve', authenticate, async (req, res, next) => 
  */
 router.post('/ssh/generate', authenticate, async (req, res, next) => {
   try {
+    await assertActiveSubscription(req.user, 'openclaw');
     const agentId = String(req.body?.agentId || 'openclaw');
     const { host, port, username } = resolveSshTarget(req.user, req.body || {});
 
@@ -413,8 +420,10 @@ router.get('/usage/check', async (req, res, next) => {
         try {
           const uid = String(req.user._id);
           const { available, balance, held } = await getAvailableBalance(req.user._id);
+          const subscription = await getSubscriptionStatus(req.user, 'openclaw');
           return res.json({
-            allowed: available >= 0,
+            allowed: available >= 0 && subscription.active,
+            subscription,
             available,
             balance,
             held,
@@ -430,8 +439,10 @@ router.get('/usage/check', async (req, res, next) => {
       return res.status(400).json({ allowed: false, message: 'user_id required' });
     }
     const { available, balance, held } = await getAvailableBalance(new mongoose.Types.ObjectId(userId));
+    const subscribed = await hasActiveSubscriptionByUserId(userId, 'openclaw');
     return res.json({
-      allowed: true,
+      allowed: subscribed,
+      ...(subscribed ? {} : { reason: 'subscription_required' }),
       available,
       balance,
       held,

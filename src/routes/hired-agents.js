@@ -1,6 +1,16 @@
 const express = require('express');
 const HiredAgent = require('../models/HiredAgent');
 const { authenticate } = require('../middleware/auth');
+const {
+  AGENT_IDS,
+  BYOK_ONLY_AGENTS,
+  monthlyFee,
+  listSubscriptions,
+  getSubscriptionStatus,
+  setAutoRenew,
+  subscribeAgent,
+} = require('../finance/agent-subscription');
+const { AIMARKETS_PROVIDER_MARKUP } = require('../utils/openclaw-pricing');
 
 const router = express.Router();
 
@@ -89,6 +99,64 @@ router.patch('/hired/:agentId', authenticate, async (req, res, next) => {
     );
     if (!row) return res.status(404).json({ message: 'Hired agent not found' });
     res.json(mapHired(row));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** GET /v1/agents/pricing — public monthly price + token policy per hosted agent. */
+router.get('/pricing', (_req, res) => {
+  res.json(
+    AGENT_IDS.map((agentId) => ({
+      agentId,
+      fee: monthlyFee(agentId),
+      tokenMarkup: AIMARKETS_PROVIDER_MARKUP,
+      byokOnly: BYOK_ONLY_AGENTS.includes(agentId),
+    })),
+  );
+});
+
+/** GET /v1/agents/subscriptions — monthly plan status + price for every hosted agent. */
+router.get('/subscriptions', authenticate, async (req, res, next) => {
+  try {
+    res.json(await listSubscriptions(req.user));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** GET /v1/agents/subscriptions/:agentId — one agent's plan status. */
+router.get('/subscriptions/:agentId', authenticate, async (req, res, next) => {
+  try {
+    const status = await getSubscriptionStatus(req.user, req.params.agentId);
+    if (!status) return res.status(404).json({ message: 'Unknown agent' });
+    res.json(status);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /v1/agents/subscriptions/:agentId — pay one month from the wallet
+ * (new plan or renewal; paid days are stacked on the current expiry).
+ */
+router.post('/subscriptions/:agentId', authenticate, async (req, res, next) => {
+  try {
+    res.json(await subscribeAgent(req.user, req.params.agentId));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** PATCH /v1/agents/subscriptions/:agentId — body { autoRenew: boolean }. */
+router.patch('/subscriptions/:agentId', authenticate, async (req, res, next) => {
+  try {
+    if (typeof req.body?.autoRenew !== 'boolean') {
+      return res.status(400).json({ message: 'autoRenew (boolean) is required' });
+    }
+    const status = await setAutoRenew(req.user, req.params.agentId, req.body.autoRenew);
+    if (!status) return res.status(404).json({ message: 'Unknown agent' });
+    res.json(status);
   } catch (err) {
     next(err);
   }
