@@ -11,6 +11,7 @@ const { applyStatus, STATUSES, effectiveStatus } = require('../utils/moderation'
 const { deleteCachePattern } = require('../utils/cache');
 const { mapProduct, mapOrder } = require('../utils/mappers');
 const { resolveOrderDispute } = require('../utils/resolve-order-dispute');
+const { adminDailySeries, adminSeries } = require('../utils/admin-series');
 
 const router = express.Router();
 
@@ -27,6 +28,7 @@ router.get('/overview', authenticate, requireRoles('admin'), async (_req, res, n
       depositAgg,
       usersList,
       productsList,
+      series,
     ] = await Promise.all([
       User.countDocuments(),
       Product.countDocuments(),
@@ -185,6 +187,7 @@ router.get('/overview', authenticate, requireRoles('admin'), async (_req, res, n
       ]),
       User.find().select('name email role creatorSlug avatarUrl createdAt accountStatus suspendedUntil').sort({ createdAt: -1 }).limit(20).lean(),
       Product.find().select('name category creatorSlug creatorName featured moderationStatus suspendedUntil published salesCount').sort({ publishedAt: -1 }).limit(20).lean(),
+      adminDailySeries({ days: 30 }),
     ]);
 
     const totalGrossRevenue = revenueAgg[0]?.total || 0;
@@ -242,6 +245,7 @@ router.get('/overview', authenticate, requireRoles('admin'), async (_req, res, n
       buyerDeposits,
       buyerDepositCount,
       shops,
+      series,
       usersList: usersList.map((u) => ({
         id: String(u._id),
         name: u.name,
@@ -291,6 +295,15 @@ function adminUserDto(u, extra = {}) {
     ...extra,
   };
 }
+
+/** GET /v1/admin/revenue-series?granularity=day|week|month — revenue split by period. */
+router.get('/revenue-series', authenticate, requireRoles('admin'), async (req, res, next) => {
+  try {
+    res.json(await adminSeries({ granularity: String(req.query.granularity || 'day') }));
+  } catch (err) {
+    next(err);
+  }
+});
 
 router.get('/users/:id', authenticate, requireRoles('admin'), async (req, res, next) => {
   try {
