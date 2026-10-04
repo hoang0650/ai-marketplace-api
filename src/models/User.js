@@ -28,6 +28,36 @@ const kycSchema = new mongoose.Schema(
   { _id: false },
 );
 
+const profileSchema = new mongoose.Schema(
+  {
+    introLine: { type: String, enum: ['', 'buyer', 'seller', 'builder', 'learner'], default: '' },
+    region: { type: String, default: '', trim: true, maxlength: 120 },
+    website: { type: String, default: '', trim: true, maxlength: 300 },
+    notifyLang: { type: String, enum: ['vi', 'en', 'zh'], default: 'vi' },
+    socials: {
+      type: [
+        new mongoose.Schema(
+          {
+            label: { type: String, default: '', trim: true, maxlength: 40 },
+            url: { type: String, default: '', trim: true, maxlength: 300 },
+          },
+          { _id: false },
+        ),
+      ],
+      default: [],
+    },
+  },
+  { _id: false },
+);
+
+const preferencesSchema = new mongoose.Schema(
+  {
+    personalizeContent: { type: Boolean, default: false },
+    personalizeAds: { type: Boolean, default: false },
+  },
+  { _id: false },
+);
+
 const userSchema = new mongoose.Schema(
   {
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
@@ -58,6 +88,13 @@ const userSchema = new mongoose.Schema(
     statusChangedAt: { type: Date, default: null },
     /** Personal eKYC — required for withdraw (all roles except admin). */
     kyc: { type: kycSchema, default: () => ({}) },
+    /** Public profile extras edited in /settings/profile. */
+    profile: { type: profileSchema, default: () => ({}) },
+    preferences: { type: preferencesSchema, default: () => ({}) },
+    profileUpdatedAt: { type: Date, default: null },
+    passwordChangedAt: { type: Date, default: null },
+    /** Bumped to revoke every refresh token ("sign out everywhere", password change). */
+    tokenVersion: { type: Number, default: 0 },
   },
   { timestamps: { createdAt: true, updatedAt: true } },
 );

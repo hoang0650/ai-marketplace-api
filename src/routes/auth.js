@@ -3,7 +3,8 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const User = require('../models/User');
 const config = require('../config/env');
-const { attachAuthSession, publicUser, authenticate, extractRefreshToken, loadActiveUser, clearRefreshCookie, extractAccessToken, userIdFromPayload, invalidateAuthUserCache, setRefreshCookie, signAccessToken, requireAuthSession, persistAuthCaches, JWT_VERIFY } = require('../middleware/auth');
+const { attachAuthSession, publicUser, authenticate, extractRefreshToken, loadActiveUser, clearRefreshCookie, extractAccessToken, userIdFromPayload, invalidateAuthUserCache, setRefreshCookie, signAccessToken, requireAuthSession, getAuthSession, persistAuthCaches, JWT_VERIFY } = require('../middleware/auth');
+const { sanitizeMediaUrl, sanitizeProfile, sanitizePreferences, accountActivity } = require('../utils/profile-settings');
 const { slugify } = require('../utils/serialize');
 const { deleteCachePattern } = require('../utils/cache');
 const {
@@ -464,6 +465,10 @@ router.post('/refresh-token', async (req, res, next) => {
       return res.status(401).json({ message: 'Unauthorized', code: 'UNAUTHORIZED' });
     }
     await assertAccountActive(user);
+    if ((Number(decoded.tv) || 0) !== (Number(user.tokenVersion) || 0)) {
+      clearRefreshCookie(res);
+      return res.status(401).json({ message: 'Phiên đăng nhập đã bị thu hồi', code: 'SESSION_REVOKED' });
+    }
     const sessionOk = await requireAuthSession(userId);
     if (!sessionOk) {
       clearRefreshCookie(res);
@@ -531,17 +536,114 @@ router.patch('/me', authenticate, async (req, res, next) => {
     if (req.body?.bio !== undefined) {
       user.bio = String(req.body.bio || '').slice(0, 2000);
     }
-    if (req.body?.avatarUrl !== undefined) {
-      user.avatarUrl = String(req.body.avatarUrl || '').slice(0, 2000);
+    for (const field of ['avatarUrl', 'coverUrl']) {
+      if (req.body?.[field] === undefined) continue;
+      const raw = String(req.body[field] || '').trim();
+      if (raw === (user[field] || '')) continue;
+      user[field] = sanitizeMediaUrl(raw, field);
     }
-    if (req.body?.coverUrl !== undefined) {
-      user.coverUrl = String(req.body.coverUrl || '').slice(0, 2000);
+    if (req.body?.profile !== undefined) {
+      user.profile = sanitizeProfile(req.body.profile, user.profile || {});
     }
+    if (req.body?.preferences !== undefined) {
+      user.preferences = sanitizePreferences(req.body.preferences, user.preferences || {});
+    }
+    user.profileUpdatedAt = new Date();
 
     await user.save();
     await invalidateAuthUserCache(user._id);
     deleteCachePattern('creators:*').catch(() => {});
     return res.json(publicUser(user));
+  } catch (err) {
+    if (err.statusCode === 400) return res.status(400).json({ message: err.message, code: err.code });
+    next(err);
+  }
+});
+
+/** Set a first password (Google-only accounts) or change it; revokes other sessions. */
+router.post('/password', authenticate, async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(401).json({ message: 'Unauthorized' });
+    const currentPassword = String(req.body?.currentPassword || '');
+    const newPassword = String(req.body?.newPassword || '');
+    if (newPassword.length < 8 || newPassword.length > 128) {
+      return res.status(400).json({ message: 'Password must be 8-128 characters', code: 'PASSWORD_LENGTH' });
+    }
+    if (req.body?.confirmPassword !== undefined && String(req.body.confirmPassword) !== newPassword) {
+      return res.status(400).json({ message: 'Mật khẩu xác nhận không khớp', code: 'PASSWORD_MISMATCH' });
+    }
+    if (user.passwordHash) {
+      const ok = currentPassword && (await bcrypt.compare(currentPassword, user.passwordHash));
+      if (!ok) return res.status(400).json({ message: 'Mật khẩu hiện tại không đúng', code: 'PASSWORD_WRONG' });
+      if (await bcrypt.compare(newPassword, user.passwordHash)) {
+        return res.status(400).json({ message: 'Mật khẩu mới phải khác mật khẩu cũ', code: 'PASSWORD_SAME' });
+      }
+    }
+    user.passwordHash = await bcrypt.hash(newPassword, 12);
+    user.passwordChangedAt = new Date();
+    user.tokenVersion = (Number(user.tokenVersion) || 0) + 1;
+    await user.save();
+    await invalidateAuthUserCache(user._id);
+    return res.json(await attachAuthSession(res, user, { ip: req.ip }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Revoke every refresh token, then re-issue one for the current device. */
+router.post('/sessions/revoke-all', authenticate, async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(401).json({ message: 'Unauthorized' });
+    user.tokenVersion = (Number(user.tokenVersion) || 0) + 1;
+    await user.save();
+    await invalidateAuthUserCache(user._id);
+    return res.json(await attachAuthSession(res, user, { ip: req.ip }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/sessions/current', authenticate, async (req, res, next) => {
+  try {
+    const session = await getAuthSession(req.user._id);
+    res.json({
+      lastLogin: session?.lastLogin || null,
+      lastLoginIp: session?.lastLoginIp || null,
+      userAgent: String(req.headers['user-agent'] || '').slice(0, 300),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/google/unlink', authenticate, async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(401).json({ message: 'Unauthorized' });
+    if (!user.googleId) return res.json(publicUser(user));
+    if (!user.passwordHash) {
+      return res.status(400).json({
+        message: 'Hãy tạo mật khẩu trước khi ngắt kết nối Google.',
+        code: 'PASSWORD_REQUIRED',
+      });
+    }
+    user.googleId = undefined;
+    user.authProvider = 'local';
+    await user.save();
+    await invalidateAuthUserCache(user._id);
+    return res.json(publicUser(user));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/activity', authenticate, async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user._id).select('createdAt profileUpdatedAt passwordChangedAt kyc').lean();
+    if (!user) return res.status(401).json({ message: 'Unauthorized' });
+    res.json({ items: accountActivity(user, await getAuthSession(req.user._id)) });
   } catch (err) {
     next(err);
   }

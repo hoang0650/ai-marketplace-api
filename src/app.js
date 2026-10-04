@@ -22,6 +22,7 @@ const creatorRoutes = require('./routes/creators');
 const categoryRoutes = require('./routes/categories');
 const reviewRoutes = require('./routes/reviews');
 const wishlistRoutes = require('./routes/wishlist');
+const cartRoutes = require('./routes/cart');
 const orderRoutes = require('./routes/orders');
 const walletRoutes = require('./routes/wallet');
 const usageRoutes = require('./routes/usage');
@@ -177,6 +178,7 @@ function createApp() {
   app.use('/v2', apiLimiter);
   app.use('/v1/auth/login', authLimiter);
   app.use('/v1/auth/register', authLimiter);
+  app.use('/v1/auth/password', authLimiter);
   app.use('/v1/auth/google/start', authLimiter);
   app.use('/v1/auth/google/login', authLimiter);
   app.use('/v1/auth/refresh-token', refreshLimiter);
@@ -205,6 +207,7 @@ function createApp() {
   app.use('/v1/categories', categoryRoutes);
   app.use('/v1/reviews', reviewRoutes);
   app.use('/v1/wishlist', wishlistRoutes);
+  app.use('/v1/cart', cartRoutes);
   app.use('/v1/orders', orderRoutes);
   app.use('/v1/wallet', walletRoutes);
   app.use('/v1/usage', usageRoutes);

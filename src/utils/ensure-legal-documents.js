@@ -2,235 +2,278 @@ const LegalDocument = require('../models/LegalDocument');
 const { LEGAL_DOCUMENT_TYPES } = LegalDocument;
 
 const PLATFORM_NAME = 'AI Markets (aimarkets.vn)';
-const OPERATOR = 'PHGROUP / đơn vị vận hành AI Markets';
+const OPERATOR = 'Công ty TNHH giải pháp công nghệ PHGroup (MST 3703279135)';
+const FULL_TEXT = 'Toàn văn: https://aimarkets.vn/legal';
 
 const BASE_DOCS = [
   {
     documentType: 'terms',
     title: 'Điều khoản sử dụng AI Markets',
-    summary: 'Điều khoản chung cho Buyer và người dùng nền tảng.',
+    summary: 'Tài khoản, dịch vụ định kỳ, nội dung AI, hành vi cấm và giới hạn trách nhiệm.',
     content: `# Điều khoản sử dụng
 
-${PLATFORM_NAME} vận hành theo mô hình sàn TMĐT trung gian + bán hàng trực tiếp (Platform Direct).
-Người dùng đồng ý với Quy chế sàn, chính sách thanh toán/hoàn tiền/tranh chấp phiên bản hiện hành.`,
+${PLATFORM_NAME} do ${OPERATOR} vận hành theo mô hình sàn giao dịch TMĐT, đồng thời bán trực tiếp một số dịch vụ của nền tảng (Platform Direct).
+
+- Người dùng chịu trách nhiệm bảo mật tài khoản; quản lý hồ sơ, thông báo, phiên đăng nhập trong Cài đặt.
+- Dịch vụ định kỳ (thuê bao agent) tự gia hạn mặc định, có thể tắt; dịch vụ tính theo mức dùng (API, GPU, phút chơi game) trừ vào số dư theo đơn giá công bố.
+- Nội dung do AI tạo được gắn nhãn; người dùng chịu trách nhiệm với nội dung mình yêu cầu tạo.
+- Cấm các hành vi tại Chính sách sử dụng chấp nhận được.
+- Thay đổi điều khoản được thông báo trước ít nhất 30 ngày. Pháp luật Việt Nam điều chỉnh.
+
+${FULL_TEXT}/dieu-khoan-su-dung`,
   },
   {
     documentType: 'privacy',
     title: 'Chính sách bảo mật AI Markets',
-    summary: 'Bảo vệ dữ liệu cá nhân theo pháp luật Việt Nam.',
+    summary: 'Bảo vệ dữ liệu cá nhân theo Luật 91/2025/QH15 và Nghị định 356/2025/NĐ-CP.',
     content: `# Chính sách bảo mật
 
-Xử lý dữ liệu cá nhân phục vụ tài khoản, đơn hàng, xác minh Seller và audit.
-Chi tiết bổ sung có thể xem trên trang Privacy của nền tảng.`,
+Dữ liệu cá nhân được xử lý theo Luật Bảo vệ dữ liệu cá nhân số 91/2025/QH15 và Nghị định số 356/2025/NĐ-CP, chỉ cho mục đích: tài khoản, đơn hàng, thanh toán, xác minh người bán, an ninh, giải quyết khiếu nại và nghĩa vụ pháp luật.
+
+- Ảnh giấy tờ tùy thân khi xác minh người bán là dữ liệu nhạy cảm, được giới hạn truy cập.
+- Nội dung trao đổi với AI không dùng để huấn luyện mô hình; được chuyển tới nhà cung cấp mô hình để xử lý yêu cầu.
+- Không bán dữ liệu cá nhân.
+- Người dùng thực hiện quyền của chủ thể dữ liệu trong Cài đặt hoặc qua support@aimarkets.vn.
+
+${FULL_TEXT}/chinh-sach-bao-mat-va-du-lieu`,
   },
   {
     documentType: 'marketplace-rules',
-    title: 'Quy chế sàn thương mại điện tử trung gian AI Markets',
-    summary: 'Quy chế hoạt động sàn TMĐT trung gian theo pháp luật Việt Nam.',
-    content: `# Quy chế sàn thương mại điện tử trung gian
+    title: 'Quy chế hoạt động sàn giao dịch TMĐT AI Markets',
+    summary: 'Quy chế hoạt động theo Luật TMĐT 122/2025/QH15 và Nghị định 248/2026/NĐ-CP.',
+    content: `# Quy chế hoạt động sàn giao dịch TMĐT
 
-## 1. Vai trò nền tảng
-${PLATFORM_NAME} do ${OPERATOR} vận hành theo mô hình **sàn thương mại điện tử trung gian** khi có bên thứ ba đăng bán, đồng thời có thể bán trực tiếp sản phẩm/dịch vụ của nền tảng (**Platform Direct**).
+## 1. Căn cứ
+Luật Thương mại điện tử số 122/2025/QH15; Nghị định số 248/2026/NĐ-CP; Luật Bảo vệ quyền lợi người tiêu dùng số 19/2023/QH15; Luật Bảo vệ dữ liệu cá nhân số 91/2025/QH15; Luật Trí tuệ nhân tạo số 134/2025/QH15; Nghị định số 252/2026/NĐ-CP về thuế.
 
-## 2. Phân biệt chủ thể
-- **Buyer**: người mua / sử dụng dịch vụ.
-- **Seller**: bên thứ ba cung cấp sản phẩm/dịch vụ trên sàn (sau khi xác minh).
-- **Platform**: đơn vị vận hành sàn; có thể là người bán trực tiếp khi \`ownershipType = PLATFORM_DIRECT\`.
-- **Provider**: hạ tầng kỹ thuật (nhà cung cấp GPU, OpenRouter, AWS, …) — **không** đồng nghĩa Seller.
+## 2. Chủ thể
+- **Người mua**: mua, sử dụng sản phẩm, dịch vụ.
+- **Người bán**: bên thứ ba đã xác minh, đăng bán trên sàn.
+- **Nền tảng**: ${OPERATOR}; là người bán khi sản phẩm gắn nhãn Platform Direct.
+- **Nhà cung cấp hạ tầng** (GPU, mô hình AI, đám mây) không phải người bán.
 
-## 3. Điều kiện đăng bán
-Seller phải hoàn tất xác minh danh tính/doanh nghiệp, chấp thuận Thỏa thuận Seller và tuân thủ kiểm duyệt sản phẩm trước khi công khai listing.
+## 3. Sản phẩm
+Mô hình và API AI, agent, mẫu website/ứng dụng, giọng đọc AI, dịch vụ talent, thuê GPU, máy chủ chơi game theo phút. Phim, truyện/sách điện tử, dataset và tin tuyển dụng hiện chưa cung cấp.
 
-## 4. Nghĩa vụ trung gian
-Sàn cung cấp listing, đặt hàng, ghi nhận hợp đồng/order, tích hợp thanh toán, đo lường usage, xử lý khiếu nại/tranh chấp và lưu trữ hồ sơ theo quy định pháp luật.
+## 4. Phí
+- Phí dịch vụ sàn mặc định 20% giá trị giao dịch của người bán bên thứ ba; không phải thuế.
+- Thuê bao agent 199.000 đ/30 ngày; phí token theo chi phí nhà cung cấp + 25%; BYOK không tính phí token.
+- Phí cửa hàng Google Play / App Store khi thanh toán trong ứng dụng do Google/Apple thu.
+- Thuế khấu trừ, nộp thay cho hộ, cá nhân kinh doanh theo Nghị định 252/2026/NĐ-CP.
 
-## 5. Cấm giao dịch ngoài sàn
-Các bên không được yêu cầu thanh toán ngoài hệ thống cho giao dịch phát sinh trên sàn.
+## 5. Thanh toán và chi trả
+Thanh toán qua GPay, Apple IAP, Google Play Billing hoặc ví AI Markets. Ví người mua không rút về ngân hàng. Tiền của người bán được giữ 48 giờ, chỉ chi trả khi không có tranh chấp và người bán đã xác minh. Cấm giao dịch ngoài sàn.
 
-## 6. Phí
-Phí sàn (commission, mặc định 20% third-party) tách khỏi thuế khấu trừ (mặc định 10% trên 80% doanh thu seller = 8% đơn) và phí cửa hàng Google Play / App Store khi thanh toán IAP. Phí cửa hàng do Google/Apple thu, không phải doanh thu sàn.
+## 6. Khiếu nại
+Tiếp nhận trong 24 giờ, giải quyết trong 07 ngày làm việc.
 
-## 7. Luật áp dụng
-Pháp luật Việt Nam; Nghị định về thương mại điện tử và bảo vệ dữ liệu cá nhân áp dụng khi có hiệu lực.`,
+## 7. Thay đổi
+Thông báo trước ít nhất 30 ngày. Pháp luật Việt Nam điều chỉnh.
+
+${FULL_TEXT}/quy-che-hoat-dong-san-tmdt`,
   },
   {
     documentType: 'seller-policy',
-    title: 'Chính sách người bán (Seller Policy)',
-    summary: 'Điều kiện, nghĩa vụ và quyền của Seller trên sàn trung gian.',
+    title: 'Chính sách người bán',
+    summary: 'Điều kiện đăng bán, phí sàn 20%, phí cửa hàng, thuế theo NĐ 252/2026, giữ tiền 48 giờ.',
     content: `# Chính sách người bán
 
 ## Điều kiện
-- Tài khoản hợp lệ; hồ sơ Seller đầy đủ; trạng thái xác minh **VERIFIED**.
-- Chấp thuận Thỏa thuận Seller (phiên bản hiện hành).
+- Hồ sơ xác minh được duyệt (giấy tờ tùy thân, mã số thuế, tài khoản nhận tiền đứng tên mình).
+- Xác nhận Chính sách người bán và Thỏa thuận người bán phiên bản hiện hành.
+- Sản phẩm qua kiểm duyệt trước khi hiển thị; không bán hàng thuộc danh mục cấm.
 
-## Nghĩa vụ
-- Cung cấp thông tin sản phẩm trung thực; sở hữu/quyền cấp phép hợp pháp.
-- Không bán hàng cấm, nội dung bất hợp pháp, hoặc giả mạo Platform Direct.
-- Chịu trách nhiệm về chất lượng dịch vụ bên thứ ba cung cấp.
+## Phí
+- Phí dịch vụ sàn mặc định **20%**, không phải thuế.
+- Thanh toán trong ứng dụng: phí Google Play (thường 15%) / App Store (thường 30%) do cửa hàng thu, không phải doanh thu sàn.
+- Sản phẩm Platform Direct không áp dụng chia sẻ doanh thu.
+- Mỗi đơn lưu ảnh chụp tỷ lệ phí tại thời điểm giao dịch.
 
-## Hoa hồng sàn (platform commission)
-Phí sàn mặc định **20%** trên giá trị giao dịch third-party, **không phải thuế seller**.
-Ngoài phí sàn, sàn khấu trừ **thuế 10% trên 80% doanh thu seller** (tương đương **8%** giá trị đơn). Seller thực nhận mặc định **72%** trước phí cửa hàng / phí thanh toán / hoàn.
-Khách hàng thanh toán giá niêm yết; Seller chịu phí sàn và thuế khấu trừ trừ khi có rule khác.
-Sản phẩm **Platform Direct** không chia 80/20 — toàn bộ doanh thu thuộc nền tảng (sau phí cửa hàng nếu có IAP).
-Mọi order lưu **snapshot** commissionRate / commissionAmount tại thời điểm giao dịch.
+## Thuế
+Sàn khấu trừ, nộp thay thuế GTGT, TNCN cho người bán là hộ, cá nhân kinh doanh theo Nghị định 252/2026/NĐ-CP, theo tỷ lệ pháp luật quy định cho từng loại hàng hóa, dịch vụ; số tiền thể hiện trên đối soát từng đơn. Người bán là doanh nghiệp, tổ chức tự kê khai.
 
-## Phí Google Play (CHPlay) và App Store
-Khi Buyer thanh toán bằng In-App Purchase:
-- **Google Play / CHPlay**: phí dịch vụ cửa hàng mặc định **15%** (Google có thể áp 15% hoặc 30% theo điều khoản Google tại thời điểm giao dịch).
-- **App Store**: hoa hồng Apple mặc định **30%** (có thể 15% theo Apple Small Business Program hoặc subscription năm 2+).
-Phí cửa hàng do Google/Apple thu, **không phải phí sàn**, **không phải thuế**, **không phải doanh thu AI Markets**. Sàn khấu trừ theo snapshot để tính seller net / payout vì số tiền thực nhận đã bị cửa hàng cắt.
-Giao dịch web / ví aimarkets.vn: phí CHPlay/App Store = 0.
+## Chi trả
+Tiền của người bán được giữ **48 giờ** sau khi đơn hoàn tất; chi trả khi không có tranh chấp mở và người bán đã xác minh.
 
-## Hoa hồng / entitlement
-Doanh thu Seller là **entitlement đối soát** trên ledger nội bộ, không phải số dư ví điện tử được cấp phép trừ khi có giấy phép phù hợp.`,
+${FULL_TEXT}/chinh-sach-nguoi-ban`,
   },
   {
     documentType: 'seller-agreement',
-    title: 'Thỏa thuận Seller AI Markets',
-    summary: 'Hợp đồng tham gia bán hàng trên sàn trung gian.',
-    content: `# Thỏa thuận Seller
+    title: 'Thỏa thuận người bán AI Markets',
+    summary: 'Hợp đồng điện tử giữa sàn và người bán: phí, đối soát, rút tiền.',
+    content: `# Thỏa thuận người bán
 
-Bằng việc chấp thuận, Seller đồng ý:
-1. Tuân thủ Quy chế sàn và pháp luật Việt Nam về TMĐT trung gian.
-2. Cung cấp giấy tờ xác minh trung thực.
-3. Không dùng Provider hạ tầng làm danh tính Seller.
-4. Chấp nhận kiểm duyệt sản phẩm, tạm ngưng, gỡ listing khi vi phạm.
-5. Thanh toán/đối soát qua kênh được sàn chỉ định; không thu tiền ngoài sàn cho đơn trên sàn.
-6. Chịu phí sàn (mặc định 20%), thuế khấu trừ (mặc định 10% trên 80% doanh thu seller) và phí cửa hàng Google Play / App Store khi giao dịch IAP, theo snapshot đơn.
-7. Chịu trách nhiệm pháp lý đối với sản phẩm THIRD_PARTY_SELLER của mình.`,
+Bằng việc xác nhận, người bán đồng ý:
+1. Tuân thủ Quy chế hoạt động sàn và pháp luật Việt Nam.
+2. Cung cấp thông tin xác minh trung thực; cập nhật khi thay đổi.
+3. Chỉ bán sản phẩm có quyền hợp pháp, qua kiểm duyệt, không thuộc danh mục cấm.
+4. Chịu phí dịch vụ sàn (mặc định 20%) và phí cửa hàng ứng dụng khi thanh toán trong ứng dụng, theo ảnh chụp đơn.
+5. Để sàn khấu trừ, nộp thay thuế theo Nghị định 252/2026/NĐ-CP nếu là hộ, cá nhân kinh doanh.
+6. Tiền được giữ 48 giờ; chỉ rút khi không có tranh chấp mở và đã xác minh.
+7. Không thu tiền ngoài sàn cho giao dịch phát sinh trên sàn.
+8. Chấp nhận biện pháp xử lý vi phạm; sửa đổi thỏa thuận được thông báo trước 30 ngày.
+
+${FULL_TEXT}/mau-hop-dong-cung-cap-dich-vu-nguoi-ban`,
   },
   {
     documentType: 'buyer-policy',
-    title: 'Chính sách người mua (Buyer Policy)',
-    summary: 'Quyền và nghĩa vụ Buyer trên AI Markets.',
+    title: 'Chính sách người mua',
+    summary: 'Quyền, nghĩa vụ người mua; GPU, phút chơi game, thuê bao agent và talent.',
     content: `# Chính sách người mua
 
-- Kiểm tra nhãn **Bán bởi sàn** (Platform Direct) hoặc **Bán bởi Seller** trước khi đặt hàng.
-- Thanh toán qua cổng/phương thức được sàn hỗ trợ.
-- Khiếu nại/tranh chấp theo Dispute Policy trong thời hạn quy định.`,
+- Kiểm tra nhãn **Bán bởi sàn** hoặc **Bán bởi người bán**, giá và đơn vị tính trước khi đặt hàng.
+- Giỏ hàng, yêu thích đồng bộ giữa web và ứng dụng khi đăng nhập.
+- Thuê GPU: trả trước tối thiểu 1 giờ, tính theo phút, cảnh báo trước 10 phút khi sắp hết số dư, tự dừng khi hết tiền, xóa sau 24 giờ.
+- Chơi game: cần số dư tối thiểu 1 phút, tính theo phút, tự dừng sau 5 phút không thao tác.
+- Thuê bao agent: 199.000 đ/30 ngày, nhắc trước 3 ngày, trừ tiền trước 24 giờ; hết hạn thì khóa agent, giữ dữ liệu 30 ngày.
+- Nên khiếu nại đơn hàng trong 48 giờ để tiền của người bán được tạm giữ trong lúc xem xét.
+
+${FULL_TEXT}/chinh-sach-nguoi-mua`,
   },
   {
     documentType: 'payment-policy',
-    title: 'Chính sách thanh toán',
-    summary: 'Thanh toán qua cổng trung gian; ledger nội bộ chỉ để đối soát.',
-    content: `# Chính sách thanh toán
+    title: 'Chính sách thanh toán và đối soát',
+    summary: 'GPay, Apple/Google IAP, ví không rút được, đối soát và cấm giao dịch ngoài sàn.',
+    content: `# Chính sách thanh toán và đối soát
 
-## Nguyên tắc
-Sàn **không** tự vận hành ví điện tử / nhận tiền gửi không kỳ hạn nếu chưa có giấy phép phù hợp.
+## Phương thức
+GPay (web), Apple In-App Purchase, Google Play Billing, ví AI Markets.
 
-## Luồng chuẩn
-Buyer → Cổng thanh toán được cấp phép / phương thức được phép → Xác nhận Order → Ledger nội bộ (entitlement, phí sàn, chi phí provider).
+## Ví người mua
+Dùng để thanh toán trên sàn; **không rút về ngân hàng**. Tiền hoàn trả về ví hoặc phương thức thanh toán ban đầu.
 
-## Ledger
-Số dư hiển thị (nếu có) là **quyền lợi đối soát nội bộ**, không phải tiền gửi ngân hàng.
+## Sổ cái
+Mỗi đơn ghi phí dịch vụ sàn, phí cửa hàng ứng dụng, thuế khấu trừ (nếu có) và phần người bán được nhận; đơn đã chốt không bị tính lại khi tỷ lệ thay đổi.
 
-## Phí sàn 20% + thuế 8%
-Platform commission (20%) được ghi **PLATFORM_REVENUE**. Thuế khấu trừ mặc định **10% trên phần 80% của seller** (= **8%** đơn) ghi **TAX_PAYABLE**, không gộp vào hoa hồng sàn.
-Seller payable mặc định = gộp − 20% phí sàn − 8% thuế − phí cửa hàng − phí thanh toán − hoàn/chargeback.
+## Chi trả người bán
+Giữ 48 giờ sau khi đơn hoàn tất; chi trả về tài khoản ngân hàng đứng tên người bán đã xác minh khi không có tranh chấp.
 
-## Phí CHPlay / App Store (IAP)
-Thanh toán In-App Purchase qua Google Play hoặc App Store chịu phí cửa hàng do Google/Apple thu (mặc định snapshot **15% CHPlay**, **30% App Store**). Ghi **STORE_FEE**, không ghi vào doanh thu sàn. Seller net = gộp − phí sàn − phí cửa hàng − thuế − phí thanh toán − hoàn/chargeback.`,
+## Cấm giao dịch ngoài sàn
+Không yêu cầu, nhận thanh toán ngoài hệ thống cho giao dịch phát sinh trên sàn.
+
+${FULL_TEXT}/chinh-sach-thanh-toan-doi-soat`,
   },
   {
     documentType: 'refund-policy',
-    title: 'Chính sách hoàn tiền',
-    summary: 'Hoàn tiền theo loại sản phẩm và quyết định tranh chấp.',
+    title: 'Chính sách hoàn tiền và chấm dứt dịch vụ',
+    summary: 'Điều kiện hoàn theo loại sản phẩm, thời hạn 48 giờ và chấm dứt dịch vụ.',
     content: `# Chính sách hoàn tiền
 
-Hoàn tiền có thể áp dụng khi: lỗi kỹ thuật phía sàn, sản phẩm không giao được, hoặc quyết định tranh chấp nghiêng về Buyer. Dịch vụ usage/metered đã tiêu thụ có thể không hoàn toàn bộ. Mọi hoàn tiền được ghi vào Refund Ledger.`,
+Không áp dụng đổi trả chung 30 ngày cho sản phẩm số.
+
+- Sản phẩm cấp phép: hoàn khi không giao được hoặc không đúng mô tả.
+- Dịch vụ tính theo mức dùng, GPU, phút chơi game đã sử dụng: không hoàn.
+- Thuê bao agent: không hoàn theo tỷ lệ ngày còn lại; hoàn khi lỗi từ nền tảng; phí token đã dùng không hoàn.
+- Talent: theo từng mốc công việc.
+- Thanh toán trong ứng dụng: hoàn qua Apple/Google theo chính sách của cửa hàng.
+
+Nên gửi yêu cầu trong 48 giờ để tiền của người bán được tạm giữ trong lúc xem xét; yêu cầu sau thời hạn này vẫn được tiếp nhận. Tiếp nhận trong 24 giờ, giải quyết trong 07 ngày làm việc.
+
+${FULL_TEXT}/chinh-sach-hoan-tien`,
   },
   {
     documentType: 'dispute-policy',
     title: 'Chính sách tranh chấp',
-    summary: 'Quy trình tranh chấp Buyer–Seller / Buyer–Platform.',
+    summary: 'Quy trình tranh chấp người mua – người bán – nền tảng.',
     content: `# Chính sách tranh chấp
 
-Loại tranh chấp: BUYER_SELLER, BUYER_PLATFORM, SELLER_PLATFORM.
-Buyer mở dispute trong cửa sổ hold; sàn xem xét bằng chứng; kết quả có thể hoàn tiền, giữ entitlement Seller, hoặc hòa giải. Quyết định được audit log.`,
+Loại tranh chấp: người mua – người bán, người mua – nền tảng, người bán – nền tảng.
+Tranh chấp mở trong 48 giờ sau khi đơn hoàn tất sẽ tạm giữ tiền của người bán. Sàn xem xét bằng chứng của các bên và quyết định trong 07 ngày làm việc: hoàn tiền, giải phóng tiền cho người bán hoặc hòa giải. Các bên được yêu cầu xem xét lại trong 07 ngày. Mọi quyết định được ghi nhật ký.
+
+${FULL_TEXT}/chinh-sach-khieu-nai-tranh-chap`,
   },
   {
     documentType: 'complaint-policy',
     title: 'Chính sách khiếu nại',
-    summary: 'Tiếp nhận và xử lý khiếu nại trên sàn.',
+    summary: 'Tiếp nhận trong 24 giờ, giải quyết trong 07 ngày làm việc.',
     content: `# Chính sách khiếu nại
 
-Gửi khiếu nại tại https://aimarkets.vn/complaints hoặc email support@aimarkets.vn.
-Quy trình: tiếp nhận → xác minh → phân loại (buyer_seller / buyer_platform / seller_platform) → seller phản hồi nếu cần → đánh giá bằng chứng → quyết định → đóng hồ sơ.
-Khiếu nại buyer–seller gắn đơn trong cửa sổ 48 giờ có thể đóng băng seller net (tranh chấp đơn). Quyết định upheld/rejected thực hiện hoàn tiền hoặc giải phóng payout. Hồ sơ được audit log.`,
+Gửi khiếu nại tại https://aimarkets.vn/complaints, email support@aimarkets.vn hoặc hotline 1900 6159.
+
+1. Xác nhận tiếp nhận trong **24 giờ**.
+2. Xác minh thông tin.
+3. Người bán phản hồi (nếu liên quan).
+4. Ra quyết định trong **07 ngày làm việc** kể từ khi tiếp nhận.
+5. Thực hiện hoàn tiền hoặc giải phóng tiền; đóng hồ sơ.
+
+${FULL_TEXT}/chinh-sach-khieu-nai-tranh-chap`,
   },
   {
     documentType: 'intellectual-property',
-    title: 'Chính sách sở hữu trí tuệ',
-    summary: 'Bảo vệ IP và gỡ nội dung xâm phạm.',
+    title: 'Chính sách sở hữu trí tuệ và giấy phép',
+    summary: 'Quyền SHTT, thông báo và gỡ bỏ, phạm vi quyền người mua.',
     content: `# Sở hữu trí tuệ
 
-Seller cam kết có quyền phân phối model/dataset/agent/API. Thông báo xâm phạm IP được xử lý theo quy trình notice-and-takedown của sàn.`,
+Người bán cam kết có quyền phân phối mô hình, agent, API, mẫu website, giọng đọc (có văn bản đồng ý của người có giọng nói đối với giọng nhân bản). Thông báo xâm phạm được xử lý theo quy trình thông báo và gỡ bỏ; yêu cầu của cơ quan có thẩm quyền được xử lý trong 24 giờ. Người mua được sử dụng theo giấy phép của từng sản phẩm, không bán lại khi giấy phép không cho phép.
+
+${FULL_TEXT}/chinh-sach-ip-ban-quyen-license`,
   },
   {
     documentType: 'acceptable-use',
-    title: 'Chính sách sử dụng chấp nhận được (AUP)',
-    summary: 'Cấm lạm dụng AI, phá hoại, nội dung bất hợp pháp.',
-    content: `# Acceptable Use
+    title: 'Chính sách sử dụng chấp nhận được',
+    summary: 'Danh mục cấm kinh doanh, hành vi cấm trên API, GPU và agent.',
+    content: `# Sử dụng chấp nhận được
 
-Cấm: malware, tấn công hạ tầng, nội dung bất hợp pháp theo pháp luật Việt Nam, deepfake độc hại, thu thập dữ liệu trái phép, đào tạo trên dữ liệu không có quyền.`,
+Cấm kinh doanh: hàng hóa, dịch vụ cấm theo pháp luật; cờ bạc; mua bán dữ liệu cá nhân; deepfake, giả mạo giọng nói, hình ảnh không có đồng ý; ngành nghề có điều kiện khi chưa có giấy phép.
+Cấm sử dụng: mã độc, tấn công hạ tầng, gian lận thanh toán, đào tiền mã hóa trên tài nguyên thuê khi không được phép, thu thập dữ liệu trái phép, lạm dụng agent và kênh nhắn tin để gửi tin rác.
+
+${FULL_TEXT}/chinh-sach-su-dung-chap-nhan-duoc`,
   },
   {
     documentType: 'data-policy',
-    title: 'Chính sách dữ liệu',
-    summary: 'Xử lý dữ liệu cá nhân và dữ liệu giao dịch sàn.',
+    title: 'Chính sách lưu trữ và cung cấp dữ liệu',
+    summary: 'Thời hạn lưu trữ, tạm giữ và cung cấp dữ liệu cho cơ quan có thẩm quyền.',
     content: `# Chính sách dữ liệu
 
-Tuân thủ pháp luật bảo vệ dữ liệu cá nhân Việt Nam. Dữ liệu đơn hàng, xác minh Seller, audit được lưu theo thời hạn phục vụ đối soát và yêu cầu cơ quan có thẩm quyền.`,
+- Thông tin sản phẩm đã đăng: lưu tối thiểu 01 năm.
+- Hợp đồng, đơn hàng, thanh toán, khiếu nại: lưu tối thiểu 03 năm.
+- Dữ liệu agent sau khi thuê bao hết hạn: 30 ngày; ổ đĩa GPU sau khi xóa máy: tối đa 24 giờ.
+- Dữ liệu liên quan tranh chấp, điều tra được tạm giữ đến khi kết thúc.
+- Cung cấp dữ liệu theo yêu cầu bằng văn bản của cơ quan có thẩm quyền; gỡ bỏ, tạm ngừng trong 24 giờ khi được yêu cầu.
+
+${FULL_TEXT}/chinh-sach-luu-tru-va-cung-cap-du-lieu`,
   },
   {
     documentType: 'tax-policy',
     title: 'Chính sách thuế AI Markets',
-    summary: 'Phí sàn 20% không phải thuế; khấu trừ thêm 10% trên 80% doanh thu seller (8% đơn).',
+    summary: 'Khấu trừ, nộp thay thuế cho hộ, cá nhân kinh doanh theo NĐ 252/2026/NĐ-CP.',
     content: `# Chính sách thuế
 
-## Phí sàn không phải thuế
-Marketplace thu **platform commission** (mặc định 20% đối với seller bên thứ ba). Đây **không** phải thuế thu nhập / VAT của seller.
+## Phí dịch vụ sàn không phải thuế
+Phí dịch vụ sàn (mặc định 20%) là doanh thu của nền tảng, không phải thuế của người bán.
 
-## Thuế khấu trừ trên phần seller
-Sau phí sàn, seller còn **80%** doanh thu gộp. Sàn khấu trừ **10% thuế** trên phần 80% đó — tương đương **8%** giá trị đơn — và ghi **TAX_PAYABLE**. Tổng khấu trừ mặc định: **20% phí sàn + 8% thuế**.
+## Khấu trừ, nộp thay
+Theo Nghị định 252/2026/NĐ-CP, sàn khấu trừ, nộp thay thuế GTGT, TNCN đối với người bán là **hộ, cá nhân kinh doanh**, theo tỷ lệ pháp luật quy định cho từng nhóm hàng hóa, dịch vụ và tình trạng cư trú. Số thuế khấu trừ thể hiện trên đối soát từng đơn và chứng từ khấu trừ.
 
-## Phí CHPlay / App Store không phải thuế
-Phí Google Play (mặc định 15%) và App Store (mặc định 30%) trên IAP là hoa hồng/phí dịch vụ của cửa hàng ứng dụng, **không phải thuế**, không phải phí sàn. Sàn khấu trừ snapshot khi tính payout.
+## Người bán là doanh nghiệp, tổ chức
+Không khấu trừ; người bán tự kê khai, nộp thuế.
 
-## Nghĩa vụ thuế của Seller
-Seller chịu trách nhiệm kê khai, nộp thuế theo loại hình (cá nhân, hộ kinh doanh, doanh nghiệp, seller nước ngoài) và pháp luật áp dụng.
-
-## Khấu trừ
-Sàn khấu trừ tại nguồn theo Tax Rule. Mặc định: **10% trên 80% doanh thu seller** (8% đơn). Rule cụ thể theo hồ sơ / pháp luật có thể thay thế tỷ lệ này cho giao dịch mới.
-
-## Hóa đơn
-Hóa đơn sàn (phí dịch vụ marketplace) khác hóa đơn hàng hóa/dịch vụ của Seller tới Buyer khi giao dịch third-party.
-
-## Seller nước ngoài
-Không mặc định áp dụng cùng cách tính với seller Việt Nam. Hồ sơ thuế / residency được version hóa.
+## Phí cửa hàng ứng dụng
+Phí Google Play / App Store là phí của cửa hàng, không phải thuế, không phải phí sàn.
 
 ## Thay đổi
-Thay đổi luật hoặc Tax Rule chỉ áp dụng cho giao dịch mới. Order đã snapshot không bị tính lại.`,
+Thay đổi tỷ lệ theo pháp luật chỉ áp dụng cho giao dịch mới.
+
+${FULL_TEXT}/chinh-sach-thue`,
   },
   {
     documentType: 'invoice-policy',
     title: 'Chính sách hóa đơn AI Markets',
-    summary: 'Phân biệt hóa đơn nền tảng (commission) và hóa đơn seller.',
+    summary: 'Phân biệt hóa đơn phí dịch vụ của sàn và hóa đơn của người bán.',
     content: `# Chính sách hóa đơn
 
-Sàn không giả định mình là bên bán đối với mọi giao dịch.
+- **Hóa đơn của sàn**: phí dịch vụ sàn và sản phẩm Platform Direct.
+- **Hóa đơn của người bán**: hàng hóa, dịch vụ do người bán bên thứ ba cung cấp; với hộ, cá nhân kinh doanh áp dụng theo Nghị định 252/2026/NĐ-CP.
+- Doanh nghiệp cần hóa đơn gửi yêu cầu tới support@aimarkets.vn kèm tên, mã số thuế, địa chỉ và mã đơn.
+- Thanh toán trong ứng dụng: biên nhận do Apple/Google phát hành.
 
-- **PLATFORM_INVOICE**: phí dịch vụ sàn / commission / hàng Platform Direct.
-- **SELLER_INVOICE**: hàng hóa/dịch vụ do seller thứ ba cung cấp cho buyer (khi mô hình pháp lý/accounting yêu cầu).
-
-Chi tiết xuất hóa đơn theo hồ sơ thuế đã xác minh và quy định hóa đơn điện tử đang hiệu lực.`,
+${FULL_TEXT}/chinh-sach-hoa-don`,
   },
 ];
 
 async function ensureLegalDocuments() {
-  const version = '2026.09.20';
-  const effectiveAt = new Date('2026-09-20T00:00:00.000Z');
+  const version = '2026.10.04';
+  const effectiveAt = new Date('2026-10-04T00:00:00.000Z');
   let created = 0;
   let skipped = 0;
 

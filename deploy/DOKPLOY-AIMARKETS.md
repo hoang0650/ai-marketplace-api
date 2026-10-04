@@ -98,6 +98,19 @@ curl -s https://api.aimarkets.vn/health
 curl -s "https://api.aimarkets.vn/v1/products?limit=1"
 ```
 
+## Ponytail (`aimarketplace-ponytail`)
+
+Service nội bộ (không cần domain) phát bộ quy tắc Ponytail cho mọi runtime agent để agent viết ít code thừa hơn, giảm token output khách hàng phải trả. Hướng dẫn tạo app: `ponytail/deploy/DOKPLOY.md` (Dockerfile, port `8787`).
+
+Env thêm trên **OpenClaw, Hermes, NanoClaw, Paperclip, Open WebUI, SpaceBot** rồi redeploy từng app:
+
+```env
+PONYTAIL_URL=http://aimarketplace-ponytail:8787
+PONYTAIL_MODE=compact   # lite | full | ultra | off
+```
+
+API không tham gia: runtime tự lấy quy tắc, cache 10 phút, service sập thì chat vẫn chạy bình thường.
+
 ## Traefik (Dokploy → Traefik File System)
 
 1. **`traefik.yml`** — giữ `openclaw/deploy/dokploy-traefik.yml` (HTTP→HTTPS + Let's Encrypt HTTP-01).

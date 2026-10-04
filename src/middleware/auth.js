@@ -58,7 +58,7 @@ function signAccessToken(user) {
 }
 
 function signRefreshToken(user) {
-  return jwt.sign({ userId: String(user._id) }, config.refreshTokenSecret, {
+  return jwt.sign({ userId: String(user._id), tv: Number(user.tokenVersion) || 0 }, config.refreshTokenSecret, {
     expiresIn: config.refreshExpiresIn,
     algorithm: 'HS256',
   });
@@ -134,12 +134,26 @@ function publicUser(user) {
     creatorSlug: u.creatorSlug || undefined,
     bio: u.bio || undefined,
     kycStatus,
+    hasPassword: !!(user?.passwordHash || user?.hasPassword),
+    googleLinked: !!u.googleId,
+    profile: {
+      introLine: u.profile?.introLine || '',
+      region: u.profile?.region || '',
+      website: u.profile?.website || '',
+      notifyLang: u.profile?.notifyLang || 'vi',
+      socials: (u.profile?.socials || []).map((s) => ({ label: s.label || '', url: s.url || '' })),
+    },
+    preferences: {
+      personalizeContent: !!u.preferences?.personalizeContent,
+      personalizeAds: !!u.preferences?.personalizeAds,
+    },
     createdAt: user.createdAt ? new Date(user.createdAt).toISOString() : new Date().toISOString(),
   };
 }
 
 function cacheableUser(user) {
   const o = typeof user.toObject === 'function' ? user.toObject() : { ...user };
+  o.hasPassword = !!(o.passwordHash || o.hasPassword);
   delete o.passwordHash;
   delete o.__v;
   if (o._id) o._id = String(o._id);
@@ -218,6 +232,11 @@ async function requireAuthSession(userId) {
   } catch {
     return true;
   }
+}
+
+async function getAuthSession(userId) {
+  if (!userId || !isCacheAvailable()) return null;
+  return getCache(authSessionCacheKey(String(userId))).catch(() => null);
 }
 
 function issueAuthTokens(user) {
@@ -366,6 +385,7 @@ module.exports = {
   invalidateAuthUserCache,
   persistAuthCaches,
   requireAuthSession,
+  getAuthSession,
   loadActiveUser,
   issueAuthTokens,
   attachAuthSession,

@@ -166,7 +166,7 @@ A: Dashboard provider là tài khoản seller. Per-user chỉ có khi gọi qua 
 A: Từ `usage` response provider (qua denglish-api). Không tự đoán trừ sandbox mode.
 
 **Q: Buyer có xem tổng token đã dùng không?**  
-A: Mỗi response có `usage`. API tổng theo buyer đang được bổ sung (`GET /v1/usage/me`).
+A: Có. Mỗi response có `usage`; buyer xem lịch sử + tổng ở trang `/usage` hoặc qua `GET /v1/usage/me?limit=100` (tối đa 200 dòng gần nhất). Response: `{ currency, summary: { requests, totalCharged, totalInputTokens, totalOutputTokens, totalTokens }, items }` — gồm `UsageEvent` (API/GPU) và các lần trừ ví agent OpenClaw / Hermes / NanoClaw.
 
 **Q: Deployment invoke khác gì gateway?**  
 A: `POST /deployments/:id/invoke` có thể nhận token client báo cáo — ưu tiên gateway cho billing chính xác.
