@@ -4,6 +4,11 @@ const mongoose = require('mongoose');
 const { authenticate } = require('../middleware/auth');
 const SshSession = require('../models/SshSession');
 const WalletTx = require('../models/WalletTx');
+const ProviderApiKey = require('../models/ProviderApiKey');
+const AgentProviderSetting = require('../models/AgentProviderSetting');
+const { openSecret } = require('../utils/secret-box');
+const { getByokProvider } = require('../utils/byok-providers');
+const { toOpenAICompatibleConnection } = require('./runtime-byok-claim');
 const { getAvailableBalance } = require('../utils/wallet');
 const {
   assertActiveSubscription,
@@ -19,6 +24,7 @@ const {
 const router = express.Router();
 const SSH_TTL_MS = 60 * 60 * 1000;
 const USER_ID_RE = /^[a-f0-9]{24}$/i;
+const MODEL_ID_RE = /^[\w.:/@+-]{1,200}$/;
 const AIMARKETS_PUBLIC_TEMPLATE =
   process.env.NANOCLAW_AIMARKETS_PUBLIC_URL_TEMPLATE ||
   process.env.NANOCLAW_PROXVN_URL_TEMPLATE ||
@@ -335,6 +341,101 @@ router.post('/ssh/revoke', authenticate, async (req, res, next) => {
       { $set: { revokedAt: new Date() } },
     );
     return res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * BYOK provider for the buyer's NanoClaw agents: one of their saved keys
+ * (/v1/openclaw/byok/keys) plus a model. No selection = AI Markets default model.
+ */
+router.get('/provider', authenticate, async (req, res, next) => {
+  try {
+    const setting = await AgentProviderSetting.findOne({ user: req.user._id, agent: 'nanoclaw' });
+    return res.json({ success: true, selection: setting ? setting.toPublic() : null });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put('/provider', authenticate, async (req, res, next) => {
+  try {
+    const spec = getByokProvider(req.body?.provider);
+    if (!spec) {
+      return res.status(400).json({ success: false, message: 'Choose a provider.' });
+    }
+    const key = await ProviderApiKey.findOne({ user: req.user._id, provider: spec.id });
+    if (!key || key.status !== 'active') {
+      return res.status(400).json({
+        success: false,
+        code: 'KEY_REQUIRED',
+        message: `Save and verify your ${spec.label} API key first.`,
+      });
+    }
+    const model = String(req.body?.model || '').trim() || (spec.custom ? key.model : '');
+    if (!MODEL_ID_RE.test(model)) {
+      return res.status(400).json({ success: false, message: 'Enter a valid model id.' });
+    }
+    const setting = await AgentProviderSetting.findOneAndUpdate(
+      { user: req.user._id, agent: 'nanoclaw' },
+      { $set: { provider: spec.id, model } },
+      { upsert: true, new: true, setDefaultsOnInsert: true },
+    );
+    return res.json({ success: true, selection: setting.toPublic() });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/provider', authenticate, async (req, res, next) => {
+  try {
+    await AgentProviderSetting.deleteOne({ user: req.user._id, agent: 'nanoclaw' });
+    return res.json({ success: true, selection: null });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** NanoClaw host only (X-Service-Secret): the decrypted OpenAI-compatible connection for one buyer. */
+router.get('/provider/resolve', async (req, res, next) => {
+  try {
+    if (!serviceSecretOk(req)) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+    const userId = readNanoclawUserId(req);
+    if (!USER_ID_RE.test(userId)) {
+      return res.status(400).json({ success: false, message: 'user_id required' });
+    }
+    res.set('Cache-Control', 'no-store');
+    const setting = await AgentProviderSetting.findOne({ user: userId, agent: 'nanoclaw' }).lean();
+    if (!setting) return res.json({ success: true, userId, connection: null });
+    const key = await ProviderApiKey.findOne({
+      user: userId,
+      provider: setting.provider,
+      status: 'active',
+    }).select('+secret');
+    if (!key) return res.json({ success: true, userId, connection: null, reason: 'key_missing' });
+    let apiKey;
+    try {
+      apiKey = openSecret(key.secret);
+    } catch {
+      console.warn(`[nanoclaw-provider] cannot decrypt key user=${userId} provider=${setting.provider}`);
+      return res.json({ success: true, userId, connection: null, reason: 'key_unreadable' });
+    }
+    const conn = toOpenAICompatibleConnection({
+      provider: setting.provider,
+      apiKey,
+      baseUrl: key.baseUrl,
+      model: setting.model,
+    });
+    if (!conn) return res.json({ success: true, userId, connection: null, reason: 'provider_unsupported' });
+    ProviderApiKey.updateOne({ _id: key._id }, { $set: { lastUsedAt: new Date() } }).catch(() => {});
+    return res.json({
+      success: true,
+      userId,
+      connection: { provider: conn.provider, baseUrl: conn.baseUrl, apiKey, model: setting.model },
+    });
   } catch (err) {
     next(err);
   }
