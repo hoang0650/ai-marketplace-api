@@ -53,7 +53,7 @@ Luật Thương mại điện tử số 122/2025/QH15; Nghị định số 248/2
 - **Nhà cung cấp hạ tầng** (GPU, mô hình AI, đám mây) không phải người bán.
 
 ## 3. Sản phẩm
-Mô hình và API AI, agent, mẫu website/ứng dụng, giọng đọc AI, dịch vụ talent, thuê GPU, máy chủ chơi game theo phút. Phim, truyện/sách điện tử, dataset và tin tuyển dụng hiện chưa cung cấp.
+Mô hình và API AI, agent, mẫu website/ứng dụng, giọng đọc AI, phim AI, truyện/sách AI (license xem/đọc theo thời hạn), dịch vụ talent, thuê GPU, máy chủ chơi game theo phút. Dataset và tin tuyển dụng hiện chưa cung cấp.
 
 ## 4. Phí
 - Phí dịch vụ sàn mặc định 20% giá trị giao dịch của người bán bên thứ ba; không phải thuế.
