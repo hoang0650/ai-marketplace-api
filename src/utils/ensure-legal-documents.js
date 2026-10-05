@@ -272,8 +272,8 @@ ${FULL_TEXT}/chinh-sach-hoa-don`,
 ];
 
 async function ensureLegalDocuments() {
-  const version = '2026.10.04';
-  const effectiveAt = new Date('2026-10-04T00:00:00.000Z');
+  const version = '2026.10.05';
+  const effectiveAt = new Date('2026-10-05T00:00:00.000Z');
   let created = 0;
   let skipped = 0;
 
