@@ -12,7 +12,8 @@ const {
   getKycObjectStream,
 } = require('../config/minio');
 const {
-  KYC_SIDES,
+  KYC_DOC_SIDES,
+  LICENSE_SIDE,
   mapKyc,
   kycOf,
   kycStatus,
@@ -49,12 +50,12 @@ router.get('/me', authenticate, async (req, res, next) => {
   }
 });
 
-/** POST /v1/kyc/documents/:side — upload ID front|back → private MinIO */
+/** POST /v1/kyc/documents/:side — upload ID front|back or business licence → private MinIO */
 router.post('/documents/:side', authenticate, upload.single('image'), async (req, res, next) => {
   try {
     const side = String(req.params.side || '').trim();
-    if (!KYC_SIDES.includes(side)) {
-      return res.status(400).json({ message: 'side must be front or back', code: 'INVALID_SIDE' });
+    if (!KYC_DOC_SIDES.includes(side)) {
+      return res.status(400).json({ message: 'side must be front, back or license', code: 'INVALID_SIDE' });
     }
     if (!isMinioEnabled()) {
       return res.status(503).json({ message: 'Document upload is not configured (MinIO)', code: 'MINIO_NOT_CONFIGURED' });
@@ -121,8 +122,8 @@ router.post('/documents/:side', authenticate, upload.single('image'), async (req
 router.get('/documents/:side', authenticate, async (req, res, next) => {
   try {
     const side = String(req.params.side || '').trim();
-    if (!KYC_SIDES.includes(side)) {
-      return res.status(400).json({ message: 'side must be front or back', code: 'INVALID_SIDE' });
+    if (!KYC_DOC_SIDES.includes(side)) {
+      return res.status(400).json({ message: 'side must be front, back or license', code: 'INVALID_SIDE' });
     }
     const targetId = req.query.userId && req.user.role === 'admin' ? String(req.query.userId) : String(req.user._id);
     const user = await User.findById(targetId);
@@ -149,7 +150,7 @@ router.get('/documents/:side', authenticate, async (req, res, next) => {
 router.get('/documents/:side/stream', authenticate, async (req, res, next) => {
   try {
     const side = String(req.params.side || '').trim();
-    if (!KYC_SIDES.includes(side)) {
+    if (!KYC_DOC_SIDES.includes(side)) {
       return res.status(400).json({ message: 'Invalid side', code: 'INVALID_SIDE' });
     }
     const targetId = req.query.userId && req.user.role === 'admin' ? String(req.query.userId) : String(req.user._id);
@@ -186,10 +187,13 @@ router.post('/submit', authenticate, async (req, res, next) => {
     if (!parsed.ok) return res.status(400).json({ message: parsed.message, code: parsed.code });
 
     const kyc = ensureKyc(user);
-    if (!canSubmit(kyc, status)) {
+    if (!canSubmit(kyc, status, parsed.data.subjectType)) {
+      const needsLicense = parsed.data.subjectType === 'organization';
       return res.status(400).json({
-        message: 'Upload the front and back of the ID document before submitting',
-        code: 'DOCUMENTS_INCOMPLETE',
+        message: needsLicense
+          ? 'Upload the front and back of the representative ID and the business registration certificate before submitting'
+          : 'Upload the front and back of the ID document before submitting',
+        code: needsLicense && !String(kyc[`${LICENSE_SIDE}ObjectName`] || '').trim() ? 'BUSINESS_LICENSE_REQUIRED' : 'DOCUMENTS_INCOMPLETE',
       });
     }
     Object.assign(kyc, parsed.data);

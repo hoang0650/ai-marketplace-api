@@ -3,7 +3,8 @@ const SellerProfile = require('../models/SellerProfile');
 const LegalDocument = require('../models/LegalDocument');
 const LegalAcceptance = require('../models/LegalAcceptance');
 const { authenticate, requireRoles } = require('../middleware/auth');
-const { getOrCreateSellerProfile } = require('../utils/seller-compliance');
+const { getOrCreateSellerProfile, sellerApprovalGate, LICENSED_SELLER_TYPES } = require('../utils/seller-compliance');
+const { normalizeSellerType } = require('../finance/seller-types');
 const { writeAuditLog } = require('../utils/audit');
 const { PLATFORM_COMMISSION_RATE, SELLER_TAX_RATE } = require('../finance/constants');
 
@@ -36,6 +37,10 @@ function mapSellerProfile(doc) {
     suspendedAt: o.suspendedAt ? new Date(o.suspendedAt).toISOString() : null,
     statusReason: o.statusReason || '',
     canPublish: o.verificationStatus === 'VERIFIED' && !!o.sellerAgreementAcceptedAt,
+    /** Household business / company must upload a business registration certificate in eKYC. */
+    requiresBusinessLicense: LICENSED_SELLER_TYPES.has(normalizeSellerType(o.sellerType)),
+    /** eKYC must be verified before approval and before any withdrawal. */
+    requiresKyc: true,
     createdAt: o.createdAt ? new Date(o.createdAt).toISOString() : null,
     updatedAt: o.updatedAt ? new Date(o.updatedAt).toISOString() : null,
   };
@@ -181,6 +186,13 @@ router.patch('/:id/status', authenticate, requireRoles('admin'), async (req, res
     const allowed = ['VERIFIED', 'REJECTED', 'SUSPENDED', 'TERMINATED', 'VERIFICATION_REQUIRED'];
     if (!allowed.includes(status)) {
       return res.status(400).json({ message: `status must be one of ${allowed.join(', ')}` });
+    }
+
+    if (status === 'VERIFIED') {
+      const User = require('../models/User');
+      const owner = await User.findById(profile.user).select('kyc').lean();
+      const gate = sellerApprovalGate(profile, owner?.kyc);
+      if (!gate.ok) return res.status(409).json({ message: gate.message, code: gate.code });
     }
 
     const old = profile.verificationStatus;

@@ -1,4 +1,5 @@
 const SellerProfile = require('../models/SellerProfile');
+const { normalizeSellerType } = require('../finance/seller-types');
 
 const PLATFORM_SELLER_SLUG = 'phai-gateways';
 
@@ -63,6 +64,42 @@ async function assertCanPublishProduct(user, { ownershipType = 'THIRD_PARTY_SELL
   return { allowed: true, ownershipType: 'THIRD_PARTY_SELLER', profile };
 }
 
+/** Seller types that must upload a business registration certificate (household business / company). */
+const LICENSED_SELLER_TYPES = new Set(['HOUSEHOLD_BUSINESS', 'COMPANY', 'FOREIGN_COMPANY']);
+
+/**
+ * Quy chế 2.1, Mục VIII: a seller can only be approved (VERIFIED) once the account owner's
+ * eKYC is verified; household businesses and companies/organizations must also have uploaded
+ * their business registration certificate (licence) scan in eKYC.
+ * Pure function — pass the seller profile and the owner's `user.kyc`.
+ * @returns {{ ok: true } | { ok: false, code: string, message: string }}
+ */
+function sellerApprovalGate(profile, kyc) {
+  const k = kyc && typeof kyc === 'object' ? kyc : {};
+  if (String(k.status || 'none') !== 'verified') {
+    return {
+      ok: false,
+      code: 'SELLER_KYC_REQUIRED',
+      message: 'Seller identity (eKYC) must be verified before the seller can be approved.',
+    };
+  }
+  const sellerType = normalizeSellerType(profile?.sellerType);
+  if (LICENSED_SELLER_TYPES.has(sellerType)) {
+    const hasLicense = k.subjectType === 'organization' && Boolean(String(k.licenseObjectName || '').trim());
+    if (!hasLicense) {
+      return {
+        ok: false,
+        code: 'BUSINESS_LICENSE_REQUIRED',
+        message:
+          sellerType === 'HOUSEHOLD_BUSINESS'
+            ? 'Household businesses must upload the household business registration certificate (eKYC → organization).'
+            : 'Companies/organizations must upload the business registration certificate or an equivalent licence (eKYC → organization).',
+      };
+    }
+  }
+  return { ok: true };
+}
+
 async function getOrCreateSellerProfile(user, defaults = {}) {
   let profile = await SellerProfile.findOne({ user: user._id });
   if (profile) return profile;
@@ -84,4 +121,6 @@ module.exports = {
   isPlatformOperator,
   assertCanPublishProduct,
   getOrCreateSellerProfile,
+  sellerApprovalGate,
+  LICENSED_SELLER_TYPES,
 };

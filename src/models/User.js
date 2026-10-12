@@ -20,6 +20,8 @@ const kycSchema = new mongoose.Schema(
     orgAddress: { type: String, default: '', trim: true, maxlength: 500 },
     frontObjectName: { type: String, default: '' },
     backObjectName: { type: String, default: '' },
+    /** Organizations: business registration certificate / licence scan (household or company). */
+    licenseObjectName: { type: String, default: '' },
     submittedAt: { type: Date, default: null },
     reviewedAt: { type: Date, default: null },
     reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
