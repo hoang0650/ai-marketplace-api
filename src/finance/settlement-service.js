@@ -1,6 +1,5 @@
 const CommissionRule = require('../models/CommissionRule');
 const TaxRule = require('../models/TaxRule');
-const StoreFeeRule = require('../models/StoreFeeRule');
 const SellerTaxProfile = require('../models/SellerTaxProfile');
 const { settleSale } = require('./settlement-engine');
 
@@ -12,8 +11,9 @@ async function loadActiveTaxRules() {
   return TaxRule.find({ status: 'ACTIVE' }).lean();
 }
 
+/** Store fees are no longer applied to orders (IAP is top-up only); kept for callers. */
 async function loadActiveStoreFeeRules() {
-  return StoreFeeRule.find({ status: 'ACTIVE' }).lean();
+  return [];
 }
 
 async function currentSellerTaxProfile(sellerId, at = new Date()) {
@@ -28,17 +28,15 @@ async function currentSellerTaxProfile(sellerId, at = new Date()) {
 }
 
 async function settleSaleFromDb(input) {
-  const [commissionRules, taxRules, storeFeeRules, sellerTaxProfile] = await Promise.all([
+  const [commissionRules, taxRules, sellerTaxProfile] = await Promise.all([
     loadActiveCommissionRules(),
     loadActiveTaxRules(),
-    loadActiveStoreFeeRules(),
     currentSellerTaxProfile(input.sellerId || input.seller?._id, input.transactionDate),
   ]);
   return settleSale({
     ...input,
     commissionRules,
     taxRules,
-    storeFeeRules,
     sellerTaxProfile,
   });
 }

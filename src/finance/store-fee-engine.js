@@ -1,21 +1,9 @@
-const {
-  roundMoney,
-  GOOGLE_PLAY_STORE_FEE_RATE,
-  APP_STORE_STORE_FEE_RATE,
-} = require('./constants');
 
 const SALES_CHANNELS = {
   WEB: 'WEB',
   GOOGLE_PLAY: 'GOOGLE_PLAY',
   APP_STORE: 'APP_STORE',
 };
-
-function inRange(rule, date) {
-  const t = date ? new Date(date).getTime() : Date.now();
-  if (rule.effectiveFrom && t < new Date(rule.effectiveFrom).getTime()) return false;
-  if (rule.effectiveTo && t > new Date(rule.effectiveTo).getTime()) return false;
-  return true;
-}
 
 /** CHPlay / Play Store / App Store aliases → canonical sales channel. Web/wallet → WEB (no store fee). */
 function normalizeSalesChannel(raw) {
@@ -32,48 +20,25 @@ function normalizeSalesChannel(raw) {
   return SALES_CHANNELS.WEB;
 }
 
-function defaultStoreFeeRate(channel) {
-  if (channel === SALES_CHANNELS.GOOGLE_PLAY) return GOOGLE_PLAY_STORE_FEE_RATE;
-  if (channel === SALES_CHANNELS.APP_STORE) return APP_STORE_STORE_FEE_RATE;
+/**
+ * Orders are always paid from the AI Markets wallet; Apple IAP / Google Play Billing are used
+ * only to top up the wallet (Quy chế 2.1). No store fee is ever deducted from an order or from
+ * the seller payable. Kept for the settlement contract: always 0. Historical orders keep the
+ * store-fee snapshot they were settled with; StoreFeeRule documents are ignored (not deleted).
+ */
+function defaultStoreFeeRate() {
   return 0;
 }
 
-function storeCollector(channel) {
-  if (channel === SALES_CHANNELS.GOOGLE_PLAY) return 'GOOGLE';
-  if (channel === SALES_CHANNELS.APP_STORE) return 'APPLE';
-  return '';
-}
-
-/**
- * Store fee is charged by Google/Apple on IAP, not by AI Markets.
- * Deducted from seller payable (or from platform proceeds on PLATFORM_DIRECT).
- */
-function calculateStoreFee({
-  grossAmount,
-  salesChannel,
-  transactionDate = new Date(),
-  rules = [],
-  digits = 2,
-} = {}) {
-  const channel = normalizeSalesChannel(salesChannel);
-  const base = roundMoney(grossAmount, digits);
-  const active = (rules || []).find(
-    (r) =>
-      (r.status || 'ACTIVE') === 'ACTIVE' &&
-      inRange(r, transactionDate) &&
-      normalizeSalesChannel(r.salesChannel) === channel,
-  );
-  const rate =
-    active && Number.isFinite(Number(active.rate)) ? Number(active.rate) : defaultStoreFeeRate(channel);
-  const amount = roundMoney(base * rate, digits);
+function calculateStoreFee({ salesChannel } = {}) {
   return {
-    channel,
-    rate,
-    amount,
+    channel: normalizeSalesChannel(salesChannel),
+    rate: 0,
+    amount: 0,
     borneBy: 'SELLER',
-    collector: storeCollector(channel),
-    ruleId: active?._id || active?.id || null,
-    ruleName: active?.name || (rate ? `DEFAULT_${channel}_STORE_FEE` : 'NO_STORE_FEE'),
+    collector: '',
+    ruleId: null,
+    ruleName: 'NO_STORE_FEE',
   };
 }
 

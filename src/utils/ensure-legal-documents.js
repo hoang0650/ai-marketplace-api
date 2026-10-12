@@ -63,7 +63,7 @@ Mô hình và API AI, agent, gói kỹ năng, phần mềm, mẫu website/ứng 
 ## 4. Phí
 - Phí dịch vụ sàn mặc định 20% giá trị đơn hàng sau giảm giá của người bán bên thứ ba; không phải thuế. Mã giảm giá được trừ trước khi tính phí sàn.
 - Thuế khấu trừ cố định 8% giá trị đơn hàng, áp dụng cho mọi người bán. Tổng khấu trừ 28%; số dư hiển thị của người bán là số dư ròng.
-- Phí kho ứng dụng (Google Play 15%, App Store 30%) đối với giao dịch trong ứng dụng do Google/Apple thu; không phải phí sàn.
+- Không khấu trừ phí kho ứng dụng (Google Play / App Store) trên đơn hàng: Apple IAP và Google Play Billing chỉ dùng để nạp ví.
 - Thuê bao agent 199.000 đ/30 ngày; phí token theo chi phí nhà cung cấp + 25%; BYOK không tính phí token.
 - Thay đổi phí được thông báo trước ít nhất 30 ngày và chỉ áp dụng cho đơn hàng mới.
 
@@ -96,7 +96,7 @@ ${FULL_TEXT}/quy-che-hoat-dong-san-tmdt`,
 ## Phí
 - Phí dịch vụ sàn mặc định **20%** giá trị đơn hàng sau giảm giá, không phải thuế; mã giảm giá được trừ trước khi tính phí sàn.
 - Thuế khấu trừ cố định **8%** áp dụng cho mọi người bán; tổng khấu trừ **28%**, số dư hiển thị là số dư ròng.
-- Thanh toán trong ứng dụng: phí Google Play 15% / App Store 30% do cửa hàng thu, không phải doanh thu sàn.
+- Không khấu trừ phí kho ứng dụng (Google Play / App Store) trên đơn hàng: Apple IAP và Google Play Billing chỉ dùng để nạp ví.
 - Thay đổi phí được thông báo trước ít nhất 30 ngày.
 - Sản phẩm Platform Direct không áp dụng chia sẻ doanh thu.
 - Mỗi đơn lưu ảnh chụp tỷ lệ phí tại thời điểm giao dịch.
@@ -119,7 +119,7 @@ Phiên bản v2026.10.05 — hiệu lực từ ngày 05/10/2026. Bằng việc x
 1. Tuân thủ Quy chế hoạt động sàn và pháp luật Việt Nam.
 2. Cung cấp thông tin xác minh trung thực (eKYC; giấy chứng nhận đăng ký hộ kinh doanh/doanh nghiệp nếu có); cập nhật khi thay đổi.
 3. Chỉ bán sản phẩm có quyền hợp pháp, qua kiểm duyệt, không thuộc danh mục cấm; dịch vụ chuyên môn bán theo gói giá cố định.
-4. Chịu phí dịch vụ sàn 20% giá trị đơn hàng sau giảm giá và phí kho ứng dụng (Google Play 15%, App Store 30%) khi thanh toán trong ứng dụng, theo ảnh chụp đơn.
+4. Chịu phí dịch vụ sàn 20% giá trị đơn hàng sau giảm giá (không có phí kho ứng dụng trên đơn hàng), theo ảnh chụp đơn.
 5. Để sàn khấu trừ thuế cố định 8% giá trị đơn hàng; tổng khấu trừ 28%.
 6. Tiền được giữ 48 giờ; chỉ rút khi không có tranh chấp mở và đã xác minh (bao gồm eKYC).
 7. Không thu tiền ngoài sàn cho giao dịch phát sinh trên sàn.
@@ -158,7 +158,7 @@ Mọi đơn hàng được thanh toán bằng **số dư ví AI Markets**. GPay/
 Dùng để thanh toán trên sàn; được **rút về tài khoản ngân hàng đứng tên mình sau khi xác minh danh tính (eKYC)**. Tiền hoàn trả về ví hoặc phương thức thanh toán ban đầu.
 
 ## Sổ cái
-Mỗi đơn ghi giá, giảm giá (trừ trước phí sàn), phí dịch vụ sàn 20%, phí kho ứng dụng (nếu có), thuế khấu trừ 8% và phần người bán được nhận; đơn đã chốt không bị tính lại khi tỷ lệ thay đổi.
+Mỗi đơn ghi giá, giảm giá (trừ trước phí sàn), phí dịch vụ sàn 20%, thuế khấu trừ 8% và phần người bán được nhận; đơn đã chốt không bị tính lại khi tỷ lệ thay đổi.
 
 ## Chi trả người bán
 Giữ 48 giờ sau khi đơn hoàn tất; chi trả về tài khoản ngân hàng đứng tên người bán đã xác minh (bao gồm eKYC) khi không có tranh chấp.
@@ -266,7 +266,7 @@ Sàn khấu trừ thuế **cố định 8%** giá trị đơn hàng (tương đ�
 Khoản khấu trừ 8% không thay thế các nghĩa vụ thuế khác; người bán tự kê khai, quyết toán và xuất hóa đơn theo quy định.
 
 ## Phí cửa hàng ứng dụng
-Phí Google Play / App Store là phí của cửa hàng, không phải thuế, không phải phí sàn.
+Không khấu trừ phí Google Play / App Store trên đơn hàng hay trên doanh thu người bán; Apple IAP và Google Play Billing chỉ dùng để nạp ví.
 
 ## Thay đổi
 Thay đổi tỷ lệ được thông báo trước ít nhất 30 ngày và chỉ áp dụng cho giao dịch mới.

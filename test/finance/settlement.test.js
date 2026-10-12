@@ -211,27 +211,27 @@ test('default 10% tax on seller 80% share is 8% of order', () => {
   assert.equal(s.salesChannel, 'WEB');
 });
 
-describe('Case 11 – Google Play / CHPlay store fee on top of 20% commission', () => {
-  test('15% Play fee is not commission and not tax', () => {
+describe('Case 11 – in-app (Google Play) order: no store fee, IAP is top-up only', () => {
+  test('only 20% commission + 8% tax are deducted', () => {
     const s = settleSale({
       unitPrice: 1_000_000,
       ownershipType: 'THIRD_PARTY_SELLER',
       salesChannel: 'CHPLAY',
       commissionRules: [{ rate: 0.2, status: 'ACTIVE' }],
+      storeFeeRules: [{ salesChannel: 'GOOGLE_PLAY', rate: 0.15, status: 'ACTIVE' }],
     });
     assert.equal(s.salesChannel, 'GOOGLE_PLAY');
-    assert.equal(s.storeFeeCollector, 'GOOGLE');
-    assert.equal(s.storeFeeRate, 0.15);
-    assert.equal(s.storeFeeAmount, 150_000);
+    assert.equal(s.storeFeeRate, 0);
+    assert.equal(s.storeFeeAmount, 0);
     assert.equal(s.commissionAmount, 200_000);
     assert.equal(s.taxAmount, 80_000);
-    assert.equal(s.sellerNetAmount, 570_000);
+    assert.equal(s.sellerNetAmount, 720_000);
     assert.equal(s.platformRevenueAmount, 200_000);
   });
 });
 
-describe('Case 12 – App Store fee on top of 20% commission', () => {
-  test('30% Apple fee is deducted from seller payable', () => {
+describe('Case 12 – in-app (App Store) order: no store fee', () => {
+  test('seller net is the same as on the web', () => {
     const s = settleSale({
       unitPrice: 1_000_000,
       ownershipType: 'THIRD_PARTY_SELLER',
@@ -239,17 +239,13 @@ describe('Case 12 – App Store fee on top of 20% commission', () => {
       commissionRules: [{ rate: 0.2, status: 'ACTIVE' }],
     });
     assert.equal(s.salesChannel, 'APP_STORE');
-    assert.equal(s.storeFeeCollector, 'APPLE');
-    assert.equal(s.storeFeeRate, 0.3);
-    assert.equal(s.storeFeeAmount, 300_000);
-    assert.equal(s.commissionAmount, 200_000);
-    assert.equal(s.taxAmount, 80_000);
-    assert.equal(s.sellerNetAmount, 420_000);
+    assert.equal(s.storeFeeAmount, 0);
+    assert.equal(s.sellerNetAmount, 720_000);
   });
 });
 
-describe('Case 13 – Platform Direct IAP still pays store, not a seller', () => {
-  test('App Store cut reduces platform proceeds; seller net stays 0', () => {
+describe('Case 13 – Platform Direct in-app order: no store fee', () => {
+  test('platform keeps the full proceeds; seller net stays 0', () => {
     const s = settleSale({
       unitPrice: 1_000_000,
       ownershipType: 'PLATFORM_DIRECT',
@@ -259,7 +255,7 @@ describe('Case 13 – Platform Direct IAP still pays store, not a seller', () =>
     });
     assert.equal(s.commissionAmount, 0);
     assert.equal(s.sellerNetAmount, 0);
-    assert.equal(s.storeFeeAmount, 300_000);
-    assert.equal(s.platformRevenueAmount, 700_000);
+    assert.equal(s.storeFeeAmount, 0);
+    assert.equal(s.platformRevenueAmount, 1_000_000);
   });
 });

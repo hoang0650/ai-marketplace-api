@@ -10,7 +10,6 @@ const { ensureComputeTestProducts } = require('./utils/ensure-compute-products')
 const { ensureLegalDocuments } = require('./utils/ensure-legal-documents');
 const { ensureCommissionRules } = require('./utils/ensure-commission-rules');
 const { ensureTaxRules } = require('./utils/ensure-tax-rules');
-const { ensureStoreFeeRules } = require('./utils/ensure-store-fee-rules');
 const { syncSalesCountsFromOrders } = require('./utils/sales');
 const { attachTerminalGateway } = require('./terminal/gateway');
 const { attachGameStreamProxy } = require('./terminal/stream-proxy');
@@ -41,12 +40,6 @@ connectDb()
   .then((tax) => {
     if (tax) {
       console.log(`[finance] tax rule ensured rate=${tax.rate} created=${tax.created} updated=${tax.updated}`);
-    }
-  })
-  .then(() => ensureStoreFeeRules())
-  .then((storeFees) => {
-    if (storeFees) {
-      console.log(`[finance] store fee rules ensured created=${storeFees.created}`);
     }
   })
   .then(() => ensureRunpodMarketplaceProducts())
