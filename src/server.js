@@ -27,7 +27,7 @@ connectDb()
   .then((legal) => {
     if (legal) {
       console.log(
-        `[legal] ensured documents version=${legal.version} created=${legal.created} skipped=${legal.skipped}`,
+        `[legal] ensured documents version=${legal.version} created=${legal.created} updated=${legal.updated} skipped=${legal.skipped}`,
       );
     }
   })
