@@ -23,7 +23,6 @@ const { findActiveLicense } = require('../utils/content-drm');
 const { sendCheckoutSuccessEmail } = require('../utils/send-checkout-email');
 const { previewCoupon, consumeCoupon } = require('../utils/coupon');
 const { roundMoney } = require('../finance/constants');
-const { HIRE_REQUEST_CATEGORIES } = require('../data/categories');
 
 const router = express.Router();
 
@@ -35,12 +34,8 @@ router.post('/checkout', authenticate, async (req, res, next) => {
 
     const product = await Product.findById(productId);
     if (!product) return res.status(404).json({ message: 'Product not found' });
-    if (HIRE_REQUEST_CATEGORIES.includes(product.category)) {
-      return res.status(400).json({
-        message: 'Dịch vụ thuê theo dự án: hãy gửi yêu cầu để người bán báo giá và chia giai đoạn thanh toán.',
-        code: 'HIRE_REQUEST_REQUIRED',
-      });
-    }
+    // Professional services (hire-* categories) are fixed packages and check out from the
+    // wallet like every other product — the quote/milestone flow is discontinued.
 
     const ownershipType = product.ownershipType || 'THIRD_PARTY_SELLER';
     const licensePick = isLicenseCategory(product.category)

@@ -19,12 +19,14 @@ const AI_CATEGORIES = [
   { id: 'training-service', label: 'Training', description: 'Fine-tune and training jobs on provider GPUs.', hubPath: '/training-service', group: 'models', navGroup: 'platform', lane: 'ai' },
   { id: 'agent-runtime', label: 'Agent runtime', description: 'Deploy open-source agents as containers (OpenClaw, Hermes, custom).', hubPath: '/agent-runtime', group: 'hire', navGroup: 'platform', lane: 'ai' },
   { id: 'hire-agent', label: 'Agents', description: 'Hire & launch OpenClaw agents.', hubPath: '/hire-agent', group: 'hire', navGroup: 'platform', lane: 'ai' },
-  { id: 'hire-marketing', label: 'Marketing', description: 'Hire marketers for campaigns, ads, and growth.', hubPath: '/hire-marketing', group: 'hire', navGroup: 'talent', lane: 'ai' },
-  { id: 'hire-seo', label: 'SEO', description: 'Hire SEO specialists for search growth.', hubPath: '/hire-seo', group: 'hire', navGroup: 'talent', lane: 'ai' },
-  { id: 'hire-creator', label: 'Creator', description: 'Hire content creators, editors, and UGC talent.', hubPath: '/hire-creator', group: 'hire', navGroup: 'talent', lane: 'ai' },
-  { id: 'hire-workflow', label: 'Workflow automation', description: 'Hire specialists to automate ops with n8n, Zapier, Make, OpenClaw.', hubPath: '/hire-workflow', group: 'hire', navGroup: 'talent', lane: 'ai' },
-  { id: 'hire-build-app', label: 'Build app', description: 'Hire teams to design and ship mobile / desktop apps.', hubPath: '/hire-build-app', group: 'hire', navGroup: 'talent', lane: 'ai' },
-  { id: 'hire-build-web', label: 'Build web', description: 'Hire teams to build marketing sites, dashboards, and web apps.', hubPath: '/hire-build-web', group: 'hire', navGroup: 'talent', lane: 'ai' },
+  // Professional services (Quy chế 2.1, khoản 6 Mục X): fixed-package, outcome-based services sold
+  // like any other product. Ids keep the legacy `hire-*` prefix so existing listings/orders stay valid.
+  { id: 'hire-marketing', label: 'Marketing', description: 'Fixed-package marketing services (campaigns, ads, growth) priced per deliverable.', hubPath: '/hire-marketing', group: 'hire', navGroup: 'talent', lane: 'ai' },
+  { id: 'hire-seo', label: 'SEO', description: 'Fixed-package SEO services priced per deliverable.', hubPath: '/hire-seo', group: 'hire', navGroup: 'talent', lane: 'ai' },
+  { id: 'hire-creator', label: 'Creator', description: 'Fixed-package content creation (video, design, copy) priced per deliverable.', hubPath: '/hire-creator', group: 'hire', navGroup: 'talent', lane: 'ai' },
+  { id: 'hire-workflow', label: 'Workflow automation', description: 'Fixed-package automation (n8n, Zapier, Make, OpenClaw) priced per deliverable.', hubPath: '/hire-workflow', group: 'hire', navGroup: 'talent', lane: 'ai' },
+  { id: 'hire-build-app', label: 'Build app', description: 'Fixed-package mobile / desktop app builds priced per deliverable.', hubPath: '/hire-build-app', group: 'hire', navGroup: 'talent', lane: 'ai' },
+  { id: 'hire-build-web', label: 'Build web', description: 'Fixed-package websites, dashboards and web apps priced per deliverable.', hubPath: '/hire-build-web', group: 'hire', navGroup: 'talent', lane: 'ai' },
   { id: 'template-web', label: 'Web templates', description: 'Seller-made website templates. Open one in AI App Builder and restyle it with your own AI key.', hubPath: '/template-web', group: 'models', navGroup: 'platform', lane: 'ai' },
   { id: 'template-app', label: 'App templates', description: 'Seller-made React Native app templates. Run them in the phone simulator and customise with AI.', hubPath: '/template-app', group: 'models', navGroup: 'platform', lane: 'ai' },
 ];
@@ -32,8 +34,12 @@ const AI_CATEGORIES = [
 /** Builder template listings → project kind. */
 const TEMPLATE_CATEGORY_KIND = { 'template-web': 'web', 'template-app': 'app' };
 
-/** Custom work ordered through a quote + milestone project (no direct checkout). Talent may list only these. */
-const HIRE_REQUEST_CATEGORIES = [
+/**
+ * Professional services: làm web, làm app, marketing, SEO, creator, tự động hóa.
+ * Sold as fixed packages and paid from the wallet at checkout like any other product
+ * (no quotes, hourly/monthly pricing, job posts or milestones). Talent accounts may list only these.
+ */
+const PROFESSIONAL_SERVICE_CATEGORIES = [
   'hire-build-web',
   'hire-build-app',
   'hire-marketing',
@@ -41,6 +47,8 @@ const HIRE_REQUEST_CATEGORIES = [
   'hire-creator',
   'hire-workflow',
 ];
+/** @deprecated Legacy name kept for existing imports — same list as PROFESSIONAL_SERVICE_CATEGORIES. */
+const HIRE_REQUEST_CATEGORIES = PROFESSIONAL_SERVICE_CATEGORIES;
 
 const DIGITAL_CATEGORIES = [];
 const CATEGORY_META = [...AI_CATEGORIES];
@@ -52,5 +60,6 @@ module.exports = {
   CATEGORY_META,
   PRODUCT_CATEGORIES,
   TEMPLATE_CATEGORY_KIND,
+  PROFESSIONAL_SERVICE_CATEGORIES,
   HIRE_REQUEST_CATEGORIES,
 };

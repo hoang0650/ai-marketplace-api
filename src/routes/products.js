@@ -8,7 +8,7 @@ const { mapProduct } = require('../utils/mappers');
 const { slugify } = require('../utils/serialize');
 const { productSlugQuery, isCatalogProductSlug } = require('../utils/product-slug');
 const { cached, deleteCachePattern } = require('../utils/cache');
-const { PRODUCT_CATEGORIES, HIRE_REQUEST_CATEGORIES } = require('../data/categories');
+const { PRODUCT_CATEGORIES, PROFESSIONAL_SERVICE_CATEGORIES } = require('../data/categories');
 const { normalizeRuntime } = require('../utils/runtime');
 const { inferProductType } = require('../data/marketplace-types');
 const { catalogVisibleFilter, isCatalogVisible } = require('../utils/moderation');
@@ -121,27 +121,41 @@ router.get('/:slug', async (req, res, next) => {
   }
 });
 
-/** Talent may only offer custom work (quote + milestones); sellers may list every category. */
+/** Talent accounts may only offer professional services; sellers may list every category. */
 function talentCategoryError(user, category) {
-  if (user.role !== ROLE.TALENT || HIRE_REQUEST_CATEGORIES.includes(String(category))) return null;
+  if (user.role !== ROLE.TALENT || PROFESSIONAL_SERVICE_CATEGORIES.includes(String(category))) return null;
   return {
-    message: 'Talent chỉ được tạo listing thuê theo yêu cầu: Làm web, Làm app, Marketing, SEO, Creator, Tự động hóa.',
+    message:
+      'Tài khoản này chỉ được đăng dịch vụ chuyên môn trọn gói: Làm web, Làm app, Marketing, SEO, Creator, Tự động hóa.',
     code: 'CATEGORY_NOT_ALLOWED',
-    allowed: HIRE_REQUEST_CATEGORIES,
+    allowed: PROFESSIONAL_SERVICE_CATEGORIES,
   };
 }
 
-/** Hire listings are always quoted: `price` is the starting quote, never a checkout price. */
+/**
+ * Professional services are fixed packages (Quy chế 2.1, khoản 6 Mục X): one-time price per
+ * package / deliverable — never hourly, daily or monthly, never a negotiable quote.
+ */
 function hirePricing(category, pricing) {
-  if (!HIRE_REQUEST_CATEGORIES.includes(String(category))) return pricing;
+  if (!PROFESSIONAL_SERVICE_CATEGORIES.includes(String(category))) return pricing;
   const src = pricing && typeof pricing === 'object' ? pricing : {};
   return {
     model: 'one-time',
     price: Math.max(0, Number(src.price) || 0),
     currency: String(src.currency || 'USD'),
     interval: null,
-    compareAtPrice: 0,
-    negotiable: src.negotiable !== false,
+    compareAtPrice: Math.max(0, Number(src.compareAtPrice) || 0),
+    negotiable: false,
+  };
+}
+
+/** A professional-service package must carry a fixed checkout price. */
+function servicePricingError(category, pricing) {
+  if (!PROFESSIONAL_SERVICE_CATEGORIES.includes(String(category))) return null;
+  if (Number(pricing?.price) > 0) return null;
+  return {
+    message: 'Dịch vụ chuyên môn trọn gói phải có giá cố định theo gói (không báo giá, không tính theo giờ/tháng).',
+    code: 'SERVICE_PACKAGE_PRICE_REQUIRED',
   };
 }
 
@@ -171,6 +185,8 @@ router.post('/', authenticate, requireRoles('seller', 'talent', 'admin'), async 
     }
     const forbidden = talentCategoryError(req.user, body.category);
     if (forbidden) return res.status(403).json(forbidden);
+    const badServicePrice = servicePricingError(body.category, body.pricing);
+    if (badServicePrice) return res.status(400).json(badServicePrice);
     let slug = slugify(body.slug || name);
     if (!slug) slug = `product-${Date.now()}`;
     if (isCatalogProductSlug(slug) && req.user.role !== 'admin') slug = `p-${slug}`;
@@ -313,6 +329,8 @@ router.put('/:id', authenticate, requireRoles('seller', 'talent', 'admin'), asyn
     }
     if (body.pricing !== undefined || body.category !== undefined) {
       const plain = product.pricing?.toObject?.() || product.pricing;
+      const badServicePrice = servicePricingError(product.category, plain);
+      if (badServicePrice) return res.status(400).json(badServicePrice);
       product.pricing = hirePricing(product.category, plain);
     }
     if (body.contentMeta !== undefined || body.category) {
@@ -366,3 +384,4 @@ router.delete('/:id', authenticate, requireRoles('seller', 'talent', 'admin'), a
 module.exports = router;
 module.exports.talentCategoryError = talentCategoryError;
 module.exports.hirePricing = hirePricing;
+module.exports.servicePricingError = servicePricingError;

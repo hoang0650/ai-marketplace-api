@@ -13,7 +13,7 @@ const {
   roleIn,
 } = require('../../src/utils/hire/rules');
 const { publicHire } = require('../../src/routes/hire');
-const { talentCategoryError, hirePricing } = require('../../src/routes/products');
+const { talentCategoryError, hirePricing, servicePricingError } = require('../../src/routes/products');
 
 const NOW = new Date('2026-10-03T00:00:00Z');
 const day = (n) => new Date(NOW.getTime() + n * 86_400_000).toISOString();
@@ -165,16 +165,19 @@ test('talent may only list the six custom-work categories', () => {
   assert.equal(talentCategoryError({ role: 'seller' }, 'text-to-image'), null);
 });
 
-test('hire listings are forced to a negotiable starting quote', () => {
+test('professional services are forced to a fixed one-time package price', () => {
   assert.deepEqual(hirePricing('hire-seo', { model: 'subscription', price: 50, interval: 'month' }), {
     model: 'one-time',
     price: 50,
     currency: 'USD',
     interval: null,
     compareAtPrice: 0,
-    negotiable: true,
+    negotiable: false,
   });
-  assert.equal(hirePricing('hire-seo', { price: 10, negotiable: false }).negotiable, false);
+  assert.equal(hirePricing('hire-seo', { price: 10, negotiable: true }).negotiable, false);
+  assert.equal(servicePricingError('hire-seo', { price: 0 })?.code, 'SERVICE_PACKAGE_PRICE_REQUIRED');
+  assert.equal(servicePricingError('hire-seo', { price: 99 }), null);
+  assert.equal(servicePricingError('text-to-text', { price: 0 }), null);
   const other = { model: 'usage', usageRate: 1 };
   assert.equal(hirePricing('text-to-text', other), other);
 });

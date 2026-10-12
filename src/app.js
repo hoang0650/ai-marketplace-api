@@ -246,8 +246,10 @@ function createApp() {
   app.use('/v1/builder/templates', builderTemplateRoutes);
   app.use('/v1/builder/git', builderGitRoutes);
   app.use('/v1/builder', builderRoutes);
-  app.use('/v1/work', workRoutes);
-  app.use('/v1/hire', hireRoutes);
+  // Work board + quote-based Hire projects are discontinued (Quy chế 2.1) — 410 for new activity.
+  const { workDiscontinued, hireDiscontinued } = require('./middleware/discontinued');
+  app.use('/v1/work', workDiscontinued, workRoutes);
+  app.use('/v1/hire', hireDiscontinued, hireRoutes);
   app.use('/v1/uploads', uploadRoutes);
   app.use('/v1/sellers', sellerRoutes);
   app.use('/v1/legal', legalRoutes);
