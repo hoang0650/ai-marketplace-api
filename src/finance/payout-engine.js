@@ -30,14 +30,17 @@ async function createPayout({
   currency = 'USD',
   actorId = null,
   idempotencyKey = '',
+  /** false for buyer wallet withdrawals (eKYC-gated by the caller, no seller profile). */
+  requireSellerProfile = true,
 }) {
   if (idempotencyKey) {
     const existing = await SellerPayout.findOne({ idempotencyKey });
     if (existing) return { payout: existing, duplicate: true };
   }
 
-  const profile = await SellerProfile.findOne({ user: sellerId }).lean();
-  const gate = canPayoutSeller(profile);
+  const gate = requireSellerProfile
+    ? canPayoutSeller(await SellerProfile.findOne({ user: sellerId }).lean())
+    : { ok: true, status: 'PENDING', holdReason: '' };
   const payoutId = `po_${crypto.randomBytes(8).toString('hex')}`;
   const payout = await SellerPayout.create({
     payoutId,

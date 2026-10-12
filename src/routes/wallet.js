@@ -56,12 +56,16 @@ router.get('/payout-policy', authenticate, async (req, res, next) => {
   }
 });
 
-/** SePay / bank-transfer top-up is retired. Web uses PayPal; mobile uses IAP. */
+/**
+ * SePay / bank-transfer top-up is retired. Web tops up via GPay (ATM / card / VietQR);
+ * mobile tops up via Apple IAP / Google Play Billing. These rails only fund the wallet —
+ * orders are paid exclusively from the AI Markets wallet balance.
+ */
 router.post('/deposit', authenticate, (_req, res) => {
   res.status(410).json({
     code: 'SEPAY_DISABLED',
     message:
-      'Bank transfer top-up is no longer available. Use PayPal on the website, or in-app purchase in the iOS/Android app.',
+      'Bank transfer top-up is no longer available. Top up with GPay (ATM / card / VietQR) on the website, or in-app purchase in the iOS/Android app.',
   });
 });
 
@@ -74,10 +78,9 @@ router.post('/withdraw', authenticate, async (req, res, next) => {
 
     const { personas, persona, policy } = await resolvePayoutPersona(req.user, req.body?.persona);
 
-    // Buyers have a spend-only wallet — no cash-out.
     if (!policy.canWithdraw) {
       return res.status(403).json({
-        message: 'Buyer wallets cannot be withdrawn. Seller/talent/employer earnings only.',
+        message: 'Withdrawal is not available for this account.',
         code: 'WITHDRAW_UNAVAILABLE',
         persona: pickPrimary(personas),
         personas,
@@ -128,8 +131,9 @@ router.post('/withdraw', authenticate, async (req, res, next) => {
       });
     }
 
-    // Seller-like personas additionally need a VERIFIED seller profile.
-    if (persona !== 'employer' && req.user.role !== 'admin') {
+    // Seller-like personas additionally need a VERIFIED seller profile (buyers only need eKYC).
+    const needsSellerProfile = persona !== 'employer' && persona !== 'buyer' && req.user.role !== 'admin';
+    if (needsSellerProfile) {
       const SellerProfile = require('../models/SellerProfile');
       const profile = await SellerProfile.findOne({ user: req.user._id }).lean();
       const { canPayoutSeller } = require('../finance/payout-engine');
@@ -152,8 +156,9 @@ router.post('/withdraw', authenticate, async (req, res, next) => {
       currency: 'USD',
       actorId: req.user._id,
       idempotencyKey: `wd_${req.user._id}_${amount}_${Date.now()}`,
+      requireSellerProfile: persona !== 'buyer',
     });
-    if (payout.status === 'ON_HOLD' && req.user.role !== 'admin' && persona !== 'employer') {
+    if (payout.status === 'ON_HOLD' && needsSellerProfile) {
       return res.status(403).json({
         message: payout.holdReason || 'Payout on hold',
         code: payout.holdReason,

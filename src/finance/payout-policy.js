@@ -7,7 +7,7 @@ const SellerProfile = require('../models/SellerProfile');
 /**
  * Withdrawal policy per marketplace persona.
  *
- * - buyer        : withdrawal not available (wallet is spend-only)
+ * - buyer        : may withdraw the wallet balance after eKYC (ID/passport); no fee
  * - seller       : product/creator earnings — 20% platform commission + 8% tax
  * - talent       : talent profile earnings — same as seller
  * - freelancer   : accepted job applicant — same as seller
@@ -86,9 +86,11 @@ function policyFor(persona) {
       requiresNoDispute: true,
     };
   }
+  // Quy chế 2.1, khoản 3 Mục XI: buyers may withdraw their wallet balance once eKYC
+  // (CCCD/passport) is verified. No platform fee/tax applies to a buyer's own top-ups.
   return {
     persona: 'buyer',
-    canWithdraw: false,
+    canWithdraw: true,
     platformFeeRate: 0,
     taxRate: 0,
     totalFeeRate: 0,
@@ -145,7 +147,11 @@ async function resolvePayoutPersona(user, requested) {
     return { personas, persona: 'admin', policy: { ...policyFor('employer'), persona: 'admin', platformFeeRate: 0, taxRate: 0, totalFeeRate: 0, minAmount: 0, minAmountVnd: 0 } };
   }
   const wanted = String(requested || '').trim();
-  const persona = wanted && personas.includes(wanted) ? wanted : pickPrimary(personas);
+  // Sellers share one wallet ledger with their buyer persona; never let 'buyer' be used
+  // to bypass the seller verification gate on seller earnings.
+  const sellerLike = personas.some((p) => SELLER_LIKE.has(p));
+  const allowed = wanted && personas.includes(wanted) && !(wanted === 'buyer' && sellerLike);
+  const persona = allowed ? wanted : pickPrimary(personas);
   return { personas, persona, policy: policyFor(persona) };
 }
 
@@ -179,6 +185,7 @@ function mapPolicy(policy) {
     minAmountVnd: policy.minAmountVnd,
     holdHours: policy.holdHours,
     requiresNoDispute: policy.requiresNoDispute,
+    requiresKyc: policy.persona !== 'admin',
   };
 }
 
