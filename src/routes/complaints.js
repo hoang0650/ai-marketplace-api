@@ -19,6 +19,7 @@ const {
   notifyAdmins,
   auditComplaint,
 } = require('../utils/complaint-helpers');
+const { appealWindowOpen } = require('../utils/complaint-sla');
 
 const router = express.Router();
 const KINDS = Complaint.KINDS || [
@@ -304,6 +305,12 @@ router.post('/:id/appeal', authenticate, async (req, res, next) => {
     }
     if (complaint.appealedAt) {
       return res.status(400).json({ message: 'This case has already been appealed' });
+    }
+    if (!appealWindowOpen(complaint)) {
+      return res.status(400).json({
+        message: 'Thời hạn khiếu nại lại (7 ngày kể từ khi có quyết định) đã hết.',
+        code: 'APPEAL_WINDOW_CLOSED',
+      });
     }
     const reason = String(req.body?.reason || '').trim().slice(0, 2000);
     if (reason.length < 8) {

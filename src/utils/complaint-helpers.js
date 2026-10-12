@@ -1,6 +1,7 @@
 const User = require('../models/User');
 const { notifyMany } = require('./notify');
 const { writeAuditLog } = require('./audit');
+const { complaintDeadlines } = require('./complaint-sla');
 
 function caseRefFromId(id) {
   return `KN-${String(id).slice(-8).toUpperCase()}`;
@@ -37,6 +38,8 @@ function mapComplaint(doc) {
     appealedAt: o.appealedAt ? new Date(o.appealedAt).toISOString() : null,
     openedOrderDispute: !!o.openedOrderDispute,
     closedAt: o.closedAt ? new Date(o.closedAt).toISOString() : null,
+    /** Quy chế 2.1 Mục XIII deadlines (ISO, business days skip Sat/Sun VN time). */
+    deadlines: complaintDeadlines(o),
     events: (o.events || []).map((e) => ({
       at: e.at ? new Date(e.at).toISOString() : new Date().toISOString(),
       actorRole: e.actorRole || '',
