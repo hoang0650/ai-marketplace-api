@@ -189,6 +189,11 @@ router.post('/conversations', authenticate, async (req, res, next) => {
 
     let convo;
 
+    if (jobId || jobSlug || applicationId || talentSlug) {
+      // Work board is shut down (Quy chế 2.1): no job/talent conversations.
+      return res.status(410).json({ message: 'Tính năng Việc làm đã ngừng.', code: 'WORK_DISCONTINUED' });
+    }
+
     if (jobId || jobSlug || applicationId) {
       let job = null;
       let application = null;

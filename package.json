@@ -14,6 +14,7 @@
     "seed:builder": "node src/scripts/seed-builder.js",
     "seed:builder-market": "node src/scripts/seed-builder-market.js",
     "migrate:roles": "node src/scripts/migrate-roles.js",
+    "report:legacy-work": "node src/scripts/report-legacy-work.js",
     "test": "node --test test/**/*.test.js"
   },
   "engines": {

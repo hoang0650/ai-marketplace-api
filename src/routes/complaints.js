@@ -86,6 +86,10 @@ router.post('/', authenticate, async (req, res, next) => {
 
     // ——— Work / freelance complaints ———
     if (WORK_KINDS.includes(kind)) {
+      // Work is shut down: no new Work complaints. Existing cases stay visible to admins.
+      return res.status(410).json({ message: 'Tính năng Việc làm đã ngừng.', code: 'WORK_DISCONTINUED' });
+    }
+    if (WORK_KINDS.includes(kind)) {
       const appId = String(req.body?.jobApplicationId || '').trim();
       if (!isId(appId)) {
         return res.status(400).json({ message: 'jobApplicationId required for Work complaints' });

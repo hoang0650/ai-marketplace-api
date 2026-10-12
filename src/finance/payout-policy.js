@@ -1,6 +1,4 @@
 const config = require('../config/env');
-const JobPosting = require('../models/JobPosting');
-const JobApplication = require('../models/JobApplication');
 const TalentProfile = require('../models/TalentProfile');
 const SellerProfile = require('../models/SellerProfile');
 const { DEFAULT_VND_PER_USD } = require('../config/fx');
@@ -116,17 +114,15 @@ async function detectPersonas(user) {
   if (user.role === 'admin') return ['admin'];
   const uid = user._id || user.id;
   const role = require('../utils/roles').normalizeRole(user.role);
-  const [seller, talent, employer, freelancer] = await Promise.all([
+  // Work is shut down: employer/freelancer personas are no longer offered. Their wallet
+  // balance (one wallet per user) is withdrawn under the seller/talent or buyer policy.
+  const [seller, talent] = await Promise.all([
     role === 'seller' ? Promise.resolve(true) : SellerProfile.exists({ user: uid }),
     role === 'talent' ? Promise.resolve(true) : TalentProfile.exists({ user: uid }),
-    role === 'employer' ? Promise.resolve(true) : JobPosting.exists({ postedBy: uid }),
-    role === 'freelancer' ? Promise.resolve(true) : JobApplication.exists({ applicant: uid, status: 'accepted' }),
   ]);
   const found = [];
   if (seller) found.push('seller');
   if (talent) found.push('talent');
-  if (freelancer) found.push('freelancer');
-  if (employer) found.push('employer');
   found.push('buyer');
   return found;
 }

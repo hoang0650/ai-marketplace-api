@@ -7,23 +7,16 @@ const { KYC_SIDES, requiredSides, canSubmit, LICENSE_SIDE } = require('../../src
 
 const req = (method, path) => ({ method, path });
 
-test('work board: new jobs / applications / talent CVs are discontinued, in-flight actions stay', () => {
-  assert.equal(matches(WORK_BLOCKED, req('POST', '/jobs')), true);
-  assert.equal(matches(WORK_BLOCKED, req('POST', '/jobs/abc/applications')), true);
-  assert.equal(matches(WORK_BLOCKED, req('GET', '/talents')), true);
-  assert.equal(matches(WORK_BLOCKED, req('PUT', '/talents/me')), true);
-  assert.equal(matches(WORK_BLOCKED, req('POST', '/applications/1/deliver')), false);
-  assert.equal(matches(WORK_BLOCKED, req('GET', '/contracts/mine')), false);
-  assert.equal(matches(WORK_BLOCKED, req('GET', '/jobs/abc')), false);
+test('work board is fully shut down: every endpoint is discontinued', () => {
+  for (const [m, path] of [['POST', '/jobs'], ['GET', '/jobs/abc'], ['GET', '/talents'], ['POST', '/applications/1/deliver'], ['GET', '/contracts/mine'], ['GET', '/applications/mine']]) {
+    assert.equal(matches(WORK_BLOCKED, req(m, path)), true, `${m} ${path}`);
+  }
 });
 
-test('hire projects: new requests / quotes / accept are discontinued, delivery actions stay', () => {
-  assert.equal(matches(HIRE_BLOCKED, req('POST', '/projects')), true);
-  assert.equal(matches(HIRE_BLOCKED, req('POST', '/projects/x/quote')), true);
-  assert.equal(matches(HIRE_BLOCKED, req('POST', '/projects/x/accept')), true);
-  assert.equal(matches(HIRE_BLOCKED, req('POST', '/projects/x/approve')), false);
-  assert.equal(matches(HIRE_BLOCKED, req('POST', '/projects/x/cancel')), false);
-  assert.equal(matches(HIRE_BLOCKED, req('GET', '/projects')), false);
+test('hire projects are fully shut down, including existing projects', () => {
+  for (const [m, path] of [['POST', '/projects'], ['GET', '/projects'], ['GET', '/projects/x'], ['POST', '/projects/x/approve'], ['POST', '/projects/x/cancel']]) {
+    assert.equal(matches(HIRE_BLOCKED, req(m, path)), true, `${m} ${path}`);
+  }
 });
 
 test('discontinued middleware answers 410', () => {
@@ -33,9 +26,8 @@ test('discontinued middleware answers 410', () => {
   workDiscontinued(req('POST', '/jobs'), res, () => assert.fail('should not call next'));
   assert.equal(status, 410);
   assert.equal(body.code, 'WORK_DISCONTINUED');
-  let nexted = false;
-  workDiscontinued(req('GET', '/contracts/mine'), res, () => { nexted = true; });
-  assert.equal(nexted, true);
+  workDiscontinued(req('GET', '/contracts/mine'), res, () => assert.fail('should not call next'));
+  assert.equal(status, 410);
 });
 
 test('seller approval requires verified eKYC', () => {

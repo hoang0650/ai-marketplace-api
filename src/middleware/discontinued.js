@@ -1,32 +1,19 @@
 /**
- * Quy chế 2.1 (05/10/2026): the Work board (job posts, applications, talent CVs) and the
- * quote-based Hire projects flow are discontinued and replaced by fixed-package professional
- * services sold as regular products. New activity is refused with 410 Gone; read access and
- * actions that let already-funded jobs/projects finish (deliver, approve, revision, cancel,
- * terminate…) stay available so no user money or data is stranded. Nothing is deleted.
+ * Quy chế 2.1 (05/10/2026): the Work board (job posts, applications, talent CVs, contracts) and
+ * the quote-based Hire projects flow are discontinued and replaced by fixed-package professional
+ * services sold as regular products. All their endpoints answer 410 Gone. Nothing is deleted;
+ * see `npm run report:legacy-work` for what is left in the database.
  */
 
-const WORK_BLOCKED = [
-  ['GET', /^\/fields\/?$/],
-  ['GET', /^\/listing-fee\/?$/],
-  ['GET', /^\/jobs\/?$/],
-  ['GET', /^\/jobs\/[^/]+\/bids\/?$/],
-  ['GET', /^\/talents(\/[^/]+)?\/?$/],
-  ['POST', /^\/jobs\/?$/],
-  ['POST', /^\/jobs\/[^/]+\/applications\/?$/],
-  ['POST', /^\/talents\/?$/],
-  ['PUT', /^\/talents\/[^/]+\/?$/],
-];
-
-const HIRE_BLOCKED = [
-  ['POST', /^\/projects\/?$/],
-  ['POST', /^\/projects\/[^/]+\/(quote|counter|accept)\/?$/],
-];
+// Fully shut down (user decision 12/10/2026): every Work and Hire endpoint answers 410,
+// including existing jobs, contracts and hire projects. Data is kept untouched in MongoDB.
+const WORK_BLOCKED = [['*', /^\/.*/]];
+const HIRE_BLOCKED = [['*', /^\/.*/]];
 
 function matches(rules, req) {
   const method = String(req.method || '').toUpperCase();
   const path = String(req.path || '');
-  return rules.some(([m, re]) => m === method && re.test(path));
+  return rules.some(([m, re]) => (m === '*' || m === method) && re.test(path));
 }
 
 function discontinued(rules, code, message) {
