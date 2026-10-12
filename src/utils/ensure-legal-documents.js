@@ -134,7 +134,7 @@ ${FULL_TEXT}/mau-hop-dong-cung-cap-dich-vu-nguoi-ban`,
     content: `# Chính sách người mua
 
 - Kiểm tra nhãn **Bán bởi sàn** hoặc **Bán bởi người bán**, giá và đơn vị tính trước khi đặt hàng.
-- Mọi đơn hàng được thanh toán bằng số dư ví; nạp ví qua GPay/VietQR (web), Apple IAP hoặc Google Play Billing (ứng dụng). Giá hiển thị theo VNĐ, USD hoặc CNY; mã giảm giá hiển thị là “Giảm giá từ sàn” trong giỏ hàng.
+- Mọi đơn hàng được thanh toán bằng số dư ví; nạp ví qua GPay/VietQR (web), Apple IAP hoặc Google Play Billing (ứng dụng). Giá hiển thị theo VNĐ, USD hoặc CNY; mã giảm giá của sàn hiển thị là “Giảm giá nền tảng” trong giỏ hàng và được trừ trước khi tính phí sàn.
 - Người mua được rút số dư ví sau khi xác minh danh tính (eKYC) bằng CCCD/hộ chiếu.
 - Dịch vụ chuyên môn (làm web, làm app, marketing, SEO, creator, tự động hóa) bán theo gói giá cố định, thanh toán như sản phẩm khác.
 - Giỏ hàng, yêu thích đồng bộ giữa web và ứng dụng khi đăng nhập.
