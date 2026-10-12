@@ -5,6 +5,7 @@ const { calculatePaymentFee } = require('./payment-fee-engine');
 const { calculateStoreFee, normalizeSalesChannel } = require('./store-fee-engine');
 const { taxCategoryFromProduct } = require('./tax-category');
 const { normalizeSellerType } = require('./seller-types');
+const { calculateAffiliateCommission } = require('./affiliate-engine');
 
 /**
  * Single money calculation for checkout and usage.
@@ -28,6 +29,8 @@ function settleSale({
   storeFeeRules = [],
   refundAmount = 0,
   chargebackAmount = 0,
+  /** Seller-chosen affiliate rate (0–0.25), snapshotted by the caller; only when attributed. */
+  affiliateRate = 0,
   currency = 'USD',
   digits = 2,
 } = {}) {
@@ -113,6 +116,8 @@ function settleSale({
   let sellerNetAmount;
   let commissionAmount = commission.commissionAmount;
   let commissionRate = commission.rate;
+  let affiliateCommissionAmount = 0;
+  let appliedAffiliateRate = 0;
 
   if (ownershipType === 'PLATFORM_DIRECT' || sellerType === 'PLATFORM') {
     commissionRate = 0;
@@ -124,10 +129,15 @@ function settleSale({
   } else {
     platformRevenueAmount = commissionAmount;
     sellerGrossAmount = grossAmount;
+    // Affiliate commission comes out of the seller's share (never the platform fee or the tax).
+    const aff = calculateAffiliateCommission({ baseAmount: grossAmount, rate: affiliateRate, currency, digits });
+    appliedAffiliateRate = aff.rate;
+    affiliateCommissionAmount = aff.amount;
     sellerNetAmount = roundMoney(
       grossAmount -
         commissionAmount -
         tax.totalTaxAmount -
+        affiliateCommissionAmount -
         storeFee.amount -
         feeIfSeller -
         refund -
@@ -160,13 +170,15 @@ function settleSale({
     refundAmount: refund,
     chargebackAmount: chargeback,
     sellerGrossAmount,
-    sellerNetAmount,
+    sellerNetAmount: Math.max(0, sellerNetAmount),
     platformRevenueAmount,
+    affiliateRate: appliedAffiliateRate,
+    affiliateCommissionAmount,
     currency,
     taxCategory,
     /** Backward-compatible aliases */
     platformFee: platformRevenueAmount,
-    sellerNet: sellerNetAmount,
+    sellerNet: Math.max(0, sellerNetAmount),
   };
 }
 

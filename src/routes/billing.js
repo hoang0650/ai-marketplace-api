@@ -23,6 +23,8 @@ const { findActiveLicense } = require('../utils/content-drm');
 const { sendCheckoutSuccessEmail } = require('../utils/send-checkout-email');
 const { previewCoupon, consumeCoupon } = require('../utils/coupon');
 const { roundMoney } = require('../finance/constants');
+const { effectiveAffiliateRate } = require('../finance/affiliate-engine');
+const { resolveAttribution, recordAffiliateCommission } = require('../finance/affiliate-service');
 
 const router = express.Router();
 
@@ -113,6 +115,28 @@ router.post('/checkout', authenticate, async (req, res, next) => {
     }
     const payableSubtotal = roundMoney(Math.max(0, subtotal - couponDiscount));
     const discountedUnit = checkoutQty > 0 ? roundMoney(payableSubtotal / checkoutQty) : 0;
+    const sellerProfile = await SellerProfile.findOne({ user: product.creator }).lean();
+    // Affiliate: last valid click (cookie click id or the buyer's own signed-in clicks), seller's
+    // rate snapshotted now. Only third-party sales; commission comes out of the seller's share.
+    let affiliateClick = null;
+    let affiliateRate = 0;
+    if (ownershipType === 'THIRD_PARTY_SELLER' && payableSubtotal > 0) {
+      const rate = effectiveAffiliateRate(product, sellerProfile);
+      if (rate > 0) {
+        const attribution = await resolveAttribution({
+          buyerId: req.user._id,
+          product,
+          clickId: req.body?.affiliateClickId,
+        }).catch((err) => {
+          console.error('[affiliate]', err.message);
+          return { click: null };
+        });
+        if (attribution.click) {
+          affiliateClick = attribution.click;
+          affiliateRate = rate;
+        }
+      }
+    }
     const settlement = await settleSaleFromDb({
       unitPrice: discountedUnit,
       quantity: checkoutQty,
@@ -123,6 +147,7 @@ router.post('/checkout', authenticate, async (req, res, next) => {
       product: product.toObject ? product.toObject() : product,
       paymentMethod: salesChannel === 'WEB' ? 'internal_ledger' : salesChannel,
       salesChannel,
+      affiliateRate,
       currency,
       digits: 2,
     });
@@ -147,7 +172,6 @@ router.post('/checkout', authenticate, async (req, res, next) => {
     }
 
     const now = new Date();
-    const sellerProfile = await SellerProfile.findOne({ user: product.creator }).lean();
     const termsDoc = await LegalDocument.findOne({
       documentType: 'terms',
       status: 'published',
@@ -195,6 +219,11 @@ router.post('/checkout', authenticate, async (req, res, next) => {
       sellerGrossAmount: settlement.sellerGrossAmount,
       sellerNetAmount: settlement.sellerNetAmount,
       platformRevenueAmount: settlement.platformRevenueAmount,
+      affiliateRate: settlement.affiliateCommissionAmount > 0 ? settlement.affiliateRate : 0,
+      affiliateCommissionAmount: settlement.affiliateCommissionAmount || 0,
+      affiliateUser: settlement.affiliateCommissionAmount > 0 ? affiliateClick.affiliate : null,
+      affiliateCode: settlement.affiliateCommissionAmount > 0 ? affiliateClick.code : '',
+      affiliateClick: settlement.affiliateCommissionAmount > 0 ? affiliateClick._id : null,
       sellerNet: settlement.sellerNetAmount,
       platformFee: settlement.platformRevenueAmount,
       financialSnapshot: settlement,
@@ -222,6 +251,7 @@ router.post('/checkout', authenticate, async (req, res, next) => {
         commissionRate: settlement.commissionRate,
         salesChannel: settlement.salesChannel,
         storeFeeRate: settlement.storeFeeRate,
+        affiliateRate: settlement.affiliateCommissionAmount > 0 ? settlement.affiliateRate : 0,
         licenseTerm: licensePick?.term || '',
       },
     });
@@ -250,8 +280,16 @@ router.post('/checkout', authenticate, async (req, res, next) => {
           type: 'credit',
           amount: settlement.sellerNetAmount,
           currency,
-          note: `Seller payable: ${product.name} (commission ${settlement.commissionAmount} snapshot, store ${settlement.storeFeeAmount}, tax ${settlement.taxAmount})`,
+          note: `Seller payable: ${product.name} (commission ${settlement.commissionAmount} snapshot, tax ${settlement.taxAmount}${settlement.affiliateCommissionAmount ? `, affiliate ${settlement.affiliateCommissionAmount}` : ''})`,
         });
+      }
+      if (affiliateClick && settlement.affiliateCommissionAmount > 0) {
+        await recordAffiliateCommission({
+          order,
+          settlement,
+          click: affiliateClick,
+          holdUntil: order.payoutHoldUntil || new Date(now.getTime() + HOLD_MS),
+        }).catch((err) => console.error('[affiliate]', err.message));
       }
       await recordOrderLedger({
         order,
@@ -289,6 +327,7 @@ router.post('/checkout', authenticate, async (req, res, next) => {
         commissionAmount: settlement.commissionAmount,
         taxAmount: settlement.taxAmount,
         sellerNetAmount: settlement.sellerNetAmount,
+        affiliateCommissionAmount: settlement.affiliateCommissionAmount || 0,
         licenseTerm: licensePick?.term || '',
       },
       ip: req.ip,

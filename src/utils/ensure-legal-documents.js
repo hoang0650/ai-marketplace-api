@@ -288,6 +288,53 @@ ${FULL_TEXT}/chinh-sach-hoa-don`,
   },
 ];
 
+/** Own version: added 12/10/2026 without bumping the 2026.10.05 set. */
+const AFFILIATE_DOC_VERSION = '2026.10.12';
+const AFFILIATE_DOC = {
+  documentType: 'affiliate-policy',
+  title: 'Chính sách chương trình Affiliate AI Markets',
+  summary: 'Hoa hồng 0–25% giá trị đơn (giá sau giảm giá) do người bán chi trả; last-click 30 ngày; giữ 48 giờ; khấu trừ thuế TNCN; hành vi cấm và thu hồi hoa hồng.',
+  content: `# Chính sách chương trình Affiliate
+
+- **Tham gia**: mọi người dùng đăng nhập có thể lấy liên kết/mã giới thiệu cho từng sản phẩm hoặc gian hàng; rút hoa hồng cần hoàn tất eKYC. Người bán tự nguyện tham gia; mặc định 0% là không tham gia.
+- **Tỷ lệ**: người bán đặt từ 0% đến 25% giá trị đơn hàng (giá sau giảm giá) cho từng sản phẩm hoặc làm mặc định gian hàng; tỷ lệ được chốt khi đặt hàng.
+- **Người chịu chi phí**: hoa hồng trừ vào phần doanh thu của người bán, không trừ vào phí sàn và không thay đổi thuế. Người bán thực nhận = giá trị đơn − 20% phí sàn − 8% thuế (10% của 80%) − tỷ lệ affiliate × giá trị đơn. Ví dụ đơn 1.000.000 đ, tỷ lệ 25%: phí sàn 200.000 đ, thuế 80.000 đ, hoa hồng 250.000 đ, người bán nhận 470.000 đ.
+- **Ghi nhận**: nhấp chuột cuối cùng (last-click) trong 30 ngày; không ghi nhận khi người mua là người giới thiệu hoặc người giới thiệu là người bán.
+- **Ghi có**: hoa hồng vào ví người giới thiệu, tạm giữ 48 giờ (hoặc đến khi giải quyết xong khiếu nại), sau đó rút được sau eKYC.
+- **Thuế TNCN**: khấu trừ 10% trên khoản hoa hồng mỗi lần chi trả trên 2.000.000 đ đối với cá nhân (quy tắc có thể cấu hình, theo quy định thuế hiện hành).
+- **Hành vi cấm**: thư rác; quảng cáo sai sự thật, gây nhầm lẫn; đặt giá thầu từ khóa thương hiệu khi chưa được chấp thuận; đơn hàng ảo; nhồi cookie; tự giới thiệu.
+- **Thu hồi**: đơn hoàn tiền/hủy đảo ngược hoa hồng theo tỷ lệ; gian lận bị thu hồi toàn bộ hoa hồng liên quan, kể cả số đã khả dụng, và xử lý theo Quy trình xử lý vi phạm.
+
+${FULL_TEXT}/chinh-sach-affiliate`,
+};
+
+async function ensureAffiliateDocument() {
+  const existing = await LegalDocument.findOne({
+    documentType: AFFILIATE_DOC.documentType,
+    version: AFFILIATE_DOC_VERSION,
+    locale: 'vi',
+  });
+  if (existing) {
+    if (existing.content !== AFFILIATE_DOC.content || existing.title !== AFFILIATE_DOC.title || existing.summary !== AFFILIATE_DOC.summary) {
+      existing.title = AFFILIATE_DOC.title;
+      existing.summary = AFFILIATE_DOC.summary;
+      existing.content = AFFILIATE_DOC.content;
+      await existing.save();
+      return 'updated';
+    }
+    return 'skipped';
+  }
+  await LegalDocument.create({
+    ...AFFILIATE_DOC,
+    version: AFFILIATE_DOC_VERSION,
+    locale: 'vi',
+    effectiveAt: new Date('2026-10-12T00:00:00.000Z'),
+    publishedAt: new Date(),
+    status: 'published',
+  });
+  return 'created';
+}
+
 async function ensureLegalDocuments() {
   const version = '2026.10.05';
   const effectiveAt = new Date('2026-10-05T00:00:00.000Z');
@@ -326,7 +373,12 @@ async function ensureLegalDocuments() {
     created += 1;
   }
 
-  return { created, updated, skipped, version, types: LEGAL_DOCUMENT_TYPES };
+  const affiliate = await ensureAffiliateDocument();
+  if (affiliate === 'created') created += 1;
+  else if (affiliate === 'updated') updated += 1;
+  else skipped += 1;
+
+  return { created, updated, skipped, version, affiliateVersion: AFFILIATE_DOC_VERSION, types: LEGAL_DOCUMENT_TYPES };
 }
 
-module.exports = { ensureLegalDocuments, BASE_DOCS };
+module.exports = { ensureLegalDocuments, BASE_DOCS, AFFILIATE_DOC, AFFILIATE_DOC_VERSION };

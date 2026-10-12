@@ -37,6 +37,8 @@ const sellerProfileSchema = new mongoose.Schema(
     businessAddress: { type: String, default: '', trim: true, maxlength: 500 },
     contactEmail: { type: String, default: '', trim: true, maxlength: 200 },
     contactPhone: { type: String, default: '', trim: true, maxlength: 40 },
+    /** Store-wide affiliate commission (0–0.25); 0 = not in the program. Products may override. */
+    affiliateDefaultRate: { type: Number, default: 0, min: 0, max: 0.25 },
     identityVerificationStatus: {
       type: String,
       enum: ['none', 'pending', 'verified', 'rejected'],

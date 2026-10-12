@@ -29,6 +29,7 @@ const ledgerEntrySchema = new mongoose.Schema(
         'CHARGEBACK',
         'TAX',
         'ADJUSTMENT',
+        'AFFILIATE_COMMISSION',
       ],
       required: true,
       index: true,

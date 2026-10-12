@@ -30,6 +30,8 @@ function reverseSettlement(original, refundGross, digits = 2) {
     sellerGrossAmount: scale(original.sellerGrossAmount),
     sellerNetAmount: scale(original.sellerNetAmount ?? original.sellerNet),
     platformRevenueAmount: scale(original.platformRevenueAmount ?? original.commissionAmount),
+    affiliateRate: original.affiliateRate || 0,
+    affiliateCommissionAmount: scale(original.affiliateCommissionAmount),
     currency: original.currency,
     ownershipType: original.ownershipType,
   };
@@ -71,6 +73,8 @@ async function createRefund({
     taxAmount: order.taxAmount,
     taxBreakdown: order.taxBreakdown || [],
     storeFeeAmount: order.storeFeeAmount || 0,
+    affiliateRate: order.affiliateRate || 0,
+    affiliateCommissionAmount: order.affiliateCommissionAmount || 0,
     salesChannel: order.salesChannel || 'WEB',
     ownershipType: order.ownershipType,
     currency: order.currency,
@@ -164,6 +168,15 @@ async function createRefund({
       },
     },
   );
+
+  // Refund / cancellation reverses the affiliate commission in the same proportion.
+  if (Number(order.affiliateCommissionAmount) > 0) {
+    const ratio = snapshot.grossAmount > 0 ? Math.min(1, reversed.grossAmount / snapshot.grossAmount) : 1;
+    const { reverseAffiliateCommission } = require('./affiliate-service');
+    await reverseAffiliateCommission({ orderId: order._id, ratio, reason: `refund ${refundId}` }).catch((err) =>
+      console.error('[affiliate reversal]', err.message),
+    );
+  }
 
   const { revokeLicensesForOrder } = require('../utils/issue-license');
   await revokeLicensesForOrder(order._id).catch(() => {});

@@ -37,6 +37,7 @@ function mapProduct(doc, { includeSecrets = false } = {}) {
     coverUrl: o.coverUrl || '',
     gallery: o.gallery || [],
     pricing: o.pricing,
+    affiliateRate: o.affiliateRate ?? null,
     contentMeta: o.contentMeta || null,
     streaming: isStreamCategory(o.category)
       ? {

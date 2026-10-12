@@ -43,6 +43,12 @@ const orderSchema = new mongoose.Schema(
     sellerGrossAmount: { type: Number, default: 0, min: 0 },
     sellerNetAmount: { type: Number, default: 0, min: 0 },
     platformRevenueAmount: { type: Number, default: 0, min: 0 },
+    /** Affiliate snapshot (rate at order time; amount is deducted from sellerNetAmount). */
+    affiliateRate: { type: Number, default: 0, min: 0, max: 0.25 },
+    affiliateCommissionAmount: { type: Number, default: 0, min: 0 },
+    affiliateUser: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null, index: true },
+    affiliateCode: { type: String, default: '' },
+    affiliateClick: { type: mongoose.Schema.Types.ObjectId, ref: 'AffiliateClick', default: null },
     /** @deprecated Alias of sellerNetAmount (snapshot). Do not recompute from current rate. */
     sellerNet: { type: Number, default: 0, min: 0 },
     /** @deprecated Alias of platformRevenueAmount. */

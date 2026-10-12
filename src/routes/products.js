@@ -17,6 +17,8 @@ const { writeAuditLog } = require('../utils/audit');
 const { normalizeContentMeta, isVoiceCategory } = require('../utils/license-keys');
 const { applyVoiceProduct } = require('../utils/voice-clone');
 const { normalizeDevices } = require('../utils/stream-clients');
+const SellerProfile = require('../models/SellerProfile');
+const { parseAffiliateRate, effectiveAffiliateRate } = require('../finance/affiliate-engine');
 
 const router = express.Router();
 
@@ -112,7 +114,15 @@ router.get('/:slug', async (req, res, next) => {
     const result = await cached(`products:slug:${slug}`, DETAIL_TTL, async () => {
       const product = await Product.findOne(productSlugQuery(slug)).lean();
       if (!product || !isCatalogVisible(product)) return null;
-      return mapProduct(product);
+      const mapped = mapProduct(product);
+      // Effective affiliate rate (product override or store default) for "Hoa hồng lên đến X%".
+      if ((product.ownershipType || 'THIRD_PARTY_SELLER') === 'THIRD_PARTY_SELLER') {
+        const profile = await SellerProfile.findOne({ user: product.creator }).select('affiliateDefaultRate').lean();
+        mapped.affiliateEffectiveRate = effectiveAffiliateRate(product, profile);
+      } else {
+        mapped.affiliateEffectiveRate = 0;
+      }
+      return mapped;
     });
     if (!result) return res.status(404).json({ message: 'Not found' });
     res.json(result);
@@ -187,6 +197,8 @@ router.post('/', authenticate, requireRoles('seller', 'talent', 'admin'), async 
     if (forbidden) return res.status(403).json(forbidden);
     const badServicePrice = servicePricingError(body.category, body.pricing);
     if (badServicePrice) return res.status(400).json(badServicePrice);
+    const affiliate = parseAffiliateRate(body.affiliateRate, { allowNull: true });
+    if (!affiliate.ok) return res.status(400).json({ message: affiliate.message, code: affiliate.code });
     let slug = slugify(body.slug || name);
     if (!slug) slug = `product-${Date.now()}`;
     if (isCatalogProductSlug(slug) && req.user.role !== 'admin') slug = `p-${slug}`;
@@ -255,6 +267,7 @@ router.post('/', authenticate, requireRoles('seller', 'talent', 'admin'), async 
       coverUrl: body.coverUrl || '',
       gallery: Array.isArray(body.gallery) ? body.gallery : [],
       pricing: hirePricing(body.category, body.pricing),
+      affiliateRate: affiliate.rate,
       runtime: normalizeRuntime(body.runtime || {}, {
         defaults: { baseModel: name },
       }),
@@ -326,6 +339,12 @@ router.put('/:id', authenticate, requireRoles('seller', 'talent', 'admin'), asyn
     ];
     for (const key of fields) {
       if (body[key] !== undefined) product[key] = body[key];
+    }
+    if (body.affiliateRate !== undefined) {
+      // 0–25% of the price after discount; null = use the store default. Applies to new orders only.
+      const affiliate = parseAffiliateRate(body.affiliateRate, { allowNull: true });
+      if (!affiliate.ok) return res.status(400).json({ message: affiliate.message, code: affiliate.code });
+      product.affiliateRate = affiliate.rate;
     }
     if (body.pricing !== undefined || body.category !== undefined) {
       const plain = product.pricing?.toObject?.() || product.pricing;

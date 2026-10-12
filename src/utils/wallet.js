@@ -1,5 +1,6 @@
 const WalletTx = require('../models/WalletTx');
 const { getSellerHolds, roundMoney } = require('./payout-hold');
+const { getAffiliateHolds } = require('../finance/affiliate-service');
 
 const MAX_TX_AMOUNT = 100_000; // sanity cap per transaction (USD)
 
@@ -54,10 +55,13 @@ async function getBalance(userId) {
   return row?.balance || 0;
 }
 
-/** Ledger minus frozen sale payouts (48h window or open dispute on that order only). */
+/** Ledger minus frozen sale payouts and affiliate commissions (48h window or open dispute on that order only). */
 async function getAvailableBalance(userId) {
   const balance = roundMoney(await getBalance(userId));
-  const { held, holds } = await getSellerHolds(userId);
+  const seller = await getSellerHolds(userId);
+  const aff = await getAffiliateHolds(userId).catch(() => ({ held: 0, holds: [] }));
+  const held = roundMoney(seller.held + aff.held);
+  const holds = [...seller.holds, ...aff.holds];
   const available = roundMoney(Math.max(0, balance - held));
   return { balance, held, available, holds };
 }

@@ -123,6 +123,8 @@ const productSchema = new mongoose.Schema(
     coverUrl: { type: String, default: '' },
     gallery: { type: [String], default: [] },
     pricing: { type: pricingSchema, required: true },
+    /** Affiliate commission 0–0.25 of the price after discount, paid by the seller. null = store default. */
+    affiliateRate: { type: Number, default: null, min: 0, max: 0.25 },
     runtime: { type: runtimeSchema, default: () => ({}) },
     streaming: { type: streamingSchema, default: () => ({}) },
     contentMeta: { type: contentMetaSchema, default: () => ({}) },
