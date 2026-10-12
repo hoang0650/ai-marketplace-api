@@ -50,8 +50,8 @@ async function resolveAttribution({ buyerId, product, clickId, now = new Date() 
   const clicks = await AffiliateClick.find({ $or: or }).sort({ createdAt: -1 }).limit(50).lean();
   const picked = pickAttribution(clicks, { buyerId, product, now, windowDays: cfg.attributionDays });
   if (!picked.click) return { click: null, rejected: picked.rejected };
-  const affiliate = await User.findById(picked.click.affiliate).select('_id affiliateCode accountStatus').lean();
-  if (!affiliate || (affiliate.accountStatus && affiliate.accountStatus !== 'active')) {
+  const affiliate = await User.findById(picked.click.affiliate).select('_id affiliateCode accountStatus kyc.status').lean();
+  if (!affiliate || (affiliate.accountStatus && affiliate.accountStatus !== 'active') || affiliate.kyc?.status !== 'verified') {
     return { click: null, rejected: [...picked.rejected, { clickId: sid(picked.click._id), reason: 'AFFILIATE_INACTIVE' }] };
   }
   return { click: picked.click, affiliate, rejected: picked.rejected };

@@ -31,9 +31,18 @@ function publicConfig() {
   };
 }
 
+const isKycVerified = (user) => user?.kyc?.status === 'verified';
+
+const KYC_REQUIRED = {
+  code: 'KYC_REQUIRED',
+  message: 'Hoàn tất xác minh danh tính (eKYC) trước khi tạo liên kết affiliate.',
+};
+
+/** Creates the affiliate code only for eKYC-verified users; unverified users get no code. */
 async function ensureCode(userId) {
   const user = await User.findById(userId);
   if (!user) return null;
+  if (!isKycVerified(user)) return user;
   if (!user.affiliateCode) {
     let code = `PHAI-${String(user.name || 'USER').replace(/[^A-Za-z0-9]/g, '').slice(0, 8).toUpperCase() || 'USER'}`;
     if (await User.exists({ affiliateCode: code, _id: { $ne: user._id } })) {
@@ -114,7 +123,7 @@ function mapCommission(c, order, now = new Date()) {
 
 router.get('/config', (_req, res) => res.json(publicConfig()));
 
-/** The signed-in user's affiliate dashboard. Payout of commissions needs eKYC (wallet withdraw). */
+/** The signed-in user's affiliate dashboard. A code and links require eKYC (verified) first. */
 router.get('/', authenticate, async (req, res, next) => {
   try {
     const user = await ensureCode(req.user._id);
@@ -129,8 +138,10 @@ router.get('/', authenticate, async (req, res, next) => {
     const commission = summarize(rows, byId);
     const kycStatus = user.kyc?.status || 'none';
     res.json({
-      code: user.affiliateCode,
+      code: kycStatus === 'verified' ? user.affiliateCode : null,
       kycStatus,
+      kycRequired: kycStatus !== 'verified',
+      linkReady: kycStatus === 'verified',
       payoutReady: kycStatus === 'verified',
       clicks,
       orders: rows.filter((r) => r.status === 'active').length,
@@ -146,10 +157,12 @@ router.get('/', authenticate, async (req, res, next) => {
   }
 });
 
-/** Referral link for one product or one store. Any signed-in user can create one. */
+/** Referral link for one product or one store. Only eKYC-verified users can create one (403 KYC_REQUIRED). */
 router.get('/link', authenticate, async (req, res, next) => {
   try {
     const user = await ensureCode(req.user._id);
+    if (!user) return res.status(401).json({ message: 'Unauthorized' });
+    if (!isKycVerified(user)) return res.status(403).json(KYC_REQUIRED);
     const target = await findTarget({
       productId: req.query.productId,
       productSlug: req.query.productSlug,
@@ -189,9 +202,12 @@ router.post('/click', optionalAuth, async (req, res, next) => {
     const cfg = affiliateConfig();
     const code = String(req.body?.code || '').trim().slice(0, 64);
     if (!code) return res.status(400).json({ message: 'code required' });
-    const affiliate = await User.findOne({ affiliateCode: code }).select('_id accountStatus').lean();
+    const affiliate = await User.findOne({ affiliateCode: code }).select('_id accountStatus kyc.status').lean();
     if (!affiliate || (affiliate.accountStatus && affiliate.accountStatus !== 'active')) {
       return res.json({ ok: false, reason: 'UNKNOWN_CODE' });
+    }
+    if (!isKycVerified(affiliate)) {
+      return res.json({ ok: false, reason: 'AFFILIATE_NOT_VERIFIED' });
     }
     const target = await findTarget({
       productId: req.body?.productId,

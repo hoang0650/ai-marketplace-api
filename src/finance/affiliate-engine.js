@@ -34,7 +34,7 @@ function toVnd(amount, currency, cfg) {
 
 /**
  * Commission on the price after discount (order gross), borne by the seller.
- * PIT is withheld from the affiliate (not the seller) when one payment exceeds the threshold.
+ * PIT is withheld from the affiliate (not the seller) on every commission above the threshold (default 0, so every commission).
  */
 function calculateAffiliateCommission({ baseAmount, rate, currency = 'USD', digits = 2, config } = {}) {
   const cfg = config || affiliateConfig();
