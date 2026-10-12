@@ -1,4 +1,5 @@
 const { detectWebhookKind } = require('../utils/gpay-client');
+const { DEFAULT_VND_PER_USD } = require('../config/fx');
 
 const roundMoney = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
@@ -72,7 +73,7 @@ async function settleOrderEvent(event, { WalletTx, vndPerUsd, mapWallet = (t) =>
   }
 
   // QR reports the amount actually transferred; the gateway charges exactly the bill amount.
-  const rate = Number(vndPerUsd) > 0 ? Number(vndPerUsd) : 26000;
+  const rate = Number(vndPerUsd) > 0 ? Number(vndPerUsd) : DEFAULT_VND_PER_USD;
   const billedVnd = Number(tx.meta?.amountVnd) || 0;
   const paidVnd = event.paidVnd > 0 ? event.paidVnd : billedVnd;
   const amountUsd = paidVnd === billedVnd ? tx.amount : roundMoney(paidVnd / rate);

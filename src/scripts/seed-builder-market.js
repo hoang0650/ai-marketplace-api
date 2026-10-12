@@ -22,9 +22,10 @@ const { WEB_CASE, APP_CASE, replayCase } = require('./builder-demo-cases');
 const { inferProductType } = require('../data/marketplace-types');
 const { taxCategoryFromProduct } = require('../finance/tax-category');
 const { publicGatewayUrls } = require('../utils/gateway-urls');
+const { DEFAULT_VND_PER_USD } = require('../config/fx');
 
 const MOCK_PATH = path.resolve(__dirname, '../../../ai-marketplace/src/assets/mock/marketplace.json');
-const VND_PER_USD = Number(process.env.PAYPAL_VND_PER_USD || 26000);
+const VND_PER_USD = Number(process.env.PAYPAL_VND_PER_USD || DEFAULT_VND_PER_USD);
 
 /** USD, one-time. */
 const HIRE = [

@@ -1,4 +1,5 @@
 const config = require('../config/env');
+const { DEFAULT_VND_PER_USD } = require('../config/fx');
 
 const SANDBOX_BASE = 'https://api-m.sandbox.paypal.com';
 const LIVE_BASE = 'https://api-m.paypal.com';
@@ -17,7 +18,7 @@ function toPaypalUsd(amount, currency = 'USD', vndPerUsd = config.paypalVndPerUs
   const code = String(currency || 'USD').toUpperCase();
   let usd = n;
   if (code === 'VND' || code === 'VNĐ') {
-    const rate = Number(vndPerUsd) > 0 ? Number(vndPerUsd) : 26000;
+    const rate = Number(vndPerUsd) > 0 ? Number(vndPerUsd) : DEFAULT_VND_PER_USD;
     usd = n / rate;
   } else if (code !== 'USD') {
     return null;

@@ -9,6 +9,7 @@ const { orderRequestId, resolveOrderEvent, settleOrderEvent, roundMoney } = requ
 const { isAdmin } = require('../utils/roles');
 const { publicApiBase } = require('../config/googleAuth');
 const config = require('../config/env');
+const { DEFAULT_VND_PER_USD } = require('../config/fx');
 const {
   gpayEnabled,
   gpayVaEnabled,
@@ -30,7 +31,7 @@ const MAX_TOPUP_VND = 500_000_000;
 const APP_SCHEME = 'aimarkets';
 
 function vndPerUsd() {
-  return Number(config.gpayVndPerUsd) > 0 ? Number(config.gpayVndPerUsd) : 26000;
+  return Number(config.gpayVndPerUsd) > 0 ? Number(config.gpayVndPerUsd) : DEFAULT_VND_PER_USD;
 }
 
 function publicAccount(doc) {

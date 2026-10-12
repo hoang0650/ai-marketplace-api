@@ -3,6 +3,7 @@ const JobPosting = require('../models/JobPosting');
 const JobApplication = require('../models/JobApplication');
 const TalentProfile = require('../models/TalentProfile');
 const SellerProfile = require('../models/SellerProfile');
+const { DEFAULT_VND_PER_USD } = require('../config/fx');
 
 /**
  * Withdrawal policy per marketplace persona.
@@ -43,7 +44,7 @@ const EMPLOYER_MIN_VND = Math.max(0, Number(process.env.WITHDRAW_EMPLOYER_MIN_VN
  */
 const SELLER_CHARGE_AT_WITHDRAW = String(process.env.WITHDRAW_SELLER_CHARGE_AT_WITHDRAW || '').toLowerCase() === 'true';
 
-const VND_PER_USD = Math.max(1, Number(process.env.PAYPAL_VND_PER_USD || config.paypalVndPerUsd || 26000) || 26000);
+const VND_PER_USD = Math.max(1, Number(process.env.PAYPAL_VND_PER_USD || config.paypalVndPerUsd || DEFAULT_VND_PER_USD) || DEFAULT_VND_PER_USD);
 
 function roundMoney(n) {
   return Math.round((Number(n) || 0) * 100) / 100;

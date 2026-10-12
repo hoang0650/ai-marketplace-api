@@ -1,4 +1,5 @@
 require('dotenv').config();
+const { DEFAULT_VND_PER_USD } = require('./fx');
 
 const DEV_JWT_FALLBACK = 'phai-market-dev-secret';
 
@@ -91,7 +92,7 @@ const config = {
   paypalClientId: (process.env.PAYPAL_CLIENT_ID || '').trim(),
   paypalClientSecret: (process.env.PAYPAL_CLIENT_SECRET || '').trim(),
   paypalSandbox: process.env.PAYPAL_SANDBOX !== 'false',
-  paypalVndPerUsd: Number(process.env.PAYPAL_VND_PER_USD || 26000),
+  paypalVndPerUsd: Number(process.env.PAYPAL_VND_PER_USD || DEFAULT_VND_PER_USD),
   /**
    * GPay (G-Pay Vietnam) — runs alongside PayPal for wallet top-up.
    * Virtual Account = VND collection account per user (webhook credits the wallet).
@@ -126,7 +127,7 @@ const config = {
   gpayVaBankCode: (process.env.GPAY_VA_BANK_CODE || process.env.GPAY_BANK_CODE || 'VCCB').trim(),
   gpayAccountType: (process.env.GPAY_ACCOUNT_TYPE || 'M').trim(),
   /** VND per USD used to credit the (USD) wallet from a VND VA deposit. */
-  gpayVndPerUsd: Number(process.env.GPAY_VND_PER_USD || process.env.PAYPAL_VND_PER_USD || 26000),
+  gpayVndPerUsd: Number(process.env.GPAY_VND_PER_USD || process.env.PAYPAL_VND_PER_USD || DEFAULT_VND_PER_USD),
   gpayMinTopupVnd: Number(process.env.GPAY_MIN_TOPUP_VND || 10000),
   appleIapSharedSecret: (process.env.APPLE_IAP_SHARED_SECRET || '').trim(),
   appleIapIssuerId: (process.env.APPLE_IAP_ISSUER_ID || '').trim(),

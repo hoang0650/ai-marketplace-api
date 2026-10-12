@@ -46,7 +46,7 @@ function pendingRow(overrides = {}) {
     gpayRequestId: 'AIMt1',
     status: 'pending',
     amount: 3.85,
-    meta: { channel: 'gpay_portal', amountVnd: 100000, vndPerUsd: 26000 },
+    meta: { channel: 'gpay_portal', amountVnd: 100000, vndPerUsd: 26500 },
     ...overrides,
   };
 }
@@ -74,12 +74,12 @@ test('resolveOrderEvent maps gateway statuses and QR payments', () => {
 test('gateway success completes the pending deposit once', async () => {
   const WalletTx = fakeWalletTx([pendingRow()]);
   const event = resolveOrderEvent({ gpay_bill_id: 'B', merchant_order_id: 'AIMt1', status: 'ORDER_SUCCESS', gpay_trans_id: 'G1' });
-  const first = await settleOrderEvent(event, { WalletTx, vndPerUsd: 26000 });
+  const first = await settleOrderEvent(event, { WalletTx, vndPerUsd: 26500 });
   assert.equal(first.status, 200);
   assert.equal(WalletTx.rows[0].status, 'completed');
   assert.equal(WalletTx.rows[0].gpayTransactionId, 'G1');
   assert.equal(WalletTx.rows[0].amount, 3.85);
-  const again = await settleOrderEvent(event, { WalletTx, vndPerUsd: 26000 });
+  const again = await settleOrderEvent(event, { WalletTx, vndPerUsd: 26500 });
   assert.equal(again.body.duplicate, true);
 });
 
@@ -87,23 +87,23 @@ test('gateway failure marks the deposit failed; unknown orders 404', async () =>
   const WalletTx = fakeWalletTx([pendingRow()]);
   await settleOrderEvent(resolveOrderEvent({ gpay_bill_id: 'B', merchant_order_id: 'AIMt1', status: 'ORDER_FAILED' }), {
     WalletTx,
-    vndPerUsd: 26000,
+    vndPerUsd: 26500,
   });
   assert.equal(WalletTx.rows[0].status, 'failed');
   const missing = await settleOrderEvent(
     resolveOrderEvent({ gpay_bill_id: 'B', merchant_order_id: 'AIMnope', status: 'ORDER_SUCCESS' }),
-    { WalletTx, vndPerUsd: 26000 },
+    { WalletTx, vndPerUsd: 26500 },
   );
   assert.equal(missing.status, 404);
 });
 
 test('QR credits the amount actually transferred', async () => {
   const WalletTx = fakeWalletTx([pendingRow({ meta: { channel: 'gpay_qr', amountVnd: 100000 } })]);
-  const event = resolveOrderEvent({ qr_type: 'DYNAMIC', bill_id: 'AIMt1', amount: 52000, gpay_trans_id: 'Q1' });
-  await settleOrderEvent(event, { WalletTx, vndPerUsd: 26000 });
+  const event = resolveOrderEvent({ qr_type: 'DYNAMIC', bill_id: 'AIMt1', amount: 53000, gpay_trans_id: 'Q1' });
+  await settleOrderEvent(event, { WalletTx, vndPerUsd: 26500 });
   assert.equal(WalletTx.rows[0].status, 'completed');
   assert.equal(WalletTx.rows[0].amount, 2);
-  assert.equal(WalletTx.rows[0].meta.paidVnd, 52000);
+  assert.equal(WalletTx.rows[0].meta.paidVnd, 53000);
 });
 
 test('gateway and QR webhook signatures verify with GPay key', () => {
