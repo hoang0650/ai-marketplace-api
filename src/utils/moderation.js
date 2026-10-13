@@ -49,6 +49,7 @@ async function liftExpired(doc, field = 'accountStatus') {
 function denyMessage(status) {
   if (status === 'blocked') return 'Account is blocked';
   if (status === 'inactive') return 'Account is inactive';
+  if (status === 'deleted') return 'Account has been deleted';
   if (status === 'suspended') return 'Account is suspended';
   return 'Account is not allowed';
 }

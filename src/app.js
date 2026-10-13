@@ -15,6 +15,7 @@ const { allowMarketplaceGameFrame } = require('./utils/frame-ancestors');
 const { gpuWorkspaceProxy } = require('./terminal/gpu-proxy');
 
 const authRoutes = require('./routes/auth');
+const accountRoutes = require('./routes/account');
 const productRoutes = require('./routes/products');
 const homeRoutes = require('./routes/home');
 const bannerRoutes = require('./routes/banners');
@@ -182,6 +183,8 @@ function createApp() {
   app.use('/v1/auth/google/start', authLimiter);
   app.use('/v1/auth/google/login', authLimiter);
   app.use('/v1/auth/refresh-token', refreshLimiter);
+  app.use('/v1/account/deletion', authLimiter);
+  app.use('/v1/account/deletion-requests', authLimiter);
 
   // Static public endpoints catalog (docs) — no DB required. `/v1/runpod` is the legacy path.
   app.use(['/v1/endpoints', '/v1/runpod'], runpodRoutes);
@@ -200,6 +203,7 @@ function createApp() {
   });
 
   app.use('/v1/auth', authRoutes);
+  app.use('/v1/account', accountRoutes);
   app.use('/v1/products', productRoutes);
   app.use('/v1/home', homeRoutes);
   app.use('/v1/banners', bannerRoutes);

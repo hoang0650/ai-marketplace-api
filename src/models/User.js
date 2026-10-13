@@ -81,11 +81,13 @@ const userSchema = new mongoose.Schema(
     affiliateEarnings: { type: Number, default: 0 },
     accountStatus: {
       type: String,
-      enum: ['active', 'suspended', 'blocked', 'inactive'],
+      enum: ['active', 'suspended', 'blocked', 'inactive', 'deleted'],
       default: 'active',
       index: true,
     },
     suspendedUntil: { type: Date, default: null },
+    /** Self-service deletion: the document stays as an anonymised tombstone (see utils/account-deletion.js). */
+    deletedAt: { type: Date, default: null },
     statusReason: { type: String, default: '', maxlength: 500 },
     statusChangedAt: { type: Date, default: null },
     /** Personal eKYC — required for withdraw (all roles except admin). */

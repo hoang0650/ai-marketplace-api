@@ -123,6 +123,10 @@ router.post('/accept-agreement', authenticate, async (req, res, next) => {
     if (!doc) {
       return res.status(404).json({ message: 'Seller agreement not published yet' });
     }
+    // Clients that showed a specific version send it; refuse if a newer one was published meanwhile.
+    if (req.body?.version && String(req.body.version) !== doc.version) {
+      return res.status(409).json({ code: 'LEGAL_VERSION_OUTDATED', message: 'A newer version was published.', version: doc.version });
+    }
 
     const profile = await getOrCreateSellerProfile(req.user);
     profile.sellerAgreementVersion = doc.version;

@@ -93,6 +93,10 @@ router.post('/:documentType/accept', authenticate, async (req, res, next) => {
       .lean();
 
     if (!doc) return res.status(404).json({ message: 'Legal document not found' });
+    // The app/web send the version they displayed (fetched from GET /legal/:type); refuse a stale one.
+    if (req.body?.version && String(req.body.version) !== doc.version) {
+      return res.status(409).json({ code: 'LEGAL_VERSION_OUTDATED', message: 'A newer version was published.', version: doc.version });
+    }
 
     const acceptance = await LegalAcceptance.findOneAndUpdate(
       {
