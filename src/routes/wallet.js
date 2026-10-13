@@ -125,6 +125,18 @@ router.post('/withdraw', authenticate, async (req, res, next) => {
       }
     }
 
+    // Buyers have no seller payout account on file: the bank account comes with the request.
+    let payoutAccount = null;
+    if (persona === 'buyer' || req.body?.bankAccount) {
+      const { parseBankAccount } = require('../utils/payout-account');
+      const parsedAccount = parseBankAccount(req.body?.bankAccount);
+      if (!parsedAccount.ok) {
+        if (persona === 'buyer') {
+          return res.status(400).json({ message: parsedAccount.message, code: parsedAccount.code });
+        }
+      } else payoutAccount = parsedAccount.data;
+    }
+
     // Affiliate persona: min balance + min withdrawal 2,000,000 VND, 10% PIT per withdrawal.
     let affiliateQuote = null;
     if (persona === 'affiliate') {
@@ -239,6 +251,7 @@ router.post('/withdraw', authenticate, async (req, res, next) => {
         taxRate: policy.taxRate,
         tax: quote.tax,
         netAmount: quote.net,
+        ...(payoutAccount ? { payoutAccount } : {}),
         ...(affiliateQuote
           ? {
               pitRule: affiliateQuote.pitRule,
