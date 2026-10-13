@@ -1,5 +1,13 @@
 const crypto = require('crypto');
 const HermesAccount = require('../models/HermesAccount');
+const HermesLoginTicket = require('../models/HermesLoginTicket');
+
+const TICKET_TTL_MS = Math.max(15, Number(process.env.HERMES_LOGIN_TICKET_TTL_SECONDS || 120) || 120) * 1000;
+const TICKET_RE = /^[A-Za-z0-9_-]{32,128}$/;
+
+function hashTicket(ticket) {
+  return crypto.createHash('sha256').update(String(ticket)).digest('hex');
+}
 
 const USER_ID_RE = /^[a-f0-9]{24}$/i;
 
@@ -81,7 +89,30 @@ async function verifyHermesCredentials(username, password) {
   };
 }
 
+/** Mint a single-use Launch ticket (raw value returned once; only its hash is stored). */
+async function issueHermesLoginTicket(userId, { now = Date.now() } = {}) {
+  const id = String(userId || '').trim();
+  if (!USER_ID_RE.test(id)) throw new Error('Invalid marketplace user id');
+  const ticket = crypto.randomBytes(32).toString('base64url');
+  await HermesLoginTicket.create({ hash: hashTicket(ticket), user: id, expiresAt: new Date(now + TICKET_TTL_MS) });
+  return ticket;
+}
+
+/** Atomically consume a ticket; returns the same shape as verifyHermesCredentials or null. */
+async function consumeHermesLoginTicket(ticket, { now = new Date() } = {}) {
+  const t = String(ticket || '').trim();
+  if (!TICKET_RE.test(t)) return null;
+  const row = await HermesLoginTicket.findOneAndDelete({ hash: hashTicket(t) }).lean();
+  if (!row || !row.expiresAt || new Date(row.expiresAt).getTime() <= now.getTime()) return null;
+  const account = await HermesAccount.findOne({ user: row.user }).lean();
+  if (!account) return null;
+  return { userId: String(account.user), username: account.username, profile: account.profile };
+}
+
 module.exports = {
+  hashTicket,
+  issueHermesLoginTicket,
+  consumeHermesLoginTicket,
   profileForUserId,
   usernameForUser,
   ensureHermesAccount,

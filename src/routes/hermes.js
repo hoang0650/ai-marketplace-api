@@ -16,7 +16,12 @@ const {
   computeOpenClawSellCost,
   isPhhotelModelId,
 } = require('../utils/openclaw-pricing');
-const { ensureHermesAccount, verifyHermesCredentials } = require('../services/hermesAccounts');
+const {
+  ensureHermesAccount,
+  verifyHermesCredentials,
+  issueHermesLoginTicket,
+  consumeHermesLoginTicket,
+} = require('../services/hermesAccounts');
 
 const router = express.Router();
 const SSH_TTL_MS = 60 * 60 * 1000;
@@ -38,11 +43,15 @@ function aimarketsPublicBase(userId) {
 }
 
 /**
- * Deep-link straight to /login so credentials are not stripped by the
- * auth gate redirect. Hermes login_page autofills + auto-submits.
- * Uses per-buyer Aimarkets auth provider (not shared admin basic auth).
+ * Launch deep link: /login?autoLogin=true&provider=aimarkets&next=...#ticket=<single-use>.
+ * The ticket is short-lived, single-use and sits in the URL fragment, so it never reaches
+ * server/proxy access logs or Referer headers. The buyer's password is never put in the URL.
+ * Hermes' login page submits it as username "__aimarkets_ticket__" + password=ticket and the
+ * aimarkets auth provider redeems it via POST /v1/hermes/auth/verify { ticket }.
  */
-function buildDashboardUrl({ uiBaseUrl, userId, username, password, provider = 'aimarkets' }) {
+const HERMES_TICKET_USERNAME = '__aimarkets_ticket__';
+
+function buildDashboardUrl({ uiBaseUrl, userId, ticket, provider = 'aimarkets' }) {
   const base = String(uiBaseUrl || '')
     .replace(/^wss:/i, 'https:')
     .replace(/^ws:/i, 'http:')
@@ -60,17 +69,12 @@ function buildDashboardUrl({ uiBaseUrl, userId, username, password, provider = '
     profile: `market-${userId}`,
     autoConnect: 'true',
   });
-  // Encode next as a single value so nested & does not eat username/password.
-  const nextPath = `/?${nextQs.toString()}`;
-
-  // Credentials FIRST so a mis-decoded next= cannot drop them from the query.
   const loginQs = new URLSearchParams();
-  if (username) loginQs.set('username', String(username));
-  if (password) loginQs.set('password', String(password));
   loginQs.set('autoLogin', 'true');
   loginQs.set('provider', String(provider || 'aimarkets'));
-  loginQs.set('next', nextPath);
-  return `${base}/login?${loginQs.toString()}`;
+  loginQs.set('next', `/?${nextQs.toString()}`);
+  const hash = ticket ? `#${new URLSearchParams({ ticket: String(ticket) }).toString()}` : '';
+  return `${base}/login?${loginQs.toString()}${hash}`;
 }
 
 function randomPassword(bytes = 18) {
@@ -185,11 +189,11 @@ router.post('/launch', authenticate, async (req, res, next) => {
 
     const account = await ensureHermesAccount(req.user);
     const uiBase = aimarketsPublicBase(userId);
+    const ticket = uiBase ? await issueHermesLoginTicket(userId) : '';
     const url = buildDashboardUrl({
       uiBaseUrl: uiBase,
       userId,
-      username: account.username,
-      password: account.password,
+      ticket,
       provider: 'aimarkets',
     });
 
@@ -227,7 +231,11 @@ router.post('/auth/verify', async (req, res, next) => {
     }
     const username = String(req.body?.username || '').trim();
     const password = String(req.body?.password || '');
-    const verified = await verifyHermesCredentials(username, password);
+    // Launch ticket: either { ticket } or the login-form convention username=__aimarkets_ticket__.
+    const ticket = String(req.body?.ticket || (username === HERMES_TICKET_USERNAME ? password : '') || '');
+    const verified = ticket
+      ? await consumeHermesLoginTicket(ticket)
+      : await verifyHermesCredentials(username, password);
     if (!verified) {
       return res.status(401).json({ ok: false, message: 'Invalid credentials' });
     }
@@ -529,3 +537,5 @@ router.post('/usage', async (req, res, next) => {
 });
 
 module.exports = router;
+module.exports.buildDashboardUrl = buildDashboardUrl;
+module.exports.HERMES_TICKET_USERNAME = HERMES_TICKET_USERNAME;
