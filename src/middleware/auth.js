@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const mongoose = require('mongoose');
 const config = require('../config/env');
 const User = require('../models/User');
 const { toClient } = require('../utils/serialize');
@@ -168,7 +169,10 @@ function cacheableUser(user) {
 function asReqUser(cached) {
   if (!cached) return null;
   const user = { ...cached };
-  user._id = user._id || user.id;
+  // Redis-cached users are plain JSON, so _id comes back as a string. Aggregation $match does not
+  // cast like find() does, so a string id silently matched nothing (wallet balance read as 0).
+  const rawId = user._id || user.id;
+  user._id = typeof rawId === 'string' && mongoose.Types.ObjectId.isValid(rawId) ? new mongoose.Types.ObjectId(rawId) : rawId;
   if (user.suspendedUntil) user.suspendedUntil = new Date(user.suspendedUntil);
   if (user.createdAt) user.createdAt = new Date(user.createdAt);
   if (!Array.isArray(user.wishlist)) user.wishlist = [];
@@ -379,6 +383,7 @@ function requireCapability(capability) {
 const authorizeRoles = (allowedRoles) => requireRoles(...(Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles]));
 
 module.exports = {
+  asReqUser,
   AUTH_USER_CACHE_TTL,
   AUTH_SESSION_TTL,
   REFRESH_COOKIE,

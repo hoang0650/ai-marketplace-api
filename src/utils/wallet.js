@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const WalletTx = require('../models/WalletTx');
 const { getSellerHolds, roundMoney } = require('./payout-hold');
 const { getAffiliateHolds } = require('../finance/affiliate-service');
@@ -10,8 +11,13 @@ function normalizeAmount(raw) {
   return amount;
 }
 
+function toObjectId(id) {
+  return typeof id === 'string' && mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : id;
+}
+
 /** Completed deposits/credits minus completed+pending withdraw/debit (pending withdraw reserves funds). */
 async function getBalance(userId) {
+  userId = toObjectId(userId); // aggregate() does not cast string ids
   const [row] = await WalletTx.aggregate([
     { $match: { user: userId } },
     {
