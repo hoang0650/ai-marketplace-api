@@ -30,9 +30,10 @@ function publicConfig() {
     pit: {
       enabled: cfg.pit.enabled,
       rate: cfg.pit.rate,
-      thresholdVnd: cfg.pit.thresholdVnd,
-      /** 10% PIT when a single commission payment is >= thresholdVnd, 0% with an approved Mẫu 08/CK-TNCN. */
-      rule: 'SINGLE_PAYMENT_GTE_THRESHOLD',
+      thresholdVnd: cfg.pit.minWithdrawVnd,
+      /** Withdraw only when the affiliate balance and the amount are >= minWithdrawVnd; 10% PIT per withdrawal, 0% with an approved Mẫu 08/CK-TNCN. */
+      minWithdrawVnd: cfg.pit.minWithdrawVnd,
+      rule: 'AT_WITHDRAWAL',
       commitmentForm: 'Mẫu 08/CK-TNCN',
       commitmentExempts: cfg.pit.commitmentExempts,
       yearEndCertificate: true,
@@ -148,6 +149,26 @@ router.get('/', authenticate, async (req, res, next) => {
     const orders = await Order.find({ _id: { $in: rows.map((r) => r.order) } }).select('_id disputeStatus').lean();
     const byId = new Map(orders.map((o) => [String(o._id), o]));
     const commission = summarize(rows, byId);
+    const { getAffiliateBalance } = require('../finance/affiliate-service');
+    const { isPitCommitmentApproved } = require('../utils/pit-commitment');
+    const cfg = affiliateConfig();
+    const slice = await getAffiliateBalance(user._id).catch(() => ({ balance: 0, available: 0, withdrawn: 0, held: 0, earned: 0 }));
+    const exempt = isPitCommitmentApproved(user, new Date()) && cfg.pit.commitmentExempts !== false;
+    const WalletTx = require('../models/WalletTx');
+    const wds = await WalletTx.find({ user: user._id, type: 'withdraw', 'meta.persona': 'affiliate', status: { $nin: ['failed', 'cancelled'] } })
+      .select('meta.pitAmount')
+      .lean()
+      .catch(() => []);
+    commission.pitWithheld = roundMoney(commission.pitWithheld + wds.reduce((t, w) => t + (Number(w.meta?.pitAmount) || 0), 0));
+    const withdrawal = {
+      ...slice,
+      minWithdrawVnd: cfg.pit.minWithdrawVnd,
+      availableVnd: Math.round(slice.available * cfg.pit.vndPerUsd),
+      canWithdraw: slice.available * cfg.pit.vndPerUsd >= cfg.pit.minWithdrawVnd && (user.kyc?.status || 'none') === 'verified',
+      pitRate: cfg.pit.enabled && !exempt ? cfg.pit.rate : 0,
+      pitCommitmentApplied: exempt,
+      persona: 'affiliate',
+    };
     const kycStatus = user.kyc?.status || 'none';
     res.json({
       code: kycStatus === 'verified' ? user.affiliateCode : null,
@@ -164,6 +185,7 @@ router.get('/', authenticate, async (req, res, next) => {
       recent: rows.slice(0, 50).map((c) => mapCommission(c, byId.get(String(c.order)))),
       config: publicConfig(),
       pitCommitment: mapPitCommitment(user),
+      withdrawal,
     });
   } catch (err) {
     next(err);

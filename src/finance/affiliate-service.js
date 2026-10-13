@@ -7,7 +7,6 @@ const WalletTx = require('../models/WalletTx');
 const { roundMoney } = require('./constants');
 const { calculateAffiliateCommission } = require('./affiliate-engine');
 const { affiliateConfig } = require('../config/affiliate');
-const { isPitCommitmentApproved } = require('../utils/pit-commitment');
 const { recordAdjustmentLines, newEntryId } = require('./ledger-service');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -58,18 +57,15 @@ async function resolveAttribution({ buyerId, product, clickId, now = new Date() 
   return { click: picked.click, affiliate, rejected: picked.rejected };
 }
 
-/** Credit the affiliate (net of PIT) and write ledger lines. Idempotent per order. */
+/** Credit the affiliate (gross; PIT is withheld at withdrawal) and write ledger lines. Idempotent per order. */
 async function recordAffiliateCommission({ order, settlement, click, holdUntil }) {
   if (!click || !(settlement.affiliateCommissionAmount > 0)) return null;
   const existing = await AffiliateCommission.findOne({ order: order._id });
   if (existing) return existing;
-  const affiliateUser = await User.findById(click.affiliate).select('pitCommitment').lean().catch(() => null);
-  const pitCommitmentApproved = isPitCommitmentApproved(affiliateUser, order.createdAt || new Date());
   const calc = calculateAffiliateCommission({
     baseAmount: settlement.grossAmount,
     rate: settlement.affiliateRate,
     currency: order.currency,
-    pitCommitmentApproved,
   });
   const commission = await AffiliateCommission.create({
     order: order._id,
@@ -88,7 +84,7 @@ async function recordAffiliateCommission({ order, settlement, click, holdUntil }
     pitAmount: calc.pitAmount,
     pitRule: calc.pitRule,
     amountVnd: calc.amountVnd,
-    pitCommitmentApplied: calc.pitRule === 'EXEMPT_CAM_KET_08_CK_TNCN',
+    pitCommitmentApplied: false,
     netAmount: calc.netAmount,
     holdUntil,
   });
@@ -215,7 +211,45 @@ async function getAffiliateHolds(userId, now = new Date()) {
   return { held: roundMoney(held), holds };
 }
 
+/** Withdrawals made under the affiliate persona (not failed/cancelled), in wallet currency. */
+async function affiliateWithdrawnTotal(userId) {
+  const rows = await WalletTx.find({
+    user: userId,
+    type: 'withdraw',
+    'meta.persona': 'affiliate',
+    status: { $nin: ['failed', 'cancelled'] },
+  })
+    .select('amount')
+    .lean();
+  return roundMoney(rows.reduce((s, r) => s + (Number(r.amount) || 0), 0));
+}
+
+/** Pure: affiliate balance = live commissions − affiliate withdrawals; available excludes held commissions. */
+function computeAffiliateBalance({ earned = 0, held = 0, withdrawn = 0 } = {}) {
+  const balance = roundMoney(Math.max(0, earned - withdrawn));
+  const available = roundMoney(Math.max(0, Math.min(balance, earned - held - withdrawn)));
+  return { earned: roundMoney(earned), held: roundMoney(held), withdrawn: roundMoney(withdrawn), balance, available };
+}
+
+/**
+ * Affiliate wallet slice. The wallet is shared, so this amount is reserved for affiliate withdrawals
+ * (min 2,000,000 VND, 10% PIT) and excluded from buyer/seller withdrawals.
+ */
+async function getAffiliateBalance(userId, now = new Date()) {
+  const rows = await AffiliateCommission.find({ affiliate: userId, status: 'active' }).select('netAmount reversedAmount').lean();
+  if (!rows.length) {
+    const withdrawn = await affiliateWithdrawnTotal(userId);
+    return computeAffiliateBalance({ earned: 0, held: 0, withdrawn });
+  }
+  const earned = rows.reduce((s, c) => s + Math.max(0, (Number(c.netAmount) || 0) - (Number(c.reversedAmount) || 0)), 0);
+  const [{ held }, withdrawn] = await Promise.all([getAffiliateHolds(userId, now), affiliateWithdrawnTotal(userId)]);
+  return computeAffiliateBalance({ earned, held, withdrawn });
+}
+
 module.exports = {
+  getAffiliateBalance,
+  computeAffiliateBalance,
+  affiliateWithdrawnTotal,
   pickAttribution,
   resolveAttribution,
   recordAffiliateCommission,

@@ -6,8 +6,10 @@ const {
   parseAffiliateRate,
   effectiveAffiliateRate,
   calculateAffiliateCommission,
+  quoteAffiliateWithdrawal,
 } = require('../../src/finance/affiliate-engine');
-const { pickAttribution, isCommissionHeld } = require('../../src/finance/affiliate-service');
+const { pickAttribution, isCommissionHeld, computeAffiliateBalance } = require('../../src/finance/affiliate-service');
+const { policyFor } = require('../../src/finance/payout-policy');
 const { affiliateConfig, AFFILIATE_MAX_RATE } = require('../../src/config/affiliate');
 
 const RULES = [{ rate: 0.2, status: 'ACTIVE', appliesTo: 'THIRD_PARTY_SELLER' }];
@@ -97,52 +99,74 @@ describe('settlement with affiliate commission (borne by the seller)', () => {
   });
 });
 
-describe('affiliate PIT withholding: 10% when a single payment >= 2,000,000 VND, 0% with Mẫu 08/CK-TNCN', () => {
+describe('affiliate PIT at withdrawal: min 2,000,000 VND, 10% per withdrawal, 0% with Mẫu 08/CK-TNCN', () => {
   const cfg = affiliateConfig({});
-  test('defaults: 30 days, 10%, threshold 2,000,000 VND', () => {
+  const q = (o) => quoteAffiliateWithdrawal({ currency: 'VND', digits: 0, config: cfg, ...o });
+  test('defaults: 30 days, 10%, minimum withdrawal 2,000,000 VND', () => {
     assert.equal(cfg.attributionDays, 30);
     assert.equal(cfg.pit.rate, 0.1);
+    assert.equal(cfg.pit.minWithdrawVnd, 2_000_000);
     assert.equal(cfg.pit.thresholdVnd, 2_000_000);
     assert.equal(cfg.pit.commitmentExempts, true);
     assert.equal(affiliateConfig({ AFFILIATE_ATTRIBUTION_DAYS: '7' }).attributionDays, 7);
+    assert.equal(affiliateConfig({ AFFILIATE_MIN_WITHDRAW_VND: '3000000' }).pit.minWithdrawVnd, 3_000_000);
   });
-  test('250,000 VND commission: below 2M, nothing withheld (old "every commission" rule is gone)', () => {
-    const c = calculateAffiliateCommission({ baseAmount: 1_000_000, rate: 0.25, currency: 'VND', digits: 0, config: cfg });
-    assert.equal(c.amount, 250_000);
-    assert.equal(c.pitAmount, 0);
-    assert.equal(c.netAmount, 250_000);
-    assert.equal(c.pitRule, 'BELOW_2M_SINGLE_PAYMENT');
-    const zero = calculateAffiliateCommission({ baseAmount: 1_000_000, rate: 0, currency: 'VND', digits: 0, config: cfg });
-    assert.equal(zero.pitAmount, 0);
-  });
-  test('exactly 2,000,000 VND is withheld (>=); 2,500,000 VND -> 250,000 PIT', () => {
-    const at = calculateAffiliateCommission({ baseAmount: 8_000_000, rate: 0.25, currency: 'VND', digits: 0, config: cfg });
-    assert.equal(at.amount, 2_000_000);
-    assert.equal(at.pitAmount, 200_000);
-    assert.equal(at.pitRule, 'VN_PIT_10PCT_SINGLE_PAYMENT_GTE_2M');
+  test('commissions are credited gross - no PIT at credit time', () => {
     const c = calculateAffiliateCommission({ baseAmount: 10_000_000, rate: 0.25, currency: 'VND', digits: 0, config: cfg });
-    assert.equal(c.pitAmount, 250_000);
-    assert.equal(c.netAmount, 2_250_000);
-    const below = calculateAffiliateCommission({ baseAmount: 7_999_996, rate: 0.25, currency: 'VND', digits: 0, config: cfg });
-    assert.equal(below.pitAmount, 0);
-  });
-  test('approved Mẫu 08/CK-TNCN -> 0% even above 2M', () => {
-    const c = calculateAffiliateCommission({ baseAmount: 10_000_000, rate: 0.25, currency: 'VND', digits: 0, config: cfg, pitCommitmentApproved: true });
+    assert.equal(c.amount, 2_500_000);
     assert.equal(c.pitAmount, 0);
     assert.equal(c.netAmount, 2_500_000);
-    assert.equal(c.pitRule, 'EXEMPT_CAM_KET_08_CK_TNCN');
+    assert.equal(c.pitRule, 'PIT_AT_WITHDRAWAL');
+    const zero = calculateAffiliateCommission({ baseAmount: 1_000_000, rate: 0, currency: 'VND', digits: 0, config: cfg });
+    assert.equal(zero.pitRule, '');
   });
-  test('USD commissions are converted to VND for the threshold; PIT can be disabled', () => {
-    const small = calculateAffiliateCommission({ baseAmount: 40, rate: 0.25, currency: 'USD', config: cfg });
-    assert.equal(small.pitAmount, 0);
-    const usd = calculateAffiliateCommission({ baseAmount: 400, rate: 0.25, currency: 'USD', config: cfg });
-    assert.equal(usd.amount, 100); // 2,650,000 VND at 26,500
-    assert.equal(usd.pitAmount, 10);
-    const off = calculateAffiliateCommission({
-      baseAmount: 10_000_000, rate: 0.25, currency: 'VND', digits: 0,
-      config: affiliateConfig({ AFFILIATE_PIT_ENABLED: 'false' }),
-    });
+  test('withdraw 2,500,000 -> PIT 250,000, receive 2,250,000', () => {
+    const w = q({ amount: 2_500_000, available: 3_000_000 });
+    assert.equal(w.ok, true);
+    assert.equal(w.pitAmount, 250_000);
+    assert.equal(w.net, 2_250_000);
+    assert.equal(w.pitRule, 'VN_PIT_10PCT_AFFILIATE_WITHDRAWAL');
+  });
+  test('balance below 2,000,000 VND cannot withdraw; amount below 2,000,000 is rejected; exactly 2M is ok', () => {
+    assert.equal(q({ amount: 1_500_000, available: 1_999_999 }).code, 'AFFILIATE_MIN_BALANCE');
+    assert.equal(q({ amount: 1_999_999, available: 5_000_000 }).code, 'AFFILIATE_MIN_WITHDRAWAL');
+    assert.equal(q({ amount: 6_000_000, available: 5_000_000 }).code, 'AFFILIATE_INSUFFICIENT');
+    const at = q({ amount: 2_000_000, available: 2_000_000 });
+    assert.equal(at.ok, true);
+    assert.equal(at.pitAmount, 200_000);
+    assert.equal(at.net, 1_800_000);
+  });
+  test('approved Mẫu 08/CK-TNCN -> 0% PIT (minimum still applies)', () => {
+    const w = q({ amount: 2_500_000, available: 2_500_000, pitCommitmentApproved: true });
+    assert.equal(w.pitAmount, 0);
+    assert.equal(w.net, 2_500_000);
+    assert.equal(w.pitRule, 'EXEMPT_CAM_KET_08_CK_TNCN');
+    assert.equal(w.pitCommitmentApplied, true);
+    assert.equal(q({ amount: 1_000_000, available: 1_000_000, pitCommitmentApproved: true }).code, 'AFFILIATE_MIN_BALANCE');
+  });
+  test('USD wallet amounts are converted to VND for the minimum; PIT can be disabled', () => {
+    const usdCfg = affiliateConfig({ AFFILIATE_VND_PER_USD: '25000' });
+    assert.equal(quoteAffiliateWithdrawal({ amount: 70, available: 100, config: usdCfg }).code, 'AFFILIATE_MIN_WITHDRAWAL');
+    const ok = quoteAffiliateWithdrawal({ amount: 100, available: 100, config: usdCfg });
+    assert.equal(ok.amountVnd, 2_500_000);
+    assert.equal(ok.pitAmount, 10);
+    assert.equal(ok.net, 90);
+    const off = quoteAffiliateWithdrawal({ amount: 2_500_000, available: 2_500_000, currency: 'VND', digits: 0, config: affiliateConfig({ AFFILIATE_PIT_ENABLED: 'false' }) });
     assert.equal(off.pitAmount, 0);
+  });
+  test('affiliate balance = live commissions - affiliate withdrawals; held commissions not withdrawable', () => {
+    const b = computeAffiliateBalance({ earned: 3_000_000, held: 500_000, withdrawn: 1_000_000 });
+    assert.equal(b.balance, 2_000_000);
+    assert.equal(b.available, 1_500_000);
+    assert.equal(computeAffiliateBalance({ earned: 100, held: 0, withdrawn: 200 }).available, 0);
+  });
+  test('affiliate persona policy: no platform fee, 10% PIT, min 2,000,000 VND; 0% with Mẫu 08', () => {
+    const p = policyFor('affiliate');
+    assert.equal(p.platformFeeRate, 0);
+    assert.equal(p.taxRate, 0.1);
+    assert.equal(p.minAmountVnd, 2_000_000);
+    assert.equal(p.chargeAtWithdraw, true);
+    assert.equal(policyFor('affiliate', { pitCommitmentApproved: true }).taxRate, 0);
   });
 });
 

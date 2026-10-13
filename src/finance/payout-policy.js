@@ -11,6 +11,9 @@ const { DEFAULT_VND_PER_USD } = require('../config/fx');
  *                  (individual 7% digital / 1.5% goods withheld; household business & company 0%)
  * - talent       : talent profile earnings — same as seller
  * - freelancer   : accepted job applicant — same as seller
+ * - affiliate    : affiliate commissions — withdrawable only when the affiliate balance and the
+ *                  withdrawal are >= 2,000,000 VND; 10% PIT withheld per withdrawal, 0% with an
+ *                  approved Mẫu 08/CK-TNCN
  * - employer / HR: job poster — 1% fee, minimum balance before withdrawal
  * - admin        : bypass (ops)
  *
@@ -20,7 +23,7 @@ const { DEFAULT_VND_PER_USD } = require('../config/fx');
  * adjustments). Kept env-tunable so ops can match the current rule book.
  */
 
-const PERSONAS = ['buyer', 'seller', 'talent', 'freelancer', 'employer'];
+const PERSONAS = ['buyer', 'seller', 'talent', 'freelancer', 'employer', 'affiliate'];
 const SELLER_LIKE = new Set(['seller', 'talent', 'freelancer']);
 
 function rateFromEnv(key, fallback) {
@@ -64,7 +67,28 @@ function sellerTaxRate(sellerType) {
 }
 
 /** Fee/tax/minimum policy for a persona (admin handled by callers). */
-function policyFor(persona, { sellerType } = {}) {
+function policyFor(persona, { sellerType, pitCommitmentApproved = false } = {}) {
+  if (persona === 'affiliate') {
+    const { affiliateConfig } = require('../config/affiliate');
+    const cfg = affiliateConfig();
+    const exempt = !!pitCommitmentApproved && cfg.pit.commitmentExempts !== false;
+    const taxRate = cfg.pit.enabled && !exempt ? cfg.pit.rate : 0;
+    return {
+      persona,
+      canWithdraw: true,
+      platformFeeRate: 0,
+      taxRate,
+      totalFeeRate: taxRate,
+      chargeAtWithdraw: true,
+      minAmount: roundMoney(cfg.pit.minWithdrawVnd / cfg.pit.vndPerUsd),
+      minAmountCurrency: 'USD',
+      minAmountVnd: cfg.pit.minWithdrawVnd,
+      holdHours: Number(process.env.PAYOUT_HOLD_HOURS || 48) || 48,
+      requiresNoDispute: true,
+      pitRule: !cfg.pit.enabled ? '' : exempt ? 'EXEMPT_CAM_KET_08_CK_TNCN' : 'VN_PIT_10PCT_AFFILIATE_WITHDRAWAL',
+      pitCommitmentApproved: exempt,
+    };
+  }
   if (persona === 'employer') {
     const minUsd = vndToUsd(EMPLOYER_MIN_VND);
     return {
@@ -128,13 +152,16 @@ async function detectPersonas(user) {
   const role = require('../utils/roles').normalizeRole(user.role);
   // Work is shut down: employer/freelancer personas are no longer offered. Their wallet
   // balance (one wallet per user) is withdrawn under the seller/talent or buyer policy.
-  const [seller, talent] = await Promise.all([
+  const AffiliateCommission = require('../models/AffiliateCommission');
+  const [seller, talent, affiliate] = await Promise.all([
     role === 'seller' ? Promise.resolve(true) : SellerProfile.exists({ user: uid }),
     role === 'talent' ? Promise.resolve(true) : TalentProfile.exists({ user: uid }),
+    AffiliateCommission.exists({ affiliate: uid }).catch(() => null),
   ]);
   const found = [];
   if (seller) found.push('seller');
   if (talent) found.push('talent');
+  if (affiliate) found.push('affiliate');
   found.push('buyer');
   return found;
 }
@@ -166,7 +193,13 @@ async function resolvePayoutPersona(user, requested) {
     const sp = await SellerProfile.findOne({ user: user._id || user.id }).select('sellerType').lean().catch(() => null);
     sellerType = sp?.sellerType ? require('./seller-types').normalizeSellerType(sp.sellerType) : undefined;
   }
-  return { personas, persona, policy: policyFor(persona, { sellerType }) };
+  let pitCommitmentApproved = false;
+  if (persona === 'affiliate' && user) {
+    const User = require('../models/User');
+    const u = await User.findById(user._id || user.id).select('pitCommitment').lean().catch(() => null);
+    pitCommitmentApproved = require('../utils/pit-commitment').isPitCommitmentApproved(u, new Date());
+  }
+  return { personas, persona, policy: policyFor(persona, { sellerType, pitCommitmentApproved }) };
 }
 
 /** Apply the persona fee/tax to a gross withdrawal amount. */
@@ -201,6 +234,7 @@ function mapPolicy(policy) {
     requiresNoDispute: policy.requiresNoDispute,
     requiresKyc: policy.persona !== 'admin',
     sellerType: policy.sellerType || null,
+    ...(policy.persona === 'affiliate' ? { pitRule: policy.pitRule, pitCommitmentApproved: !!policy.pitCommitmentApproved } : {}),
   };
 }
 
@@ -211,6 +245,7 @@ function personaLabel(persona) {
     talent: 'Talent',
     freelancer: 'Freelancer',
     employer: 'Employer / HR',
+    affiliate: 'Affiliate',
     admin: 'Admin',
   };
   return has(map, persona) ? map[persona] : persona;

@@ -14,6 +14,15 @@ const {
 
 const router = express.Router();
 
+/**
+ * Affiliate commissions sit in the same wallet but are withdrawn only under the affiliate persona
+ * (min 2,000,000 VND, 10% PIT). Other personas cannot spend that slice on withdrawal.
+ */
+async function affiliateSlice(userId) {
+  const { getAffiliateBalance } = require('../finance/affiliate-service');
+  return getAffiliateBalance(userId).catch(() => ({ earned: 0, held: 0, withdrawn: 0, balance: 0, available: 0 }));
+}
+
 router.get('/', authenticate, async (req, res, next) => {
   try {
     const txs = await WalletTx.find({ user: req.user._id }).sort({ createdAt: -1 }).lean();
@@ -27,7 +36,20 @@ router.get('/summary', authenticate, async (req, res, next) => {
   try {
     const summary = await getAvailableBalance(req.user._id);
     const { personas, persona, policy } = await resolvePayoutPersona(req.user, req.query.persona);
+    let affiliate = null;
+    if (personas.includes('affiliate')) {
+      const { affiliateConfig } = require('../config/affiliate');
+      const cfg = affiliateConfig();
+      const slice = await affiliateSlice(req.user._id);
+      affiliate = {
+        ...slice,
+        minWithdrawVnd: cfg.pit.minWithdrawVnd,
+        availableVnd: Math.round(slice.available * cfg.pit.vndPerUsd),
+        canWithdraw: slice.available * cfg.pit.vndPerUsd >= cfg.pit.minWithdrawVnd,
+      };
+    }
     res.json({
+      affiliate,
       currency: 'USD',
       holdHours: require('../utils/payout-hold').HOLD_HOURS,
       ...summary,
@@ -103,8 +125,33 @@ router.post('/withdraw', authenticate, async (req, res, next) => {
       }
     }
 
+    // Affiliate persona: min balance + min withdrawal 2,000,000 VND, 10% PIT per withdrawal.
+    let affiliateQuote = null;
+    if (persona === 'affiliate') {
+      const { quoteAffiliateWithdrawal } = require('../finance/affiliate-engine');
+      const slice = await affiliateSlice(req.user._id);
+      const overall = await getAvailableBalance(req.user._id);
+      affiliateQuote = quoteAffiliateWithdrawal({
+        amount,
+        available: Math.min(slice.available, overall.available),
+        currency: 'USD',
+        pitCommitmentApproved: !!policy.pitCommitmentApproved,
+      });
+      if (!affiliateQuote.ok) {
+        return res.status(affiliateQuote.code === 'AFFILIATE_INSUFFICIENT' ? 400 : 403).json({
+          message: affiliateQuote.message,
+          code: affiliateQuote.code,
+          persona,
+          minAmountVnd: affiliateQuote.minWithdrawVnd,
+          amountVnd: affiliateQuote.amountVnd,
+          availableVnd: affiliateQuote.availableVnd,
+          available: affiliateQuote.available,
+        });
+      }
+    }
+
     // Employer / HR minimum balance (VND threshold, quoted in USD for the ledger).
-    const minAmount = Number(policy.minAmount || 0);
+    const minAmount = persona === 'affiliate' ? 0 : Number(policy.minAmount || 0);
     if (minAmount > 0) {
       const { balance } = await getAvailableBalance(req.user._id);
       if (balance < minAmount) {
@@ -120,7 +167,14 @@ router.post('/withdraw', authenticate, async (req, res, next) => {
       }
     }
 
-    const { available, held, balance } = await getAvailableBalance(req.user._id);
+    const summaryNow = await getAvailableBalance(req.user._id);
+    const { held, balance } = summaryNow;
+    let available = summaryNow.available;
+    if (persona !== 'affiliate' && req.user.role !== 'admin') {
+      // Reserve the affiliate slice: it can only leave through the affiliate persona (PIT applies).
+      const slice = await affiliateSlice(req.user._id);
+      available = Math.max(0, Math.round((available - slice.available) * 100) / 100);
+    }
     if (amount > available) {
       return res.status(400).json({
         message: `Insufficient available balance. Ledger ${balance.toFixed(2)}, held ${held.toFixed(2)} (48h protection or open dispute on those orders only), available ${available.toFixed(2)}.`,
@@ -132,7 +186,7 @@ router.post('/withdraw', authenticate, async (req, res, next) => {
     }
 
     // Seller-like personas additionally need a VERIFIED seller profile (buyers only need eKYC).
-    const needsSellerProfile = persona !== 'employer' && persona !== 'buyer' && req.user.role !== 'admin';
+    const needsSellerProfile = persona !== 'employer' && persona !== 'buyer' && persona !== 'affiliate' && req.user.role !== 'admin';
     if (needsSellerProfile) {
       const SellerProfile = require('../models/SellerProfile');
       const profile = await SellerProfile.findOne({ user: req.user._id }).lean();
@@ -146,7 +200,9 @@ router.post('/withdraw', authenticate, async (req, res, next) => {
       }
     }
 
-    const quote = quoteWithdrawal(amount, policy);
+    const quote = affiliateQuote
+      ? { gross: affiliateQuote.gross, platformFee: 0, tax: affiliateQuote.pitAmount, net: affiliateQuote.net, totalFee: affiliateQuote.pitAmount, chargeAtWithdraw: true }
+      : quoteWithdrawal(amount, policy);
     const { createPayout } = require('../finance/payout-engine');
     const { payout } = await createPayout({
       sellerId: req.user._id,
@@ -156,7 +212,7 @@ router.post('/withdraw', authenticate, async (req, res, next) => {
       currency: 'USD',
       actorId: req.user._id,
       idempotencyKey: `wd_${req.user._id}_${amount}_${Date.now()}`,
-      requireSellerProfile: persona !== 'buyer',
+      requireSellerProfile: persona !== 'buyer' && persona !== 'affiliate',
     });
     if (payout.status === 'ON_HOLD' && needsSellerProfile) {
       return res.status(403).json({
@@ -183,6 +239,16 @@ router.post('/withdraw', authenticate, async (req, res, next) => {
         taxRate: policy.taxRate,
         tax: quote.tax,
         netAmount: quote.net,
+        ...(affiliateQuote
+          ? {
+              pitRule: affiliateQuote.pitRule,
+              pitRate: affiliateQuote.pitRate,
+              pitAmount: affiliateQuote.pitAmount,
+              amountVnd: affiliateQuote.amountVnd,
+              pitAmountVnd: affiliateQuote.pitAmountVnd,
+              pitCommitmentApplied: affiliateQuote.pitCommitmentApplied,
+            }
+          : {}),
       },
     });
     res.status(201).json({

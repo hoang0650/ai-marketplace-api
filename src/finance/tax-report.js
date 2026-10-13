@@ -87,7 +87,36 @@ function buildSellerRows(orders, sellers = new Map(), fx = taxConfig().vndPerUsd
   return [...bySeller.values()].sort((a, b) => a.sellerType.localeCompare(b.sellerType) || b.revenueVnd - a.revenueVnd);
 }
 
-/** Group active affiliate commissions by affiliate (gross commission = taxable income). */
+/**
+ * Affiliate PIT is withheld at withdrawal (policy 2026-10 rev. 2): each affiliate withdrawal is one
+ * income payment. Maps wallet withdrawals (meta.persona = 'affiliate') to the payment-row shape.
+ */
+function withdrawalsToAffiliatePayments(txs) {
+  return (txs || [])
+    .filter((t) => t && t.type === 'withdraw' && t.meta?.persona === 'affiliate' && !['failed', 'cancelled'].includes(t.status))
+    .map((t) => ({
+      affiliate: t.user,
+      currency: t.currency || 'USD',
+      amount: Number(t.amount) || 0,
+      amountVnd: Number(t.meta?.amountVnd) || 0,
+      netAmount: Number(t.amount) || 0,
+      reversedAmount: 0,
+      pitAmount: Number(t.meta?.pitAmount ?? t.meta?.tax) || 0,
+      pitAmountVnd: Number(t.meta?.pitAmountVnd) || 0,
+      pitCommitmentApplied: !!t.meta?.pitCommitmentApplied,
+      createdAt: t.createdAt,
+    }));
+}
+
+async function loadAffiliatePayments(range, affiliateId) {
+  const WalletTx = require('../models/WalletTx');
+  const q = { type: 'withdraw', 'meta.persona': 'affiliate', createdAt: { $gte: range.from, $lt: range.to } };
+  if (affiliateId) q.user = affiliateId;
+  const txs = await WalletTx.find(q).select('user type status currency amount meta createdAt').lean();
+  return withdrawalsToAffiliatePayments(txs);
+}
+
+/** Group affiliate income payments (withdrawals) by affiliate (gross = taxable income). */
 function buildAffiliateRows(commissions, people = new Map(), fx = taxConfig().vndPerUsd) {
   const byAff = new Map();
   for (const c of commissions || []) {
@@ -109,7 +138,7 @@ function buildAffiliateRows(commissions, people = new Map(), fx = taxConfig().vn
     const share = c.amount > 0 ? Math.max(0, 1 - (Number(c.reversedAmount) || 0) / (Number(c.netAmount) || c.amount)) : 0;
     const income = c.amountVnd ? roundMoney(c.amountVnd * share, 0) : toVnd(c.amount * share, c.currency, fx);
     if (!(share > 0)) continue;
-    const pit = toVnd((Number(c.pitAmount) || 0) * share, c.currency, fx);
+    const pit = c.pitAmountVnd ? roundMoney(c.pitAmountVnd * share, 0) : toVnd((Number(c.pitAmount) || 0) * share, c.currency, fx);
     row.payments += 1;
     row.incomeVnd += income;
     row.pitWithheldVnd += pit;
@@ -246,7 +275,6 @@ async function loadPeople(userIds) {
 
 async function buildQuarterlyReport({ year, quarter }) {
   const Order = require('../models/Order');
-  const AffiliateCommission = require('../models/AffiliateCommission');
   const range = quarterRange(year, quarter);
   const [orders, commissions] = await Promise.all([
     Order.find({
@@ -256,9 +284,7 @@ async function buildQuarterlyReport({ year, quarter }) {
     })
       .select('seller sellerType currency grossAmount amount refundAmount taxAmount taxPolicy createdAt')
       .lean(),
-    AffiliateCommission.find({ createdAt: { $gte: range.from, $lt: range.to } })
-      .select('affiliate currency amount amountVnd netAmount reversedAmount pitAmount pitCommitmentApplied createdAt status')
-      .lean(),
+    loadAffiliatePayments(range),
   ]);
   const people = await loadPeople([...orders.map((o) => o.seller), ...commissions.map((c) => c.affiliate)]);
   const sellers = buildSellerRows(orders, people);
@@ -282,12 +308,11 @@ async function buildQuarterlyReport({ year, quarter }) {
  * (PIT part of the withholding). `affiliateId` limits to one person (self-service view).
  */
 async function buildPitCertificates({ year, affiliateId } = {}) {
-  const AffiliateCommission = require('../models/AffiliateCommission');
   const Order = require('../models/Order');
   const range = yearRange(year);
   const q = { createdAt: { $gte: range.from, $lt: range.to } };
   const [commissions, orders] = await Promise.all([
-    AffiliateCommission.find(affiliateId ? { ...q, affiliate: affiliateId } : q).lean(),
+    loadAffiliatePayments(range, affiliateId),
     Order.find({
       ...q,
       ...(affiliateId ? { seller: affiliateId } : {}),
@@ -349,6 +374,7 @@ module.exports = {
   yearRange,
   buildSellerRows,
   buildAffiliateRows,
+  withdrawalsToAffiliatePayments,
   renderQuarterlyReport,
   renderPitCertificates,
   buildQuarterlyReport,

@@ -11,20 +11,27 @@ const AFFILIATE_MAX_RATE = 0.25;
 /**
  * Affiliate settings. Everything except the 25% ceiling is configurable by env.
  *
- * PIT on affiliate commissions (Luật Thuế TNCN): the platform withholds 10% when a single
- * commission payment is >= 2,000,000 VND (AFFILIATE_PIT_THRESHOLD_VND), unless the affiliate has an
- * APPROVED commitment form Mẫu 08/CK-TNCN for that year (then 0%). Below the threshold nothing is
- * withheld. Year-end the platform issues PIT withholding certificates (chứng từ khấu trừ thuế TNCN).
+ * Affiliate payout + PIT (Luật Thuế TNCN), policy 2026-10 rev. 2:
+ * - commissions are credited GROSS (no PIT at credit time);
+ * - an affiliate can withdraw only when the withdrawable affiliate balance is >= 2,000,000 VND and
+ *   each withdrawal is >= 2,000,000 VND (AFFILIATE_MIN_WITHDRAW_VND);
+ * - every affiliate withdrawal (= one payment of income) has 10% PIT withheld, unless the affiliate has
+ *   an APPROVED Mẫu 08/CK-TNCN for that year (then 0%).
+ * Year-end the platform issues PIT withholding certificates (chứng từ khấu trừ thuế TNCN).
  * Pending legal review.
  */
 function affiliateConfig(env = process.env) {
+  const minWithdrawVnd = Math.max(0, num(env.AFFILIATE_MIN_WITHDRAW_VND, 2_000_000));
   return {
     maxRate: AFFILIATE_MAX_RATE,
     attributionDays: Math.max(1, Math.min(365, Math.floor(num(env.AFFILIATE_ATTRIBUTION_DAYS, 30)))),
     pit: {
       enabled: String(env.AFFILIATE_PIT_ENABLED ?? 'true').toLowerCase() !== 'false',
       rate: Math.max(0, Math.min(1, num(env.AFFILIATE_PIT_RATE, 0.1))),
-      thresholdVnd: Math.max(0, num(env.AFFILIATE_PIT_THRESHOLD_VND, 2_000_000)),
+      /** Minimum withdrawable balance AND minimum single withdrawal, in VND. */
+      minWithdrawVnd,
+      /** Kept for API compatibility: equals minWithdrawVnd (PIT is applied at withdrawal). */
+      thresholdVnd: minWithdrawVnd,
       /** An approved Mẫu 08/CK-TNCN commitment exempts the affiliate from withholding. */
       commitmentExempts: String(env.AFFILIATE_PIT_COMMITMENT_EXEMPTS ?? 'true').toLowerCase() !== 'false',
       vndPerUsd: Math.max(1, num(env.AFFILIATE_VND_PER_USD, DEFAULT_VND_PER_USD)),

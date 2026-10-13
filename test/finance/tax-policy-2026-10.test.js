@@ -7,7 +7,7 @@ const { taxConfig } = require('../../src/config/tax');
 const { taxCategoryFromProduct } = require('../../src/finance/tax-category');
 const { validateSellerTaxInfo, isValidTaxCode, sellerApprovalGate } = require('../../src/utils/seller-compliance');
 const { isPitCommitmentApproved, parsePitCommitmentSubmission, vnYear } = require('../../src/utils/pit-commitment');
-const { quarterRange, buildSellerRows, buildAffiliateRows, renderQuarterlyReport, renderPitCertificates, totals } = require('../../src/finance/tax-report');
+const { quarterRange, buildSellerRows, buildAffiliateRows, withdrawalsToAffiliatePayments, renderQuarterlyReport, renderPitCertificates, totals } = require('../../src/finance/tax-report');
 const { buildXlsx, buildCsv, crc32 } = require('../../src/utils/xlsx-writer');
 
 const RULES = [{ rate: 0.2, status: 'ACTIVE' }];
@@ -162,6 +162,21 @@ describe('quarterly report + year-end PIT certificate exports', () => {
     assert.equal(xlsx.body.subarray(0, 2).toString(), 'PK');
     const cert = renderPitCertificates([{ kind: 'AFFILIATE', personId: 'x', year: 2026, totalIncomeVnd: 1, totalPitWithheldVnd: 0 }], 2026, 'csv');
     assert.match(cert.body, /AFFILIATE/);
+  });
+
+  test('affiliate PIT rows come from affiliate withdrawals (one withdrawal = one payment)', () => {
+    const pays = withdrawalsToAffiliatePayments([
+      { user: 'x', type: 'withdraw', status: 'pending', currency: 'USD', amount: 100, meta: { persona: 'affiliate', amountVnd: 2_500_000, pitAmount: 10, pitAmountVnd: 250_000 }, createdAt: '2026-08-01T00:00:00Z' },
+      { user: 'x', type: 'withdraw', status: 'completed', currency: 'USD', amount: 80, meta: { persona: 'affiliate', amountVnd: 2_000_000, pitAmount: 0, pitAmountVnd: 0, pitCommitmentApplied: true }, createdAt: '2026-09-01T00:00:00Z' },
+      { user: 'x', type: 'withdraw', status: 'failed', currency: 'USD', amount: 80, meta: { persona: 'affiliate', amountVnd: 2_000_000 }, createdAt: '2026-09-02T00:00:00Z' },
+      { user: 'x', type: 'withdraw', status: 'completed', currency: 'USD', amount: 50, meta: { persona: 'buyer' }, createdAt: '2026-09-03T00:00:00Z' },
+    ]);
+    assert.equal(pays.length, 2);
+    const rows = buildAffiliateRows(pays);
+    assert.equal(rows[0].payments, 2);
+    assert.equal(rows[0].incomeVnd, 4_500_000);
+    assert.equal(rows[0].pitWithheldVnd, 250_000);
+    assert.equal(rows[0].exemptByCommitment, 1);
   });
   test('xlsx writer: valid zip entries with correct CRC', () => {
     assert.equal(crc32(Buffer.from('123456789')), 0xcbf43926);

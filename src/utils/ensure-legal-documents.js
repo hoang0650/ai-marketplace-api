@@ -257,7 +257,7 @@ ${FULL_TEXT}/chinh-sach-luu-tru-va-cung-cap-du-lieu`,
   {
     documentType: 'tax-policy',
     title: 'Chính sách thuế AI Markets',
-    summary: 'Thuế theo loại người bán: cá nhân kinh doanh 7% (dịch vụ, sản phẩm số) hoặc 1,5% (hàng hóa) do sàn khấu trừ, nộp thay; hộ kinh doanh và doanh nghiệp 0%; affiliate 10% TNCN khi một lần chi trả từ 2.000.000 đ; báo cáo quý và chứng từ khấu trừ cuối năm.',
+    summary: 'Thuế theo loại người bán: cá nhân kinh doanh 7% (dịch vụ, sản phẩm số) hoặc 1,5% (hàng hóa) do sàn khấu trừ, nộp thay; hộ kinh doanh và doanh nghiệp 0%; affiliate rút tối thiểu 2.000.000 đ, khấu trừ 10% TNCN mỗi lần rút; báo cáo quý và chứng từ khấu trừ cuối năm.',
     content: `# Chính sách thuế
 
 ## Phí dịch vụ sàn không phải thuế
@@ -281,7 +281,7 @@ Cá nhân kinh doanh có doanh thu trong năm dương lịch không vượt ngư
 Ví dụ đơn 1.000.000 đ có affiliate 25%: cá nhân — phí sàn 200.000 đ, thuế 70.000 đ, hoa hồng 250.000 đ, người bán nhận 480.000 đ; hộ kinh doanh/doanh nghiệp — phí sàn 200.000 đ, thuế 0 đ, hoa hồng 250.000 đ, người bán nhận 550.000 đ.
 
 ## Affiliate
-Sàn khấu trừ 10% thuế TNCN khi một lần chi trả hoa hồng từ 2.000.000 đ trở lên; không khấu trừ nếu người giới thiệu đã nộp Cam kết Mẫu 08/CK-TNCN được sàn duyệt.
+Hoa hồng được ghi có đủ (chưa khấu trừ thuế). Người giới thiệu chỉ rút được khi số dư hoa hồng khả dụng từ 2.000.000 đ trở lên và mỗi lần rút tối thiểu 2.000.000 đ; sàn khấu trừ 10% thuế TNCN trên mỗi lần rút, không khấu trừ nếu người giới thiệu đã nộp Cam kết Mẫu 08/CK-TNCN được sàn duyệt. Ví dụ rút 2.500.000 đ: thuế TNCN 250.000 đ, thực nhận 2.250.000 đ.
 
 ## Nghĩa vụ báo cáo của sàn
 - Báo cáo quý cho cơ quan thuế (nộp trong tháng 1, 4, 7, 10) doanh thu của cá nhân kinh doanh, hộ kinh doanh và số thuế đã khấu trừ (kể cả TNCN của affiliate).
@@ -318,15 +318,15 @@ const AFFILIATE_DOC_VERSION = '2026.10.12';
 const AFFILIATE_DOC = {
   documentType: 'affiliate-policy',
   title: 'Chính sách chương trình Affiliate AI Markets',
-  summary: 'Hoa hồng 0–25% giá trị đơn (giá sau giảm giá) do người bán chi trả; last-click 30 ngày; giữ 48 giờ; eKYC trước khi tạo liên kết; khấu trừ 10% thuế TNCN khi một lần chi trả từ 2.000.000 đ (trừ khi có Cam kết Mẫu 08/CK-TNCN được duyệt); hành vi cấm và thu hồi hoa hồng.',
+  summary: 'Hoa hồng 0–25% giá trị đơn (giá sau giảm giá) do người bán chi trả; last-click 30 ngày; giữ 48 giờ; eKYC trước khi tạo liên kết; rút tối thiểu 2.000.000 đ, khấu trừ 10% thuế TNCN mỗi lần rút (trừ khi có Cam kết Mẫu 08/CK-TNCN được duyệt); hành vi cấm và thu hồi hoa hồng.',
   content: `# Chính sách chương trình Affiliate
 
 - **Tham gia**: người dùng đã đăng nhập và đã xác minh danh tính (eKYC) mới được tạo mã giới thiệu và lấy liên kết cho từng sản phẩm hoặc gian hàng; liên kết của tài khoản chưa xác minh không được ghi nhận. Người bán tự nguyện tham gia; mặc định 0% là không tham gia.
 - **Tỷ lệ**: người bán đặt từ 0% đến 25% giá trị đơn hàng (giá sau giảm giá) cho từng sản phẩm hoặc làm mặc định gian hàng; tỷ lệ được chốt khi đặt hàng.
 - **Người chịu chi phí**: hoa hồng trừ vào phần doanh thu của người bán, không trừ vào phí sàn và không thay đổi thuế. Người bán thực nhận = giá trị đơn − 20% phí sàn − thuế theo loại người bán (cá nhân 7%; hộ kinh doanh, doanh nghiệp 0%) − tỷ lệ affiliate × giá trị đơn. Ví dụ đơn 1.000.000 đ, tỷ lệ 25%: người bán cá nhân — phí sàn 200.000 đ, thuế 70.000 đ, hoa hồng 250.000 đ, nhận 480.000 đ; hộ kinh doanh/doanh nghiệp — phí sàn 200.000 đ, thuế 0 đ, hoa hồng 250.000 đ, nhận 550.000 đ.
 - **Ghi nhận**: nhấp chuột cuối cùng (last-click) trong 30 ngày; không ghi nhận khi người mua là người giới thiệu hoặc người giới thiệu là người bán.
-- **Ghi có**: hoa hồng vào ví người giới thiệu, tạm giữ 48 giờ (hoặc đến khi giải quyết xong khiếu nại), sau đó rút được về tài khoản đã xác minh.
-- **Thuế TNCN**: sàn khấu trừ 10% khi một lần chi trả hoa hồng từ 2.000.000 đ trở lên (Luật Thuế TNCN); dưới mức này không khấu trừ. Người giới thiệu chỉ có thu nhập thuộc diện khấu trừ nhưng ước tính tổng thu nhập trong năm chưa đến mức phải nộp thuế có thể tải lên Cam kết Mẫu 08/CK-TNCN (Thông tư 80/2021/TT-BTC); sau khi sàn duyệt, không khấu trừ cho năm cam kết. Cuối năm sàn cấp chứng từ khấu trừ thuế TNCN; số thuế đã khấu trừ được báo cáo cơ quan thuế theo quý.
+- **Ghi có**: hoa hồng vào ví người giới thiệu, tạm giữ 48 giờ (hoặc đến khi giải quyết xong khiếu nại), sau đó rút được về tài khoản đã xác minh khi số dư hoa hồng khả dụng từ 2.000.000 đ trở lên (mỗi lần rút tối thiểu 2.000.000 đ).
+- **Thuế TNCN**: hoa hồng được ghi có đủ; sàn khấu trừ 10% thuế TNCN trên mỗi lần rút (Luật Thuế TNCN), ví dụ rút 2.500.000 đ: thuế 250.000 đ, thực nhận 2.250.000 đ. Người giới thiệu chỉ có thu nhập thuộc diện khấu trừ nhưng ước tính tổng thu nhập trong năm chưa đến mức phải nộp thuế có thể tải lên Cam kết Mẫu 08/CK-TNCN (Thông tư 80/2021/TT-BTC); sau khi sàn duyệt, không khấu trừ cho năm cam kết. Cuối năm sàn cấp chứng từ khấu trừ thuế TNCN; số thuế đã khấu trừ được báo cáo cơ quan thuế theo quý.
 - **Hành vi cấm**: thư rác; quảng cáo sai sự thật, gây nhầm lẫn; đặt giá thầu từ khóa thương hiệu khi chưa được chấp thuận; đơn hàng ảo; nhồi cookie; tự giới thiệu.
 - **Thu hồi**: đơn hoàn tiền/hủy đảo ngược hoa hồng theo tỷ lệ; gian lận bị thu hồi toàn bộ hoa hồng liên quan, kể cả số đã khả dụng, và xử lý theo Quy trình xử lý vi phạm.
 
