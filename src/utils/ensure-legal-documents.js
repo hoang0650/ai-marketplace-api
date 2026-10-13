@@ -33,7 +33,7 @@ Dữ liệu cá nhân được xử lý theo Luật Bảo vệ dữ liệu cá n
 
 - Ảnh giấy tờ tùy thân khi xác minh người bán là dữ liệu nhạy cảm, được giới hạn truy cập.
 - Nội dung trao đổi với AI không dùng để huấn luyện mô hình; được chuyển tới nhà cung cấp mô hình để xử lý yêu cầu.
-- Cơ sở dữ liệu và dữ liệu cá nhân được lưu trữ tại Việt Nam trên máy chủ của Công ty TNHH Lưu Trữ Số (123HOST, MST 0312088232); chỉ chuyển ra nước ngoài trong phạm vi cần thiết để cung cấp dịch vụ (ví dụ nhà cung cấp mô hình AI) theo quy định pháp luật.
+- Cơ sở dữ liệu và dữ liệu cá nhân được lưu trữ tại Việt Nam trên máy chủ của Công ty TNHH Lưu Trữ Số (123HOST, MST 0312088232) (trung tâm dữ liệu của 123HOST tại TP. Hồ Chí Minh, địa chỉ IP 103.97.127.39); chỉ chuyển ra nước ngoài trong phạm vi cần thiết để cung cấp dịch vụ (ví dụ nhà cung cấp mô hình AI) theo quy định pháp luật.
 - Ảnh CCCD/hộ chiếu khi người mua rút số dư ví và giấy chứng nhận đăng ký kinh doanh của người bán là hộ kinh doanh, doanh nghiệp được giới hạn truy cập.
 - Không bán dữ liệu cá nhân.
 - Người dùng thực hiện quyền của chủ thể dữ liệu trong Cài đặt hoặc qua support@aimarkets.vn.
@@ -74,7 +74,7 @@ Mọi đơn hàng được thanh toán bằng số dư ví AI Markets. GPay/Viet
 Xác nhận tiếp nhận trong 24 giờ; xác minh sơ bộ trong 01 ngày làm việc; người bán phản hồi trong 02 ngày làm việc; ra quyết định trong 07 ngày làm việc kể từ khi đủ hồ sơ. Khiếu nại lại trong 07 ngày kể từ khi có quyết định, được trả lời trong 07 ngày làm việc.
 
 ## 7. Dữ liệu
-Cơ sở dữ liệu và dữ liệu cá nhân được lưu trữ tại Việt Nam trên máy chủ của Công ty TNHH Lưu Trữ Số (123HOST, MST 0312088232).
+Cơ sở dữ liệu và dữ liệu cá nhân được lưu trữ tại Việt Nam trên máy chủ của Công ty TNHH Lưu Trữ Số (123HOST, MST 0312088232) (trung tâm dữ liệu của 123HOST tại TP. Hồ Chí Minh, địa chỉ IP 103.97.127.39).
 
 ## 8. Thay đổi
 Thông báo trước ít nhất 30 ngày. Pháp luật Việt Nam điều chỉnh.
@@ -203,7 +203,7 @@ ${FULL_TEXT}/chinh-sach-khieu-nai-tranh-chap`,
     summary: 'Tiếp nhận 24 giờ, xác minh 01 ngày làm việc, người bán phản hồi 02 ngày làm việc, quyết định 07 ngày làm việc.',
     content: `# Chính sách khiếu nại
 
-Gửi khiếu nại tại https://aimarkets.vn/complaints, email support@aimarkets.vn hoặc hotline 1900 6159.
+Gửi khiếu nại tại https://aimarkets.vn/complaints, email support@aimarkets.vn hoặc hotline 0931 881 584.
 
 1. Xác nhận tiếp nhận trong **24 giờ**.
 2. Xác minh sơ bộ trong **01 ngày làm việc**.
@@ -241,7 +241,7 @@ ${FULL_TEXT}/chinh-sach-su-dung-chap-nhan-duoc`,
     summary: 'Thời hạn lưu trữ, tạm giữ và cung cấp dữ liệu cho cơ quan có thẩm quyền.',
     content: `# Chính sách dữ liệu
 
-- Cơ sở dữ liệu và dữ liệu cá nhân lưu trữ tại Việt Nam trên máy chủ của Công ty TNHH Lưu Trữ Số (123HOST, MST 0312088232).
+- Cơ sở dữ liệu và dữ liệu cá nhân lưu trữ tại Việt Nam trên máy chủ của Công ty TNHH Lưu Trữ Số (123HOST, MST 0312088232) (trung tâm dữ liệu của 123HOST tại TP. Hồ Chí Minh, địa chỉ IP 103.97.127.39).
 - Thông tin sản phẩm đã đăng: lưu tối thiểu 01 năm.
 - Hợp đồng, đơn hàng, thanh toán, khiếu nại: lưu tối thiểu 03 năm.
 - Dữ liệu agent sau khi thuê bao hết hạn: 30 ngày; ổ đĩa GPU sau khi xóa máy: tối đa 24 giờ.
