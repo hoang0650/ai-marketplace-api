@@ -91,6 +91,87 @@ router.post('/deposit', authenticate, (_req, res) => {
   });
 });
 
+const {
+  parseBankAccount,
+  holderMatchesKyc,
+  hasPayoutAccount,
+  mapPayoutAccount,
+} = require('../utils/payout-account');
+
+/**
+ * Validate a payout account for the user: explicit body account (optionally saved), else the saved one.
+ * @returns {Promise<{ok:true, account:object} | {ok:false, code:string, message:string}>}
+ */
+async function resolveWithdrawAccount(userId, rawAccount, { save = false } = {}) {
+  const User = require('../models/User');
+  const user = await User.findById(userId).select('kyc payoutAccount');
+  if (!user) return { ok: false, code: 'NOT_FOUND', message: 'User not found' };
+  if (!rawAccount) {
+    if (hasPayoutAccount(user.payoutAccount)) {
+      const a = user.payoutAccount;
+      return { ok: true, account: { bankName: a.bankName, accountNumber: a.accountNumber, accountName: a.accountName, source: 'saved' } };
+    }
+    return { ok: false, code: 'BANK_ACCOUNT_REQUIRED', message: 'Bank name, account number and account holder are required' };
+  }
+  const parsed = parseBankAccount(rawAccount);
+  if (!parsed.ok) return parsed;
+  if (!holderMatchesKyc(parsed.data.accountName, user.kyc)) {
+    return {
+      ok: false,
+      code: 'ACCOUNT_NAME_MISMATCH',
+      message: 'The account holder name must match your verified eKYC name',
+    };
+  }
+  if (save) {
+    user.payoutAccount = { ...parsed.data, updatedAt: new Date() };
+    await user.save();
+  }
+  return { ok: true, account: { ...parsed.data, source: 'request' } };
+}
+
+/** GET /v1/wallet/payout-account — own saved payout account + whether eKYC allows editing it. */
+router.get('/payout-account', authenticate, async (req, res, next) => {
+  try {
+    const User = require('../models/User');
+    const { kycStatus } = require('../utils/kyc');
+    const user = await User.findById(req.user._id).select('role kyc payoutAccount').lean();
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    const status = kycStatus(user);
+    res.json({
+      account: mapPayoutAccount(user.payoutAccount),
+      kycStatus: status,
+      canEdit: status === 'verified' || user.role === 'admin',
+      holderName: (user.kyc?.subjectType === 'organization' ? user.kyc?.orgName : user.kyc?.fullName) || user.kyc?.fullName || '',
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** PUT /v1/wallet/payout-account — save own payout account (eKYC verified; holder must match the eKYC name). */
+router.put('/payout-account', authenticate, async (req, res, next) => {
+  try {
+    const User = require('../models/User');
+    const { assertCanWithdrawKyc } = require('../utils/kyc');
+    const user = await User.findById(req.user._id).select('role kyc payoutAccount');
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    if (user.role !== 'admin') {
+      const gate = assertCanWithdrawKyc(user);
+      if (!gate.ok) return res.status(403).json({ message: gate.message, code: gate.code || 'KYC_REQUIRED', kycStatus: gate.kycStatus });
+    }
+    const parsed = parseBankAccount(req.body);
+    if (!parsed.ok) return res.status(400).json({ message: parsed.message, code: parsed.code });
+    if (!holderMatchesKyc(parsed.data.accountName, user.kyc)) {
+      return res.status(400).json({ message: 'The account holder name must match your verified eKYC name', code: 'ACCOUNT_NAME_MISMATCH' });
+    }
+    user.payoutAccount = { ...parsed.data, updatedAt: new Date() };
+    await user.save();
+    res.json({ ok: true, account: mapPayoutAccount(user.payoutAccount) });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.post('/withdraw', authenticate, async (req, res, next) => {
   try {
     const amount = normalizeAmount(req.body?.amount);
@@ -125,16 +206,18 @@ router.post('/withdraw', authenticate, async (req, res, next) => {
       }
     }
 
-    // Buyers have no seller payout account on file: the bank account comes with the request.
+    // Payout bank account: from the request, else the user's saved account. Required for buyers
+    // (no seller profile). The holder must match the eKYC name.
     let payoutAccount = null;
     if (persona === 'buyer' || req.body?.bankAccount) {
-      const { parseBankAccount } = require('../utils/payout-account');
-      const parsedAccount = parseBankAccount(req.body?.bankAccount);
-      if (!parsedAccount.ok) {
-        if (persona === 'buyer') {
-          return res.status(400).json({ message: parsedAccount.message, code: parsedAccount.code });
+      const resolved = await resolveWithdrawAccount(req.user._id, req.body?.bankAccount, {
+        save: req.body?.saveAccount === true,
+      });
+      if (!resolved.ok) {
+        if (persona === 'buyer' || req.body?.bankAccount) {
+          return res.status(400).json({ message: resolved.message, code: resolved.code });
         }
-      } else payoutAccount = parsedAccount.data;
+      } else payoutAccount = resolved.account;
     }
 
     // Affiliate persona: min balance + min withdrawal 2,000,000 VND, 10% PIT per withdrawal.

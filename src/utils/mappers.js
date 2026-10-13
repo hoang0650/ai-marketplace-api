@@ -133,8 +133,19 @@ function mapOrder(doc, { viewerId, viewerRole } = {}) {
   };
 }
 
-function mapWallet(doc) {
+function mapWallet(doc, { admin = false } = {}) {
   const o = typeof doc.toObject === 'function' ? doc.toObject({ virtuals: true }) : { ...doc };
+  const acc = o.meta && o.meta.payoutAccount;
+  const payoutAccount =
+    acc && acc.accountNumber
+      ? {
+          bankName: acc.bankName || '',
+          accountName: acc.accountName || '',
+          accountNumber: admin ? acc.accountNumber : '',
+          accountNumberMasked: String(acc.accountNumber).length > 4 ? `••••${String(acc.accountNumber).slice(-4)}` : String(acc.accountNumber),
+          source: acc.source || 'request',
+        }
+      : undefined;
   const user = o.user && typeof o.user === 'object' && o.user.email
     ? {
         id: String(o.user._id || o.user.id),
@@ -160,6 +171,7 @@ function mapWallet(doc) {
     reviewedAt: o.reviewedAt ? new Date(o.reviewedAt).toISOString() : null,
     createdAt: o.createdAt ? new Date(o.createdAt).toISOString() : new Date().toISOString(),
     user,
+    ...(payoutAccount ? { payoutAccount } : {}),
   };
 }
 

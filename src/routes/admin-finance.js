@@ -322,8 +322,20 @@ router.get('/wallet-txs', ...admin, async (req, res, next) => {
       WalletTx.countDocuments({ type: 'deposit', status: 'pending' }),
       WalletTx.countDocuments({ type: 'withdraw', status: 'pending' }),
     ]);
+    // Older withdrawals have no account on the tx: fall back to the user's saved payout account.
+    const needAcc = rows.filter((r) => r.type === 'withdraw' && !r.meta?.payoutAccount && r.user?._id);
+    if (needAcc.length) {
+      const owners = await User.find({ _id: { $in: needAcc.map((r) => r.user._id) } })
+        .select('payoutAccount')
+        .lean();
+      const byId = new Map(owners.map((u) => [String(u._id), u.payoutAccount]));
+      for (const r of needAcc) {
+        const a = byId.get(String(r.user._id));
+        if (a && a.accountNumber) r.meta = { ...(r.meta || {}), payoutAccount: { ...a, source: 'saved' } };
+      }
+    }
     res.json({
-      items: rows.map(mapWallet),
+      items: rows.map((r) => mapWallet(r, { admin: true })),
       pendingDeposits,
       pendingWithdraws,
     });

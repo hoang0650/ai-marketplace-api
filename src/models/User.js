@@ -127,6 +127,13 @@ const userSchema = new mongoose.Schema(
     statusChangedAt: { type: Date, default: null },
     /** Personal eKYC — required for withdraw (all roles except admin). */
     kyc: { type: kycSchema, default: () => ({}) },
+    /** Own payout bank account (any eKYC-verified user; no seller profile needed). */
+    payoutAccount: {
+      bankName: { type: String, default: '', maxlength: 100 },
+      accountNumber: { type: String, default: '', maxlength: 20 },
+      accountName: { type: String, default: '', maxlength: 100 },
+      updatedAt: { type: Date, default: null },
+    },
     /** Public profile extras edited in /settings/profile. */
     profile: { type: profileSchema, default: () => ({}) },
     preferences: { type: preferencesSchema, default: () => ({}) },

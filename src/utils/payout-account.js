@@ -30,4 +30,50 @@ function maskAccountNumber(n) {
   return s.length <= 4 ? s : `${'•'.repeat(Math.min(6, s.length - 4))}${s.slice(-4)}`;
 }
 
-module.exports = { parseBankAccount, maskAccountNumber };
+/** Uppercase, no Vietnamese diacritics, single spaces: "Nguyễn  Văn A" → "NGUYEN VAN A". */
+function normalizeHolderName(s) {
+  return String(s || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D')
+    .replace(/[^A-Za-z0-9 ]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase();
+}
+
+/** The account holder must be the verified person (or, for organizations, the business name). */
+function holderMatchesKyc(accountName, kyc) {
+  const want = normalizeHolderName(accountName);
+  if (!want) return false;
+  const k = kyc || {};
+  const names = [k.fullName];
+  if (k.subjectType === 'organization') names.push(k.orgName);
+  return names.some((n) => n && normalizeHolderName(n) === want);
+}
+
+function hasPayoutAccount(acc) {
+  return Boolean(acc && acc.bankName && acc.accountNumber && acc.accountName);
+}
+
+/** Owner view: full number (it is their own data) plus a masked copy for display. */
+function mapPayoutAccount(acc) {
+  if (!hasPayoutAccount(acc)) return null;
+  return {
+    bankName: acc.bankName,
+    accountNumber: acc.accountNumber,
+    accountNumberMasked: maskAccountNumber(acc.accountNumber),
+    accountName: acc.accountName,
+    updatedAt: acc.updatedAt ? new Date(acc.updatedAt).toISOString() : null,
+  };
+}
+
+module.exports = {
+  parseBankAccount,
+  maskAccountNumber,
+  normalizeHolderName,
+  holderMatchesKyc,
+  hasPayoutAccount,
+  mapPayoutAccount,
+};
