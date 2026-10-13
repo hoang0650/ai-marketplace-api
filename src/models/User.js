@@ -22,6 +22,10 @@ const kycSchema = new mongoose.Schema(
     backObjectName: { type: String, default: '' },
     /** Organizations: business registration certificate / licence scan (household or company). */
     licenseObjectName: { type: String, default: '' },
+    /** Business licence is a PDF (older uploads may be images). */
+    licenseFileName: { type: String, default: '', maxlength: 255 },
+    licenseFileSize: { type: Number, default: 0 },
+    licenseContentType: { type: String, default: '' },
     submittedAt: { type: Date, default: null },
     reviewedAt: { type: Date, default: null },
     reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },

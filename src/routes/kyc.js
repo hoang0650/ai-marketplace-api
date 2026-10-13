@@ -20,19 +20,46 @@ const {
   canSubmit,
   objectNameForSide,
   parseKycSubmission,
+  licenseFileOf,
 } = require('../utils/kyc');
+const { UPLOAD_MAX_BYTES, isAllowedUploadMime, validateKycDocument } = require('../utils/kyc-upload');
 
 const router = express.Router();
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 8 * 1024 * 1024 },
+  limits: { fileSize: UPLOAD_MAX_BYTES, files: 1 },
   fileFilter(_req, file, cb) {
-    const ok = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'].includes(file.mimetype);
-    if (ok) cb(null, true);
-    else cb(new Error('Only jpeg, png, webp images are allowed for eKYC'));
+    if (isAllowedUploadMime(file.mimetype)) cb(null, true);
+    else {
+      const err = new Error('ID photos must be jpeg/png/webp; the business licence must be a PDF');
+      err.status = 400;
+      err.code = 'INVALID_FILE_TYPE';
+      cb(err);
+    }
   },
 });
+
+/** Accept the file under "file" (preferred) or the legacy "image" field. */
+const uploadFields = upload.fields([
+  { name: 'file', maxCount: 1 },
+  { name: 'image', maxCount: 1 },
+]);
+/** Multer errors happen before the handler, so map them to clean 4xx responses here. */
+function uploadOne(req, res, next) {
+  uploadFields(req, res, (err) => {
+    if (!err) return next();
+    if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({ message: 'File must be 10MB or smaller', code: 'FILE_TOO_LARGE' });
+    }
+    if (err instanceof multer.MulterError) return res.status(400).json({ message: err.message, code: err.code });
+    if (err.code === 'INVALID_FILE_TYPE') return res.status(400).json({ message: err.message, code: err.code });
+    return next(err);
+  });
+}
+function pickFile(req) {
+  return req.files?.file?.[0] || req.files?.image?.[0] || null;
+}
 
 function ensureKyc(user) {
   if (!user.kyc) user.kyc = {};
@@ -51,7 +78,7 @@ router.get('/me', authenticate, async (req, res, next) => {
 });
 
 /** POST /v1/kyc/documents/:side — upload ID front|back or business licence → private MinIO */
-router.post('/documents/:side', authenticate, upload.single('image'), async (req, res, next) => {
+router.post('/documents/:side', authenticate, uploadOne, async (req, res, next) => {
   try {
     const side = String(req.params.side || '').trim();
     if (!KYC_DOC_SIDES.includes(side)) {
@@ -60,9 +87,9 @@ router.post('/documents/:side', authenticate, upload.single('image'), async (req
     if (!isMinioEnabled()) {
       return res.status(503).json({ message: 'Document upload is not configured (MinIO)', code: 'MINIO_NOT_CONFIGURED' });
     }
-    if (!req.file) {
-      return res.status(400).json({ message: 'No image file uploaded', code: 'NO_FILE' });
-    }
+    const file = pickFile(req);
+    const check = validateKycDocument(side, file);
+    if (!check.ok) return res.status(check.status).json({ message: check.message, code: check.code });
 
     const user = await User.findById(req.user._id);
     if (!user) return res.status(404).json({ message: 'User not found' });
@@ -75,15 +102,20 @@ router.post('/documents/:side', authenticate, upload.single('image'), async (req
       });
     }
 
-    const uploaded = await uploadKycBuffer(req.file.buffer, {
+    const uploaded = await uploadKycBuffer(file.buffer, {
       userId: user._id,
       side,
-      contentType: req.file.mimetype,
-      filename: req.file.originalname,
+      contentType: check.contentType,
+      filename: file.originalname,
     });
 
     const kyc = ensureKyc(user);
     kyc[`${side}ObjectName`] = uploaded.objectName;
+    if (side === LICENSE_SIDE) {
+      kyc.licenseFileName = String(file.originalname || 'license.pdf').slice(0, 255);
+      kyc.licenseFileSize = file.size || file.buffer.length;
+      kyc.licenseContentType = check.contentType;
+    }
     if (status === 'none' || status === 'rejected') {
       kyc.status = 'draft';
       if (status === 'rejected') {
@@ -112,8 +144,9 @@ router.post('/documents/:side', authenticate, upload.single('image'), async (req
     });
   } catch (e) {
     if (e instanceof multer.MulterError && e.code === 'LIMIT_FILE_SIZE') {
-      return res.status(413).json({ message: 'Image must be 8MB or smaller', code: 'FILE_TOO_LARGE' });
+      return res.status(413).json({ message: 'File must be 10MB or smaller', code: 'FILE_TOO_LARGE' });
     }
+    if (e && e.code === 'INVALID_FILE_TYPE') return res.status(400).json({ message: e.message, code: e.code });
     next(e);
   }
 });
@@ -140,7 +173,8 @@ router.get('/documents/:side', authenticate, async (req, res, next) => {
       return res.status(503).json({ message: 'MinIO is not configured', code: 'MINIO_NOT_CONFIGURED' });
     }
     const url = await getKycPresignedUrl(objectName, 900);
-    res.json({ side, url, expiresIn: 900 });
+    const meta = side === LICENSE_SIDE ? licenseFileOf(kycOf(user)) : null;
+    res.json({ side, url, expiresIn: 900, ...(meta ? { file: meta } : {}) });
   } catch (err) {
     next(err);
   }
@@ -163,7 +197,9 @@ router.get('/documents/:side/stream', authenticate, async (req, res, next) => {
     if (!objectName) return res.status(404).json({ message: 'Document not uploaded', code: 'NO_DOCUMENT' });
     const stream = await getKycObjectStream(objectName);
     res.setHeader('Cache-Control', 'private, no-store');
-    res.setHeader('Content-Type', 'image/jpeg');
+    const meta = side === LICENSE_SIDE ? licenseFileOf(kycOf(user)) : null;
+    res.setHeader('Content-Type', meta ? meta.contentType : 'image/jpeg');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     stream.pipe(res);
   } catch (err) {
     next(err);

@@ -72,6 +72,7 @@ function mapKyc(user, { includeSensitive = false } = {}) {
     hasBack: hasDoc(k, 'back'),
     hasLicense: hasDoc(k, LICENSE_SIDE),
     licenseRequired: subjectType === 'organization',
+    licenseFile: hasDoc(k, LICENSE_SIDE) ? licenseFileOf(k) : null,
     submittedAt: k.submittedAt ? new Date(k.submittedAt).toISOString() : null,
     reviewedAt: k.reviewedAt ? new Date(k.reviewedAt).toISOString() : null,
     rejectReason: k.rejectReason || '',
@@ -91,6 +92,18 @@ function mapKyc(user, { includeSensitive = false } = {}) {
 }
 
 /** Document sides an applicant must upload: ID front/back, plus the business licence for organizations. */
+/** Metadata of the uploaded business licence (PDF; legacy uploads may be images). */
+function licenseFileOf(k) {
+  const objectName = String(k.licenseObjectName || '');
+  const contentType = k.licenseContentType || (/\.pdf$/i.test(objectName) ? 'application/pdf' : 'image/jpeg');
+  return {
+    name: k.licenseFileName || objectName.split('/').pop() || '',
+    size: Number(k.licenseFileSize) || 0,
+    contentType,
+    isPdf: contentType === 'application/pdf',
+  };
+}
+
 function requiredSides(subjectType) {
   return subjectType === 'organization' ? KYC_DOC_SIDES : KYC_SIDES;
 }
@@ -187,6 +200,7 @@ function parseKycSubmission(body, fallbackName = '') {
 }
 
 module.exports = {
+  licenseFileOf,
   KYC_SIDES,
   KYC_DOC_SIDES,
   LICENSE_SIDE,
