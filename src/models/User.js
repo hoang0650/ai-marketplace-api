@@ -127,6 +127,17 @@ const userSchema = new mongoose.Schema(
     statusChangedAt: { type: Date, default: null },
     /** Personal eKYC — required for withdraw (all roles except admin). */
     kyc: { type: kycSchema, default: () => ({}) },
+    /** Saved VAT invoice details for reuse (order invoice choice). */
+    invoiceProfile: {
+      buyerType: { type: String, enum: ['', 'organization', 'individual'], default: '' },
+      buyerName: { type: String, default: '', maxlength: 300 },
+      taxCode: { type: String, default: '', maxlength: 20 },
+      personalId: { type: String, default: '', maxlength: 20 },
+      address: { type: String, default: '', maxlength: 500 },
+      email: { type: String, default: '', maxlength: 200 },
+      budgetUnitCode: { type: String, default: '', maxlength: 20 },
+      updatedAt: { type: Date, default: null },
+    },
     /** Own payout bank account (any eKYC-verified user; no seller profile needed). */
     payoutAccount: {
       bankName: { type: String, default: '', maxlength: 100 },

@@ -369,8 +369,17 @@ router.post('/checkout', authenticate, async (req, res, next) => {
       license?.licenseKey ? '/dashboard/licenses' : '/dashboard/orders',
     ).catch(() => {});
 
+    // Every sale gets an invoice record; default: buyer does not want a VAT invoice.
+    let invoiceRec = null;
+    try {
+      invoiceRec = await require('../finance/invoice-service').ensureOrderInvoice(order);
+    } catch (e) {
+      console.error('[invoice]', e.message);
+    }
+
     const balance = await getBalance(req.user._id);
     res.status(201).json({
+      invoice: invoiceRec ? require('../utils/invoice').mapInvoice(invoiceRec) : null,
       checkoutId: `chk_${order._id.toString()}`,
       provider: 'wallet',
       paymentProvider: 'internal_ledger',

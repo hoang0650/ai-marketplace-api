@@ -362,6 +362,111 @@ router.put('/wallet-txs/:id', ...admin, async (req, res, next) => {
   }
 });
 
+/** GET /v1/admin/invoices?status=pending|issued|cancelled&wants=yes|no&q= — per-order invoice records. */
+router.get('/invoices', ...admin, async (req, res, next) => {
+  try {
+    const OrderInvoice = require('../models/OrderInvoice');
+    const { mapInvoice } = require('../utils/invoice');
+    const filter = {};
+    const status = String(req.query.status || '').trim();
+    if (['pending', 'issued', 'cancelled'].includes(status)) filter.status = status;
+    const wants = String(req.query.wants || '').trim();
+    if (wants === 'yes') filter.wantsInvoice = true;
+    if (wants === 'no') filter.wantsInvoice = false;
+    const q = String(req.query.q || '').trim().slice(0, 100);
+    if (q) {
+      const rx = new RegExp(escapeRegex(q), 'i');
+      filter.$or = [{ buyerName: rx }, { taxCode: rx }, { email: rx }, { invoiceNumber: rx }, { productName: rx }];
+      if (mongoose.isValidObjectId(q)) filter.$or.push({ order: q }, { _id: q }, { buyer: q });
+    }
+    const [rows, counts] = await Promise.all([
+      OrderInvoice.find(filter).populate('buyer', 'name email').sort({ createdAt: -1 }).limit(200).lean(),
+      OrderInvoice.aggregate([{ $group: { _id: { status: '$status', wants: '$wantsInvoice' }, n: { $sum: 1 } } }]),
+    ]);
+    const c = { pending: 0, issued: 0, cancelled: 0, pendingWanted: 0 };
+    for (const x of counts) {
+      c[x._id.status] = (c[x._id.status] || 0) + x.n;
+      if (x._id.status === 'pending' && x._id.wants) c.pendingWanted += x.n;
+    }
+    res.json({ items: rows.map((r) => mapInvoice(r, { admin: true })), counts: c });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** PUT /v1/admin/invoices/:id — mark issued (number/series/lookup code) or cancelled. */
+router.put('/invoices/:id', ...admin, async (req, res, next) => {
+  try {
+    const OrderInvoice = require('../models/OrderInvoice');
+    const { mapInvoice } = require('../utils/invoice');
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ message: 'Invalid id' });
+    const inv = await OrderInvoice.findById(req.params.id);
+    if (!inv) return res.status(404).json({ message: 'Invoice not found' });
+    const status = String(req.body?.status || '').trim();
+    if (!['issued', 'pending', 'cancelled'].includes(status)) {
+      return res.status(400).json({ message: 'status must be issued, pending or cancelled', code: 'INVALID_STATUS' });
+    }
+    if (status === 'issued') {
+      const invoiceNumber = String(req.body?.invoiceNumber || '').trim().slice(0, 50);
+      if (!invoiceNumber && !inv.pdfObjectName) {
+        return res.status(400).json({ message: 'Invoice number or PDF is required to mark issued', code: 'INVOICE_NUMBER_REQUIRED' });
+      }
+      if (invoiceNumber) inv.invoiceNumber = invoiceNumber;
+      inv.invoiceSeries = String(req.body?.invoiceSeries ?? inv.invoiceSeries ?? '').trim().slice(0, 20);
+      inv.lookupCode = String(req.body?.lookupCode ?? inv.lookupCode ?? '').trim().slice(0, 100);
+      inv.issuedAt = new Date();
+      inv.issuedBy = req.user._id;
+    }
+    inv.status = status;
+    await inv.save();
+    await writeAuditLog({
+      actorId: req.user._id,
+      action: `invoice.${status}`,
+      resourceType: 'OrderInvoice',
+      resourceId: inv._id,
+      newValue: { orderId: String(inv.order), status, invoiceNumber: inv.invoiceNumber },
+    }).catch(() => {});
+    res.json({ ok: true, invoice: mapInvoice(inv, { admin: true }) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** POST /v1/admin/invoices/:id/pdf — attach the issued invoice PDF (private MinIO, %PDF, ≤10MB). */
+const invoiceUpload = require('multer')({ storage: require('multer').memoryStorage(), limits: { fileSize: 10 * 1024 * 1024, files: 1 } });
+router.post('/invoices/:id/pdf', ...admin, (req, res, next) => {
+  invoiceUpload.single('file')(req, res, async (upErr) => {
+    try {
+      if (upErr) {
+        const tooBig = upErr.code === 'LIMIT_FILE_SIZE';
+        return res.status(tooBig ? 413 : 400).json({ message: tooBig ? 'PDF must be 10MB or smaller' : upErr.message, code: upErr.code });
+      }
+      const OrderInvoice = require('../models/OrderInvoice');
+      const { mapInvoice } = require('../utils/invoice');
+      const { isPdfBuffer } = require('../utils/kyc-upload');
+      const minio = require('../config/minio');
+      if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ message: 'Invalid id' });
+      const inv = await OrderInvoice.findById(req.params.id);
+      if (!inv) return res.status(404).json({ message: 'Invoice not found' });
+      if (!req.file || !isPdfBuffer(req.file.buffer)) {
+        return res.status(400).json({ message: 'Upload a PDF file', code: 'INVOICE_MUST_BE_PDF' });
+      }
+      if (!minio.isMinioEnabled()) return res.status(503).json({ message: 'MinIO is not configured', code: 'MINIO_NOT_CONFIGURED' });
+      const cfg = await minio.ensurePlaygroundBucket();
+      const objectName = `${String(cfg.kycPrefix).replace(/\/kyc$/, '')}/invoices/${inv.order}/invoice-${Date.now()}.pdf`;
+      await minio.getMinioClient().putObject(cfg.bucket, objectName, req.file.buffer, req.file.buffer.length, {
+        'Content-Type': 'application/pdf',
+        'Cache-Control': 'private, no-store',
+      });
+      inv.pdfObjectName = objectName;
+      await inv.save();
+      res.status(201).json({ ok: true, invoice: mapInvoice(inv, { admin: true }) });
+    } catch (err) {
+      next(err);
+    }
+  });
+});
+
 /**
  * Quarterly tax report (tax policy 2026-10): revenue of individual sellers + household businesses,
  * VAT/PIT withheld for individuals, PIT withheld from affiliates. ?year=2026&quarter=3&format=xlsx|csv|json
