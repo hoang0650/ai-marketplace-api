@@ -1,7 +1,9 @@
 const CommissionRule = require('../models/CommissionRule');
 const TaxRule = require('../models/TaxRule');
 const SellerTaxProfile = require('../models/SellerTaxProfile');
+const SellerProfile = require('../models/SellerProfile');
 const { settleSale } = require('./settlement-engine');
+const { taxConfig } = require('../config/tax');
 
 async function loadActiveCommissionRules() {
   return CommissionRule.find({ status: 'ACTIVE' }).lean();
@@ -27,17 +29,44 @@ async function currentSellerTaxProfile(sellerId, at = new Date()) {
     .lean();
 }
 
+/**
+ * Seller revenue (price after discount) on paid orders since 1 January of the transaction year, in VND.
+ * Used for the individual annual-revenue threshold. Returns undefined when it cannot be computed.
+ */
+async function sellerAnnualRevenueVnd(sellerId, at = new Date()) {
+  if (!sellerId) return undefined;
+  try {
+    const Order = require('../models/Order');
+    const d = new Date(at);
+    const from = new Date(Date.UTC(d.getUTCFullYear(), 0, 1) - 7 * 3600 * 1000); // 00:00 1/1 Asia/Bangkok
+    const rows = await Order.aggregate([
+      { $match: { seller: sellerId, status: 'paid', ownershipType: { $ne: 'PLATFORM_DIRECT' }, createdAt: { $gte: from, $lte: d } } },
+      { $group: { _id: { $toUpper: { $ifNull: ['$currency', 'USD'] } }, total: { $sum: { $ifNull: ['$grossAmount', '$amount'] } } } },
+    ]);
+    const fx = taxConfig().vndPerUsd;
+    return rows.reduce((s, r) => s + (r._id === 'VND' ? r.total : r.total * fx), 0);
+  } catch {
+    return undefined;
+  }
+}
+
 async function settleSaleFromDb(input) {
-  const [commissionRules, taxRules, sellerTaxProfile] = await Promise.all([
+  const sellerId = input.sellerId || input.seller?._id;
+  const [commissionRules, taxRules, taxProfile, sellerProfile, annual] = await Promise.all([
     loadActiveCommissionRules(),
     loadActiveTaxRules(),
-    currentSellerTaxProfile(input.sellerId || input.seller?._id, input.transactionDate),
+    currentSellerTaxProfile(sellerId, input.transactionDate),
+    sellerId ? SellerProfile.findOne({ user: sellerId }).select('sellerType').lean().catch(() => null) : null,
+    input.sellerAnnualRevenueVnd !== undefined ? input.sellerAnnualRevenueVnd : sellerAnnualRevenueVnd(sellerId, input.transactionDate),
   ]);
+  // Seller type (mandatory at registration) comes from the tax profile, else the seller profile.
+  const sellerTaxProfile = taxProfile || (sellerProfile?.sellerType ? { sellerType: sellerProfile.sellerType, sellerId } : null);
   return settleSale({
     ...input,
     commissionRules,
     taxRules,
     sellerTaxProfile,
+    sellerAnnualRevenueVnd: annual,
   });
 }
 
@@ -47,4 +76,5 @@ module.exports = {
   loadActiveTaxRules,
   loadActiveStoreFeeRules,
   currentSellerTaxProfile,
+  sellerAnnualRevenueVnd,
 };

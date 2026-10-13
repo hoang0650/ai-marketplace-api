@@ -1,4 +1,6 @@
-const { roundMoney, SELLER_TAX_RATE } = require('./constants');
+const { roundMoney } = require('./constants');
+const { calculateSellerTax } = require('./seller-tax-policy');
+const { taxConfig } = require('../config/tax');
 const { calculateCommission } = require('./commission-engine');
 const { calculateTax } = require('./tax-engine');
 const { calculatePaymentFee } = require('./payment-fee-engine');
@@ -31,6 +33,8 @@ function settleSale({
   chargebackAmount = 0,
   /** Seller-chosen affiliate rate (0–0.25), snapshotted by the caller; only when attributed. */
   affiliateRate = 0,
+  /** Seller revenue earlier this calendar year in VND (threshold check); undefined = unknown. */
+  sellerAnnualRevenueVnd,
   currency = 'USD',
   digits = 2,
 } = {}) {
@@ -55,6 +59,17 @@ function settleSale({
   });
 
   const sellerShareAmount = roundMoney(Math.max(0, grossAmount - commission.commissionAmount), digits);
+  // Tax policy 2026-10: tax base is the price after discount (order gross), by seller type.
+  const taxableAmount = grossAmount;
+  const policyTax = calculateSellerTax({
+    sellerType,
+    taxCategory,
+    grossAmount: taxableAmount,
+    currency,
+    sellerAnnualRevenueVnd,
+    digits,
+  });
+  // Admin-configured ACTIVE TaxRules (none are seeded) override the built-in policy when they match.
   let tax = calculateTax({
     seller,
     buyer,
@@ -62,32 +77,21 @@ function settleSale({
     jurisdiction,
     transactionDate,
     taxCategory,
-    taxableAmount: sellerShareAmount,
+    taxableAmount,
     rules: taxRules,
     sellerTaxProfile,
     digits,
   });
-
-  if (ownershipType !== 'PLATFORM_DIRECT' && sellerType !== 'PLATFORM' && !tax.taxApplicable) {
-    const amount = roundMoney(sellerShareAmount * SELLER_TAX_RATE, digits);
-    tax = {
-      taxApplicable: amount > 0,
-      taxes: amount
-        ? [
-            {
-              type: 'SELLER_WITHHOLDING',
-              rate: SELLER_TAX_RATE,
-              amount,
-              ruleId: null,
-              name: 'DEFAULT_SELLER_TAX_ON_SHARE',
-            },
-          ]
-        : [],
-      totalTaxAmount: amount,
-      withholdingRequired: true,
-      reason: 'DEFAULT_SELLER_TAX_ON_SHARE',
-    };
+  let taxPolicy = policyTax.policy;
+  if (ownershipType === 'PLATFORM_DIRECT' || sellerType === 'PLATFORM') {
+    tax = { taxApplicable: false, taxes: [], totalTaxAmount: 0, withholdingRequired: false, reason: 'PLATFORM_SALE_USES_OPERATOR_ACCOUNTING' };
+    taxPolicy = { ...taxPolicy, rule: 'PLATFORM_SALE_USES_OPERATOR_ACCOUNTING' };
+  } else if (tax.reason === 'RULE_MATCH') {
+    taxPolicy = { ...taxPolicy, rule: 'ADMIN_TAX_RULE', rate: taxableAmount ? roundMoney(tax.totalTaxAmount / taxableAmount, 6) : 0 };
+  } else {
+    tax = policyTax;
   }
+  const isCompany = sellerType === 'COMPANY' || sellerType === 'FOREIGN_COMPANY';
 
   const paymentFee = calculatePaymentFee({
     grossAmount,
@@ -154,8 +158,17 @@ function settleSale({
     commissionAmount,
     commissionRuleId: commission.ruleId,
     commissionRuleName: commission.ruleName,
-    taxableAmount: sellerShareAmount,
+    sellerShareAmount,
+    taxableAmount,
     taxAmount: tax.totalTaxAmount,
+    sellerType,
+    taxPolicy,
+    /** Company/organisation sellers receive a VAT invoice (10%) for the platform fee. */
+    platformFeeInvoice: {
+      required: isCompany && ownershipType !== 'PLATFORM_DIRECT',
+      vatRate: taxConfig().platformFeeVatRate,
+      feeAmount: ownershipType === 'PLATFORM_DIRECT' || sellerType === 'PLATFORM' ? 0 : commission.commissionAmount,
+    },
     taxBreakdown: tax.taxes,
     taxApplicable: tax.taxApplicable,
     withholdingRequired: tax.withholdingRequired,

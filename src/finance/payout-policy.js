@@ -7,7 +7,8 @@ const { DEFAULT_VND_PER_USD } = require('../config/fx');
  * Withdrawal policy per marketplace persona.
  *
  * - buyer        : may withdraw the wallet balance after eKYC (ID/passport); no fee
- * - seller       : product/creator earnings — 20% platform commission + 8% tax
+ * - seller       : product/creator earnings — 20% platform commission + tax by seller type
+ *                  (individual 7% digital / 1.5% goods withheld; household business & company 0%)
  * - talent       : talent profile earnings — same as seller
  * - freelancer   : accepted job applicant — same as seller
  * - employer / HR: job poster — 1% fee, minimum balance before withdrawal
@@ -30,12 +31,17 @@ function rateFromEnv(key, fallback) {
 }
 
 const SELLER_PLATFORM_FEE_RATE = rateFromEnv('WITHDRAW_SELLER_PLATFORM_FEE_RATE', 0.2);
-const SELLER_TAX_RATE = rateFromEnv('WITHDRAW_SELLER_TAX_RATE', 0.08);
+const { sellerTaxRateFor } = require('./seller-tax-policy');
+
+/** Explicit env override (legacy); unset = rate follows the seller type (tax policy 2026-10). */
+const SELLER_TAX_RATE_OVERRIDE = rateFromEnv('WITHDRAW_SELLER_TAX_RATE', null);
+/** Default individual (digital) rate - informational. */
+const SELLER_TAX_RATE = SELLER_TAX_RATE_OVERRIDE ?? sellerTaxRateFor('INDIVIDUAL', 'AI_API').total;
 const EMPLOYER_FEE_RATE = rateFromEnv('WITHDRAW_EMPLOYER_FEE_RATE', 0.01);
 const EMPLOYER_MIN_VND = Math.max(0, Number(process.env.WITHDRAW_EMPLOYER_MIN_VND || 2_000_000) || 2_000_000);
 
 /**
- * Seller earnings are already credited net of the 20% commission + 8% tax at
+ * Seller earnings are already credited net of the 20% commission + type-based tax at
  * order settlement (`settleSale`), so re-charging on withdraw would double-tax.
  * Default false = rates are informational on the withdraw screen. Flip to true
  * only if balances are credited gross (e.g. manual admin top-ups).
@@ -52,8 +58,13 @@ function vndToUsd(vnd) {
   return roundMoney(Number(vnd || 0) / VND_PER_USD);
 }
 
+function sellerTaxRate(sellerType) {
+  if (SELLER_TAX_RATE_OVERRIDE !== null) return SELLER_TAX_RATE_OVERRIDE;
+  return sellerType ? sellerTaxRateFor(sellerType, 'AI_API').total : SELLER_TAX_RATE;
+}
+
 /** Fee/tax/minimum policy for a persona (admin handled by callers). */
-function policyFor(persona) {
+function policyFor(persona, { sellerType } = {}) {
   if (persona === 'employer') {
     const minUsd = vndToUsd(EMPLOYER_MIN_VND);
     return {
@@ -75,8 +86,9 @@ function policyFor(persona) {
       persona,
       canWithdraw: true,
       platformFeeRate: SELLER_PLATFORM_FEE_RATE,
-      taxRate: SELLER_TAX_RATE,
-      totalFeeRate: roundMoney(SELLER_PLATFORM_FEE_RATE + SELLER_TAX_RATE),
+      taxRate: sellerTaxRate(sellerType),
+      totalFeeRate: roundMoney(SELLER_PLATFORM_FEE_RATE + sellerTaxRate(sellerType)),
+      sellerType: sellerType || null,
       chargeAtWithdraw: SELLER_CHARGE_AT_WITHDRAW,
       minAmount: 0,
       minAmountCurrency: 'USD',
@@ -149,7 +161,12 @@ async function resolvePayoutPersona(user, requested) {
   const sellerLike = personas.some((p) => SELLER_LIKE.has(p));
   const allowed = wanted && personas.includes(wanted) && !(wanted === 'buyer' && sellerLike);
   const persona = allowed ? wanted : pickPrimary(personas);
-  return { personas, persona, policy: policyFor(persona) };
+  let sellerType;
+  if (SELLER_LIKE.has(persona) && user) {
+    const sp = await SellerProfile.findOne({ user: user._id || user.id }).select('sellerType').lean().catch(() => null);
+    sellerType = sp?.sellerType ? require('./seller-types').normalizeSellerType(sp.sellerType) : undefined;
+  }
+  return { personas, persona, policy: policyFor(persona, { sellerType }) };
 }
 
 /** Apply the persona fee/tax to a gross withdrawal amount. */
@@ -183,6 +200,7 @@ function mapPolicy(policy) {
     holdHours: policy.holdHours,
     requiresNoDispute: policy.requiresNoDispute,
     requiresKyc: policy.persona !== 'admin',
+    sellerType: policy.sellerType || null,
   };
 }
 

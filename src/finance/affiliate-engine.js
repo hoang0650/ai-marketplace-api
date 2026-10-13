@@ -34,15 +34,19 @@ function toVnd(amount, currency, cfg) {
 
 /**
  * Commission on the price after discount (order gross), borne by the seller.
- * PIT is withheld from the affiliate (not the seller) on every commission above the threshold (default 0, so every commission).
+ * PIT (10%) is withheld from the affiliate (not the seller) when this single commission payment is
+ * >= the threshold (default 2,000,000 VND), unless the affiliate has an approved Mẫu 08/CK-TNCN.
  */
-function calculateAffiliateCommission({ baseAmount, rate, currency = 'USD', digits = 2, config } = {}) {
+function calculateAffiliateCommission({ baseAmount, rate, currency = 'USD', digits = 2, config, pitCommitmentApproved = false } = {}) {
   const cfg = config || affiliateConfig();
   const r = parseAffiliateRate(rate);
   const appliedRate = r.ok ? r.rate || 0 : 0;
   const base = roundMoney(Math.max(0, Number(baseAmount) || 0), digits);
   const amount = roundMoney(base * appliedRate, digits);
-  const pitApplies = cfg.pit.enabled && amount > 0 && toVnd(amount, currency, cfg) > cfg.pit.thresholdVnd;
+  const amountVnd = toVnd(amount, currency, cfg);
+  const overThreshold = amount > 0 && amountVnd >= cfg.pit.thresholdVnd;
+  const exempt = !!pitCommitmentApproved && cfg.pit.commitmentExempts !== false;
+  const pitApplies = cfg.pit.enabled && overThreshold && !exempt;
   const pitRate = pitApplies ? cfg.pit.rate : 0;
   const pitAmount = roundMoney(amount * pitRate, digits);
   return {
@@ -52,7 +56,15 @@ function calculateAffiliateCommission({ baseAmount, rate, currency = 'USD', digi
     pitRate,
     pitAmount,
     netAmount: roundMoney(amount - pitAmount, digits),
-    pitRule: pitApplies ? 'VN_PIT_SERVICE_INCOME_10PCT_OVER_2M' : '',
+    pitRule: pitApplies
+      ? 'VN_PIT_10PCT_SINGLE_PAYMENT_GTE_2M'
+      : !cfg.pit.enabled || !(amount > 0)
+        ? ''
+        : overThreshold && exempt
+          ? 'EXEMPT_CAM_KET_08_CK_TNCN'
+          : 'BELOW_2M_SINGLE_PAYMENT',
+    /** Income amount in VND (for the year-end withholding certificate / quarterly report). */
+    amountVnd: roundMoney(amountVnd, 0),
   };
 }
 

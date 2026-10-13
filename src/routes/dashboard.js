@@ -17,6 +17,13 @@ router.get('/summary', authenticate, requireRoles('seller', 'admin'), async (req
       0,
     );
     const taxWithheld = paidOrders.reduce((s, o) => s + (Number(o.taxAmount) || 0), 0);
+    const taxVatWithheld = paidOrders.reduce((s, o) => s + (Number(o.taxPolicy?.vatAmount) || 0), 0);
+    const taxPitWithheld = paidOrders.reduce((s, o) => s + (Number(o.taxPolicy?.pitAmount) || 0), 0);
+    const SellerProfile = require('../models/SellerProfile');
+    const { normalizeSellerType } = require('../finance/seller-types');
+    const { sellerTaxRateFor } = require('../finance/seller-tax-policy');
+    const sp = await SellerProfile.findOne({ user: sellerId }).select('sellerType sellerTypeDeclaredAt').lean();
+    const sellerType = normalizeSellerType(sp?.sellerType);
     const storeFees = paidOrders.reduce((s, o) => s + (Number(o.storeFeeAmount) || 0), 0);
     const netPayable = paidOrders.reduce(
       (s, o) => s + (Number(o.sellerNetAmount ?? o.sellerNet) || 0),
@@ -34,6 +41,12 @@ router.get('/summary', authenticate, requireRoles('seller', 'admin'), async (req
       platformCommission,
       storeFees,
       taxWithholding: taxWithheld,
+      taxVatWithheld,
+      taxPitWithheld,
+      /** Tax policy 2026-10: rate follows the declared seller type. */
+      sellerType,
+      sellerTypeDeclared: !!sp?.sellerTypeDeclaredAt,
+      sellerTaxRate: sellerTaxRateFor(sellerType, 'AI_API'),
       refunds,
       netPayable,
       orders,

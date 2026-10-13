@@ -33,15 +33,15 @@ test('discontinued middleware answers 410', () => {
 test('seller approval requires verified eKYC', () => {
   assert.equal(sellerApprovalGate({ sellerType: 'INDIVIDUAL' }, { status: 'pending' }).code, 'SELLER_KYC_REQUIRED');
   assert.equal(sellerApprovalGate({ sellerType: 'INDIVIDUAL' }, null).code, 'SELLER_KYC_REQUIRED');
-  assert.equal(sellerApprovalGate({ sellerType: 'INDIVIDUAL' }, { status: 'verified' }).ok, true);
+  assert.equal(sellerApprovalGate({ sellerType: 'INDIVIDUAL', taxCode: '012345678901' }, { status: 'verified' }).ok, true);
 });
 
 test('household business / company approval requires the business licence', () => {
   const noLicense = { status: 'verified', subjectType: 'organization' };
-  assert.equal(sellerApprovalGate({ sellerType: 'HOUSEHOLD_BUSINESS' }, noLicense).code, 'BUSINESS_LICENSE_REQUIRED');
-  assert.equal(sellerApprovalGate({ sellerType: 'enterprise' }, noLicense).code, 'BUSINESS_LICENSE_REQUIRED');
+  assert.equal(sellerApprovalGate({ sellerType: 'HOUSEHOLD_BUSINESS', taxCode: '0312345678' }, noLicense).code, 'BUSINESS_LICENSE_REQUIRED');
+  assert.equal(sellerApprovalGate({ sellerType: 'enterprise', taxCode: '0312345678' }, noLicense).code, 'BUSINESS_LICENSE_REQUIRED');
   const withLicense = { ...noLicense, licenseObjectName: 'kyc/u1/license.jpg' };
-  assert.equal(sellerApprovalGate({ sellerType: 'COMPANY' }, withLicense).ok, true);
+  assert.equal(sellerApprovalGate({ sellerType: 'COMPANY', taxCode: '0312345678-001' }, withLicense).ok, true);
 });
 
 test('eKYC: organizations must upload the licence, individuals only front/back', () => {

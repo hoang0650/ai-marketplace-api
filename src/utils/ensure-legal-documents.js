@@ -49,7 +49,7 @@ ${FULL_TEXT}/chinh-sach-bao-mat-va-du-lieu`,
 Phiên bản 2.1 — hiệu lực từ ngày 05/10/2026. Bản tóm tắt; toàn văn tại đường dẫn cuối trang.
 
 ## 1. Căn cứ
-Luật Thương mại điện tử số 122/2025/QH15; Nghị định số 248/2026/NĐ-CP; Luật Bảo vệ quyền lợi người tiêu dùng số 19/2023/QH15; Luật Bảo vệ dữ liệu cá nhân số 91/2025/QH15; Luật Trí tuệ nhân tạo số 134/2025/QH15; Nghị định số 252/2026/NĐ-CP về thuế.
+Luật Thương mại điện tử số 122/2025/QH15; Nghị định số 248/2026/NĐ-CP; Luật Bảo vệ quyền lợi người tiêu dùng số 19/2023/QH15; Luật Bảo vệ dữ liệu cá nhân số 91/2025/QH15; Luật Trí tuệ nhân tạo số 134/2025/QH15; Nghị định số 252/2026/NĐ-CP về thuế; Luật Thuế thu nhập cá nhân; Nghị định số 117/2025/NĐ-CP (sàn có chức năng thanh toán khấu trừ, nộp thay thuế của cá nhân kinh doanh); Thông tư số 40/2021/TT-BTC.
 
 ## 2. Chủ thể
 - **Người mua**: mua, sử dụng sản phẩm, dịch vụ.
@@ -62,7 +62,7 @@ Mô hình và API AI, agent, gói kỹ năng, phần mềm, mẫu website/ứng 
 
 ## 4. Phí
 - Phí dịch vụ sàn mặc định 20% giá trị đơn hàng sau giảm giá của người bán bên thứ ba; không phải thuế. Mã giảm giá được trừ trước khi tính phí sàn.
-- Thuế khấu trừ cố định 8% giá trị đơn hàng, áp dụng cho mọi người bán. Tổng khấu trừ 28%; số dư hiển thị của người bán là số dư ròng.
+- Thuế theo loại người bán (bắt buộc khai báo khi đăng ký): cá nhân kinh doanh được sàn khấu trừ, nộp thay 7% (5% GTGT + 2% TNCN) giá trị đơn hàng sau giảm giá đối với dịch vụ, phần mềm, sản phẩm số (1,5% đối với hàng hóa vật lý) theo Nghị định 117/2025/NĐ-CP; hộ kinh doanh và doanh nghiệp/tổ chức không bị khấu trừ (0%), tự kê khai và xuất hóa đơn; doanh nghiệp/tổ chức nhận hóa đơn GTGT 10% cho phí sàn. Số dư hiển thị của người bán là số dư ròng.
 - Không khấu trừ phí kho ứng dụng (Google Play / App Store) trên đơn hàng: Apple IAP và Google Play Billing chỉ dùng để nạp ví.
 - Thuê bao agent 199.000 đ/30 ngày; phí token theo chi phí nhà cung cấp + 25%; BYOK không tính phí token.
 - Thay đổi phí được thông báo trước ít nhất 30 ngày và chỉ áp dụng cho đơn hàng mới.
@@ -84,25 +84,29 @@ ${FULL_TEXT}/quy-che-hoat-dong-san-tmdt`,
   {
     documentType: 'seller-policy',
     title: 'Chính sách người bán',
-    summary: 'Điều kiện đăng bán, eKYC, giấy chứng nhận đăng ký kinh doanh, phí sàn 20%, thuế 8%, giữ tiền 48 giờ.',
+    summary: 'Điều kiện đăng bán, eKYC, giấy chứng nhận đăng ký kinh doanh, phí sàn 20%, thuế theo loại người bán (cá nhân 7%, hộ kinh doanh/doanh nghiệp 0%), giữ tiền 48 giờ.',
     content: `# Chính sách người bán
 
 ## Điều kiện
-- Hồ sơ xác minh được duyệt (giấy tờ tùy thân, mã số thuế, tài khoản nhận tiền đứng tên mình). Hộ kinh doanh tải lên giấy chứng nhận đăng ký hộ kinh doanh; doanh nghiệp, tổ chức tải lên giấy chứng nhận đăng ký doanh nghiệp hoặc giấy phép tương đương.
+- Khai báo bắt buộc loại người bán (Cá nhân kinh doanh, Hộ kinh doanh, Doanh nghiệp/Tổ chức) và mã số thuế (MST; cá nhân có thể dùng số CCCD 12 số); hộ kinh doanh, doanh nghiệp khai thêm số đăng ký kinh doanh (ĐKKD).
+- Hồ sơ xác minh được duyệt (giấy tờ tùy thân CCCD, mã số thuế, tài khoản nhận tiền đứng tên mình). Hộ kinh doanh tải lên giấy chứng nhận đăng ký hộ kinh doanh; doanh nghiệp, tổ chức tải lên giấy chứng nhận đăng ký doanh nghiệp hoặc giấy phép tương đương.
 - Hoàn tất xác minh danh tính (eKYC) trước khi hồ sơ được phê duyệt và trước khi rút tiền. Từ ngày 01/01/2027, định danh, xác thực điện tử thực hiện qua VNeID theo quy định.
 - Xác nhận Chính sách người bán và Thỏa thuận người bán phiên bản hiện hành.
 - Sản phẩm qua kiểm duyệt trước khi hiển thị; không bán hàng thuộc danh mục cấm.
 
 ## Phí
 - Phí dịch vụ sàn mặc định **20%** giá trị đơn hàng sau giảm giá, không phải thuế; mã giảm giá được trừ trước khi tính phí sàn.
-- Thuế khấu trừ cố định **8%** áp dụng cho mọi người bán; tổng khấu trừ **28%**, số dư hiển thị là số dư ròng.
+- Thuế theo loại người bán: cá nhân kinh doanh **7%** (5% GTGT + 2% TNCN; hàng hóa vật lý 1,5%) do sàn khấu trừ, nộp thay; hộ kinh doanh, doanh nghiệp/tổ chức **0%**. Số dư hiển thị là số dư ròng.
 - Không khấu trừ phí kho ứng dụng (Google Play / App Store) trên đơn hàng: Apple IAP và Google Play Billing chỉ dùng để nạp ví.
 - Thay đổi phí được thông báo trước ít nhất 30 ngày.
 - Sản phẩm Platform Direct không áp dụng chia sẻ doanh thu.
 - Mỗi đơn lưu ảnh chụp tỷ lệ phí tại thời điểm giao dịch.
 
 ## Thuế
-Sàn khấu trừ cố định 8% giá trị đơn hàng (tương đương 10% trên phần 80% doanh thu của người bán) đối với mọi người bán khi đơn hàng hoàn tất; số tiền thể hiện trên đối soát từng đơn. Người bán tự chịu trách nhiệm các nghĩa vụ thuế khác và xuất hóa đơn theo quy định.
+- **Cá nhân kinh doanh**: sàn (có chức năng thanh toán) khấu trừ, nộp thay thuế theo Nghị định 117/2025/NĐ-CP, Luật Thuế TNCN và Thông tư 40/2021/TT-BTC: 7% (5% GTGT + 2% TNCN) giá trị đơn hàng sau giảm giá đối với dịch vụ, phần mềm, sản phẩm số; 1,5% (1% GTGT + 0,5% TNCN) đối với hàng hóa vật lý. Không khấu trừ khi doanh thu trong năm dương lịch (tính cả đơn) không vượt ngưỡng 100.000.000 đ/năm (ngưỡng có thể điều chỉnh theo quy định).
+- **Hộ kinh doanh**: sàn không khấu trừ (0%); hộ kinh doanh tự kê khai, nộp thuế và xuất hóa đơn.
+- **Doanh nghiệp/Tổ chức**: sàn không khấu trừ (0%); sàn xuất hóa đơn GTGT (10%) cho phí dịch vụ sàn 20%.
+- Thuế được tính và chốt trên từng đơn; sàn báo cáo doanh thu của cá nhân, hộ kinh doanh với cơ quan thuế theo quý và cấp chứng từ khấu trừ thuế TNCN cuối năm.
 
 ## Chi trả
 Tiền của người bán được giữ **48 giờ** sau khi đơn hoàn tất; chi trả khi không có tranh chấp mở và người bán đã xác minh (bao gồm eKYC).
@@ -112,7 +116,7 @@ ${FULL_TEXT}/chinh-sach-nguoi-ban`,
   {
     documentType: 'seller-agreement',
     title: 'Thỏa thuận cung cấp dịch vụ người bán AI Markets',
-    summary: 'Phiên bản v2026.10.05: phí sàn 20%, thuế 8%, đối soát, eKYC và rút tiền.',
+    summary: 'Phiên bản v2026.10.05: phí sàn 20%, thuế theo loại người bán, đối soát, eKYC và rút tiền.',
     content: `# Thỏa thuận cung cấp dịch vụ người bán
 
 Phiên bản v2026.10.05 — hiệu lực từ ngày 05/10/2026. Bằng việc xác nhận, người bán đồng ý:
@@ -120,7 +124,7 @@ Phiên bản v2026.10.05 — hiệu lực từ ngày 05/10/2026. Bằng việc x
 2. Cung cấp thông tin xác minh trung thực (eKYC; giấy chứng nhận đăng ký hộ kinh doanh/doanh nghiệp nếu có); cập nhật khi thay đổi.
 3. Chỉ bán sản phẩm có quyền hợp pháp, qua kiểm duyệt, không thuộc danh mục cấm; dịch vụ chuyên môn bán theo gói giá cố định.
 4. Chịu phí dịch vụ sàn 20% giá trị đơn hàng sau giảm giá (không có phí kho ứng dụng trên đơn hàng), theo ảnh chụp đơn.
-5. Để sàn khấu trừ thuế cố định 8% giá trị đơn hàng; tổng khấu trừ 28%.
+5. Khai báo bắt buộc loại người bán và MST; nếu là cá nhân kinh doanh, để sàn khấu trừ, nộp thay 7% (5% GTGT + 2% TNCN) giá trị đơn hàng sau giảm giá (1,5% với hàng hóa vật lý) theo Nghị định 117/2025/NĐ-CP; hộ kinh doanh, doanh nghiệp/tổ chức không bị khấu trừ, tự kê khai và xuất hóa đơn.
 6. Tiền được giữ 48 giờ; chỉ rút khi không có tranh chấp mở và đã xác minh (bao gồm eKYC).
 7. Không thu tiền ngoài sàn cho giao dịch phát sinh trên sàn.
 8. Chấp nhận biện pháp xử lý vi phạm; sửa đổi thỏa thuận được thông báo trước 30 ngày.
@@ -158,7 +162,7 @@ Mọi đơn hàng được thanh toán bằng **số dư ví AI Markets**. GPay/
 Dùng để thanh toán trên sàn; được **rút về tài khoản ngân hàng đứng tên mình sau khi xác minh danh tính (eKYC)**. Tiền hoàn trả về ví hoặc phương thức thanh toán ban đầu.
 
 ## Sổ cái
-Mỗi đơn ghi giá, giảm giá (trừ trước phí sàn), phí dịch vụ sàn 20%, thuế khấu trừ 8% và phần người bán được nhận; đơn đã chốt không bị tính lại khi tỷ lệ thay đổi.
+Mỗi đơn ghi giá, giảm giá (trừ trước phí sàn), phí dịch vụ sàn 20%, loại người bán, thuế khấu trừ theo loại người bán (cá nhân 7%/1,5%, hộ kinh doanh và doanh nghiệp 0%) và phần người bán được nhận; đơn đã chốt không bị tính lại khi tỷ lệ thay đổi.
 
 ## Chi trả người bán
 Giữ 48 giờ sau khi đơn hoàn tất; chi trả về tài khoản ngân hàng đứng tên người bán đã xác minh (bao gồm eKYC) khi không có tranh chấp.
@@ -253,17 +257,38 @@ ${FULL_TEXT}/chinh-sach-luu-tru-va-cung-cap-du-lieu`,
   {
     documentType: 'tax-policy',
     title: 'Chính sách thuế AI Markets',
-    summary: 'Thuế khấu trừ cố định 8% cho mọi người bán; tổng khấu trừ cùng phí sàn 28%.',
+    summary: 'Thuế theo loại người bán: cá nhân kinh doanh 7% (dịch vụ, sản phẩm số) hoặc 1,5% (hàng hóa) do sàn khấu trừ, nộp thay; hộ kinh doanh và doanh nghiệp 0%; affiliate 10% TNCN khi một lần chi trả từ 2.000.000 đ; báo cáo quý và chứng từ khấu trừ cuối năm.',
     content: `# Chính sách thuế
 
 ## Phí dịch vụ sàn không phải thuế
 Phí dịch vụ sàn (mặc định 20% giá trị đơn hàng sau giảm giá) là doanh thu của nền tảng, không phải thuế của người bán.
 
-## Khấu trừ
-Sàn khấu trừ thuế **cố định 8%** giá trị đơn hàng (tương đương 10% trên phần 80% doanh thu của người bán) đối với **mọi người bán** (cá nhân, hộ kinh doanh, doanh nghiệp, tổ chức) khi đơn hàng hoàn tất. Tổng khấu trừ = phí sàn 20% + thuế 8% = **28%**; số dư hiển thị là số dư ròng. Số thuế khấu trừ thể hiện trên đối soát từng đơn.
+## Loại người bán (bắt buộc)
+Khi đăng ký, người bán khai báo loại: **Cá nhân kinh doanh**, **Hộ kinh doanh** hoặc **Doanh nghiệp/Tổ chức**, kèm mã số thuế (MST; cá nhân có thể dùng số CCCD) và giấy tờ CCCD / ĐKKD qua eKYC.
+
+## Khấu trừ theo loại người bán
+Căn cứ Nghị định 117/2025/NĐ-CP (sàn có chức năng thanh toán khấu trừ, nộp thay thuế của cá nhân kinh doanh), Luật Thuế TNCN và Thông tư 40/2021/TT-BTC. Thuế tính trên giá trị đơn hàng sau giảm giá và được chốt trên từng đơn.
+
+| Loại người bán | Sàn khấu trừ | Ghi chú |
+|---|---|---|
+| Cá nhân kinh doanh — dịch vụ, phần mềm, sản phẩm số (mặc định) | **7%** (5% GTGT + 2% TNCN) | Sàn khai, nộp thay |
+| Cá nhân kinh doanh — hàng hóa vật lý | **1,5%** (1% GTGT + 0,5% TNCN) | Sàn khai, nộp thay |
+| Hộ kinh doanh | **0%** | Tự kê khai, nộp thuế, xuất hóa đơn |
+| Doanh nghiệp/Tổ chức | **0%** | Tự kê khai; sàn xuất hóa đơn GTGT 10% cho phí sàn |
+
+Cá nhân kinh doanh có doanh thu trong năm dương lịch không vượt ngưỡng **100.000.000 đ/năm** (ngưỡng có thể cấu hình, theo quy định hiện hành) không bị khấu trừ.
+
+Ví dụ đơn 1.000.000 đ có affiliate 25%: cá nhân — phí sàn 200.000 đ, thuế 70.000 đ, hoa hồng 250.000 đ, người bán nhận 480.000 đ; hộ kinh doanh/doanh nghiệp — phí sàn 200.000 đ, thuế 0 đ, hoa hồng 250.000 đ, người bán nhận 550.000 đ.
+
+## Affiliate
+Sàn khấu trừ 10% thuế TNCN khi một lần chi trả hoa hồng từ 2.000.000 đ trở lên; không khấu trừ nếu người giới thiệu đã nộp Cam kết Mẫu 08/CK-TNCN được sàn duyệt.
+
+## Nghĩa vụ báo cáo của sàn
+- Báo cáo quý cho cơ quan thuế (nộp trong tháng 1, 4, 7, 10) doanh thu của cá nhân kinh doanh, hộ kinh doanh và số thuế đã khấu trừ (kể cả TNCN của affiliate).
+- Cuối năm cấp chứng từ khấu trừ thuế TNCN cho cá nhân đã bị khấu trừ.
 
 ## Nghĩa vụ khác
-Khoản khấu trừ 8% không thay thế các nghĩa vụ thuế khác; người bán tự kê khai, quyết toán và xuất hóa đơn theo quy định.
+Khoản khấu trừ không thay thế các nghĩa vụ thuế khác; hộ kinh doanh, doanh nghiệp tự kê khai, quyết toán và xuất hóa đơn theo quy định.
 
 ## Phí cửa hàng ứng dụng
 Không khấu trừ phí Google Play / App Store trên đơn hàng hay trên doanh thu người bán; Apple IAP và Google Play Billing chỉ dùng để nạp ví.
@@ -279,7 +304,7 @@ ${FULL_TEXT}/chinh-sach-thue`,
     summary: 'Phân biệt hóa đơn phí dịch vụ của sàn và hóa đơn của người bán.',
     content: `# Chính sách hóa đơn
 
-- **Hóa đơn của sàn**: phí dịch vụ sàn và sản phẩm Platform Direct.
+- **Hóa đơn của sàn**: phí dịch vụ sàn và sản phẩm Platform Direct; người bán là doanh nghiệp/tổ chức nhận hóa đơn GTGT 10% cho phí dịch vụ sàn 20%.
 - **Hóa đơn của người bán**: hàng hóa, dịch vụ do người bán bên thứ ba cung cấp, do người bán xuất theo quy định.
 - Doanh nghiệp cần hóa đơn gửi yêu cầu tới support@aimarkets.vn kèm tên, mã số thuế, địa chỉ và mã đơn.
 - Nạp ví trong ứng dụng: biên nhận giao dịch nạp do Apple/Google phát hành.
@@ -293,15 +318,15 @@ const AFFILIATE_DOC_VERSION = '2026.10.12';
 const AFFILIATE_DOC = {
   documentType: 'affiliate-policy',
   title: 'Chính sách chương trình Affiliate AI Markets',
-  summary: 'Hoa hồng 0–25% giá trị đơn (giá sau giảm giá) do người bán chi trả; last-click 30 ngày; giữ 48 giờ; eKYC trước khi tạo liên kết; khấu trừ 10% thuế TNCN trên mọi khoản hoa hồng; hành vi cấm và thu hồi hoa hồng.',
+  summary: 'Hoa hồng 0–25% giá trị đơn (giá sau giảm giá) do người bán chi trả; last-click 30 ngày; giữ 48 giờ; eKYC trước khi tạo liên kết; khấu trừ 10% thuế TNCN khi một lần chi trả từ 2.000.000 đ (trừ khi có Cam kết Mẫu 08/CK-TNCN được duyệt); hành vi cấm và thu hồi hoa hồng.',
   content: `# Chính sách chương trình Affiliate
 
 - **Tham gia**: người dùng đã đăng nhập và đã xác minh danh tính (eKYC) mới được tạo mã giới thiệu và lấy liên kết cho từng sản phẩm hoặc gian hàng; liên kết của tài khoản chưa xác minh không được ghi nhận. Người bán tự nguyện tham gia; mặc định 0% là không tham gia.
 - **Tỷ lệ**: người bán đặt từ 0% đến 25% giá trị đơn hàng (giá sau giảm giá) cho từng sản phẩm hoặc làm mặc định gian hàng; tỷ lệ được chốt khi đặt hàng.
-- **Người chịu chi phí**: hoa hồng trừ vào phần doanh thu của người bán, không trừ vào phí sàn và không thay đổi thuế. Người bán thực nhận = giá trị đơn − 20% phí sàn − 8% thuế (10% của 80%) − tỷ lệ affiliate × giá trị đơn. Ví dụ đơn 1.000.000 đ, tỷ lệ 25%: phí sàn 200.000 đ, thuế 80.000 đ, hoa hồng 250.000 đ, người bán nhận 470.000 đ.
+- **Người chịu chi phí**: hoa hồng trừ vào phần doanh thu của người bán, không trừ vào phí sàn và không thay đổi thuế. Người bán thực nhận = giá trị đơn − 20% phí sàn − thuế theo loại người bán (cá nhân 7%; hộ kinh doanh, doanh nghiệp 0%) − tỷ lệ affiliate × giá trị đơn. Ví dụ đơn 1.000.000 đ, tỷ lệ 25%: người bán cá nhân — phí sàn 200.000 đ, thuế 70.000 đ, hoa hồng 250.000 đ, nhận 480.000 đ; hộ kinh doanh/doanh nghiệp — phí sàn 200.000 đ, thuế 0 đ, hoa hồng 250.000 đ, nhận 550.000 đ.
 - **Ghi nhận**: nhấp chuột cuối cùng (last-click) trong 30 ngày; không ghi nhận khi người mua là người giới thiệu hoặc người giới thiệu là người bán.
 - **Ghi có**: hoa hồng vào ví người giới thiệu, tạm giữ 48 giờ (hoặc đến khi giải quyết xong khiếu nại), sau đó rút được về tài khoản đã xác minh.
-- **Thuế TNCN**: khấu trừ 10% trên mọi khoản hoa hồng, không áp dụng ngưỡng tối thiểu (quy tắc có thể cấu hình, theo quy định thuế hiện hành).
+- **Thuế TNCN**: sàn khấu trừ 10% khi một lần chi trả hoa hồng từ 2.000.000 đ trở lên (Luật Thuế TNCN); dưới mức này không khấu trừ. Người giới thiệu chỉ có thu nhập thuộc diện khấu trừ nhưng ước tính tổng thu nhập trong năm chưa đến mức phải nộp thuế có thể tải lên Cam kết Mẫu 08/CK-TNCN (Thông tư 80/2021/TT-BTC); sau khi sàn duyệt, không khấu trừ cho năm cam kết. Cuối năm sàn cấp chứng từ khấu trừ thuế TNCN; số thuế đã khấu trừ được báo cáo cơ quan thuế theo quý.
 - **Hành vi cấm**: thư rác; quảng cáo sai sự thật, gây nhầm lẫn; đặt giá thầu từ khóa thương hiệu khi chưa được chấp thuận; đơn hàng ảo; nhồi cookie; tự giới thiệu.
 - **Thu hồi**: đơn hoàn tiền/hủy đảo ngược hoa hồng theo tỷ lệ; gian lận bị thu hồi toàn bộ hoa hồng liên quan, kể cả số đã khả dụng, và xử lý theo Quy trình xử lý vi phạm.
 

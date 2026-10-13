@@ -11,10 +11,11 @@ const AFFILIATE_MAX_RATE = 0.25;
 /**
  * Affiliate settings. Everything except the 25% ceiling is configurable by env.
  *
- * PIT withholding on affiliate income is modelled on the general Vietnamese rule for individual
- * service income, applied to every commission (default threshold 0 VND, i.e. 10% on each
- * commission; set AFFILIATE_PIT_THRESHOLD_VND to apply it only above an amount). It is a configurable rule pending
- * legal review — not a statement of the final tax treatment.
+ * PIT on affiliate commissions (Luật Thuế TNCN): the platform withholds 10% when a single
+ * commission payment is >= 2,000,000 VND (AFFILIATE_PIT_THRESHOLD_VND), unless the affiliate has an
+ * APPROVED commitment form Mẫu 08/CK-TNCN for that year (then 0%). Below the threshold nothing is
+ * withheld. Year-end the platform issues PIT withholding certificates (chứng từ khấu trừ thuế TNCN).
+ * Pending legal review.
  */
 function affiliateConfig(env = process.env) {
   return {
@@ -23,7 +24,9 @@ function affiliateConfig(env = process.env) {
     pit: {
       enabled: String(env.AFFILIATE_PIT_ENABLED ?? 'true').toLowerCase() !== 'false',
       rate: Math.max(0, Math.min(1, num(env.AFFILIATE_PIT_RATE, 0.1))),
-      thresholdVnd: Math.max(0, num(env.AFFILIATE_PIT_THRESHOLD_VND, 0)),
+      thresholdVnd: Math.max(0, num(env.AFFILIATE_PIT_THRESHOLD_VND, 2_000_000)),
+      /** An approved Mẫu 08/CK-TNCN commitment exempts the affiliate from withholding. */
+      commitmentExempts: String(env.AFFILIATE_PIT_COMMITMENT_EXEMPTS ?? 'true').toLowerCase() !== 'false',
       vndPerUsd: Math.max(1, num(env.AFFILIATE_VND_PER_USD, DEFAULT_VND_PER_USD)),
     },
   };

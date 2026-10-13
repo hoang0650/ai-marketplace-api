@@ -30,6 +30,26 @@ const kycSchema = new mongoose.Schema(
   { _id: false },
 );
 
+/**
+ * Affiliate PIT commitment (Cam kết Mẫu 08/CK-TNCN, Thông tư 80/2021/TT-BTC): uploaded by the
+ * affiliate, approved by an admin (same flow as eKYC). APPROVED for `year` = no 10% PIT withheld
+ * on commissions paid in that year.
+ */
+const pitCommitmentSchema = new mongoose.Schema(
+  {
+    status: { type: String, enum: ['none', 'draft', 'pending', 'approved', 'rejected'], default: 'none', index: true },
+    year: { type: Number, default: null },
+    objectName: { type: String, default: '' },
+    contentType: { type: String, default: '' },
+    personalTaxCode: { type: String, default: '', trim: true, maxlength: 20 },
+    submittedAt: { type: Date, default: null },
+    reviewedAt: { type: Date, default: null },
+    reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    rejectReason: { type: String, default: '', maxlength: 1000 },
+  },
+  { _id: false },
+);
+
 const profileSchema = new mongoose.Schema(
   {
     introLine: { type: String, enum: ['', 'buyer', 'seller', 'builder', 'learner'], default: '' },
@@ -79,6 +99,7 @@ const userSchema = new mongoose.Schema(
     affiliateClicks: { type: Number, default: 0 },
     affiliateConversions: { type: Number, default: 0 },
     affiliateEarnings: { type: Number, default: 0 },
+    pitCommitment: { type: pitCommitmentSchema, default: () => ({}) },
     accountStatus: {
       type: String,
       enum: ['active', 'suspended', 'blocked', 'inactive', 'deleted'],

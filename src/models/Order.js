@@ -28,6 +28,11 @@ const orderSchema = new mongoose.Schema(
     taxAmount: { type: Number, default: 0, min: 0 },
     taxBreakdown: { type: mongoose.Schema.Types.Mixed, default: [] },
     taxCategory: { type: String, default: '' },
+    /** Tax policy 2026-10 snapshot: seller type at order time + rates/amounts (never recomputed). */
+    sellerType: { type: String, default: '', index: true },
+    taxPolicy: { type: mongoose.Schema.Types.Mixed, default: null },
+    /** Company sellers: the platform issues a 10% VAT invoice for its fee. */
+    platformFeeInvoice: { type: mongoose.Schema.Types.Mixed, default: null },
     paymentFeeAmount: { type: Number, default: 0, min: 0 },
     salesChannel: {
       type: String,

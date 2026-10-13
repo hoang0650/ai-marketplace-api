@@ -348,4 +348,48 @@ router.put('/wallet-txs/:id', ...admin, async (req, res, next) => {
   }
 });
 
+/**
+ * Quarterly tax report (tax policy 2026-10): revenue of individual sellers + household businesses,
+ * VAT/PIT withheld for individuals, PIT withheld from affiliates. ?year=2026&quarter=3&format=xlsx|csv|json
+ * Submit on the tax authority portal in months 1, 4, 7, 10.
+ */
+router.get('/tax-reports/quarterly', ...admin, async (req, res, next) => {
+  try {
+    const { buildQuarterlyReport, renderQuarterlyReport } = require('../finance/tax-report');
+    const report = await buildQuarterlyReport({ year: req.query.year, quarter: req.query.quarter });
+    const out = renderQuarterlyReport(report, req.query.format || 'xlsx');
+    await writeAuditLog({
+      actorId: req.user._id,
+      actorRole: req.user.role,
+      action: 'TAX_REPORT_EXPORTED',
+      resourceType: 'TaxReport',
+      newValue: { year: report.year, quarter: report.quarter, format: req.query.format || 'xlsx' },
+    }).catch(() => {});
+    res.setHeader('Content-Type', out.contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${out.filename}"`);
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.send(out.body);
+  } catch (err) {
+    if (err.status === 400) return res.status(400).json({ message: err.message });
+    next(err);
+  }
+});
+
+/** Year-end PIT withholding certificate data (chứng từ khấu trừ thuế TNCN). ?year=2026&format=xlsx|csv|json */
+router.get('/tax-reports/pit-certificates', ...admin, async (req, res, next) => {
+  try {
+    const { buildPitCertificates, renderPitCertificates } = require('../finance/tax-report');
+    const year = Number(req.query.year);
+    const rows = await buildPitCertificates({ year });
+    const out = renderPitCertificates(rows, year, req.query.format || 'xlsx');
+    res.setHeader('Content-Type', out.contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${out.filename}"`);
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.send(out.body);
+  } catch (err) {
+    if (err.status === 400) return res.status(400).json({ message: err.message });
+    next(err);
+  }
+});
+
 module.exports = router;

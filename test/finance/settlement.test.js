@@ -42,9 +42,10 @@ describe('Case 1 – individual seller', () => {
     assert.equal(s.grossAmount, 1_000_000);
     assert.equal(s.commissionRate, 0.2);
     assert.equal(s.commissionAmount, 200_000);
-    assert.equal(s.taxableAmount, 800_000);
-    assert.equal(s.taxAmount, 12_000);
-    assert.equal(s.sellerNetAmount, 788_000);
+    // Tax base is the price after discount (order gross), not the seller share.
+    assert.equal(s.taxableAmount, 1_000_000);
+    assert.equal(s.taxAmount, 15_000);
+    assert.equal(s.sellerNetAmount, 785_000);
     assert.notEqual(s.sellerNetAmount, 800_000);
   });
 });
@@ -165,11 +166,11 @@ describe('Case 8 – tax rule change does not rewrite snapshot', () => {
     const later = calculateTax({
       sellerTaxProfile: { sellerType: 'INDIVIDUAL', country: 'VN' },
       product: { taxCategory: 'AI_API' },
-      taxableAmount: 800_000,
+      taxableAmount: 1_000_000,
       rules: [{ ...VN_INDIVIDUAL_PIT, rate: 0.02 }],
     });
-    assert.equal(snapshot.taxAmount, 12_000);
-    assert.equal(later.totalTaxAmount, 16_000);
+    assert.equal(snapshot.taxAmount, 15_000);
+    assert.equal(later.totalTaxAmount, 20_000);
   });
 });
 
@@ -196,7 +197,7 @@ describe('Case 10 – foreign seller does not match VN-only rule', () => {
   });
 });
 
-test('default 10% tax on seller 80% share is 8% of order', () => {
+test('default (individual, digital) tax is 7% of the price after discount - no flat 8%', () => {
   const s = settleSale({
     unitPrice: 1_000_000,
     ownershipType: 'THIRD_PARTY_SELLER',
@@ -204,15 +205,15 @@ test('default 10% tax on seller 80% share is 8% of order', () => {
     taxRules: [],
   });
   assert.equal(s.commissionAmount, 200_000);
-  assert.equal(s.taxableAmount, 800_000);
-  assert.equal(s.taxAmount, 80_000);
-  assert.equal(s.sellerNetAmount, 720_000);
+  assert.equal(s.taxableAmount, 1_000_000);
+  assert.equal(s.taxAmount, 70_000);
+  assert.equal(s.sellerNetAmount, 730_000);
   assert.equal(s.storeFeeAmount, 0);
   assert.equal(s.salesChannel, 'WEB');
 });
 
 describe('Case 11 – in-app (Google Play) order: no store fee, IAP is top-up only', () => {
-  test('only 20% commission + 8% tax are deducted', () => {
+  test('only 20% commission + 7% individual tax are deducted', () => {
     const s = settleSale({
       unitPrice: 1_000_000,
       ownershipType: 'THIRD_PARTY_SELLER',
@@ -224,8 +225,8 @@ describe('Case 11 – in-app (Google Play) order: no store fee, IAP is top-up on
     assert.equal(s.storeFeeRate, 0);
     assert.equal(s.storeFeeAmount, 0);
     assert.equal(s.commissionAmount, 200_000);
-    assert.equal(s.taxAmount, 80_000);
-    assert.equal(s.sellerNetAmount, 720_000);
+    assert.equal(s.taxAmount, 70_000);
+    assert.equal(s.sellerNetAmount, 730_000);
     assert.equal(s.platformRevenueAmount, 200_000);
   });
 });
@@ -240,7 +241,7 @@ describe('Case 12 – in-app (App Store) order: no store fee', () => {
     });
     assert.equal(s.salesChannel, 'APP_STORE');
     assert.equal(s.storeFeeAmount, 0);
-    assert.equal(s.sellerNetAmount, 720_000);
+    assert.equal(s.sellerNetAmount, 730_000);
   });
 });
 

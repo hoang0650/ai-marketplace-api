@@ -44,31 +44,41 @@ describe('affiliate rate validation', () => {
 });
 
 describe('settlement with affiliate commission (borne by the seller)', () => {
-  test('1,000,000 VND at 25%: fee 200k, tax 80k, affiliate 250k, seller 470k', () => {
-    const s = sale({ affiliateRate: 0.25 });
+  test('1,000,000 VND individual seller at 25%: fee 200k, tax 70k, affiliate 250k, seller 480k', () => {
+    const s = sale({ affiliateRate: 0.25, sellerTaxProfile: { sellerType: 'INDIVIDUAL' } });
     assert.equal(s.grossAmount, 1_000_000);
     assert.equal(s.commissionAmount, 200_000);
     assert.equal(s.platformRevenueAmount, 200_000);
-    assert.equal(s.taxAmount, 80_000);
+    assert.equal(s.taxAmount, 70_000);
     assert.equal(s.affiliateRate, 0.25);
     assert.equal(s.affiliateCommissionAmount, 250_000);
-    assert.equal(s.sellerNetAmount, 470_000);
+    assert.equal(s.sellerNetAmount, 480_000);
   });
 
-  test('no affiliate: unchanged 720k seller net; tax is not reduced by the commission', () => {
+  test('1,000,000 VND household business / company at 25%: fee 200k, tax 0, affiliate 250k, seller 550k', () => {
+    for (const sellerType of ['HOUSEHOLD_BUSINESS', 'COMPANY']) {
+      const s = sale({ affiliateRate: 0.25, sellerTaxProfile: { sellerType } });
+      assert.equal(s.commissionAmount, 200_000);
+      assert.equal(s.taxAmount, 0);
+      assert.equal(s.affiliateCommissionAmount, 250_000);
+      assert.equal(s.sellerNetAmount, 550_000);
+    }
+  });
+
+  test('no affiliate: unchanged 730k seller net; tax is not reduced by the commission', () => {
     const base = sale();
     const aff = sale({ affiliateRate: 0.1 });
-    assert.equal(base.sellerNetAmount, 720_000);
+    assert.equal(base.sellerNetAmount, 730_000);
     assert.equal(base.affiliateCommissionAmount, 0);
     assert.equal(aff.taxAmount, base.taxAmount);
     assert.equal(aff.platformRevenueAmount, base.platformRevenueAmount);
-    assert.equal(aff.sellerNetAmount, 620_000);
+    assert.equal(aff.sellerNetAmount, 630_000);
   });
 
   test('commission is on the price after discount and a rate above 25% is ignored', () => {
     const discounted = sale({ unitPrice: 800_000, affiliateRate: 0.25 });
     assert.equal(discounted.affiliateCommissionAmount, 200_000);
-    assert.equal(discounted.sellerNetAmount, 800_000 - 160_000 - 64_000 - 200_000);
+    assert.equal(discounted.sellerNetAmount, 800_000 - 160_000 - 56_000 - 200_000);
     const over = sale({ affiliateRate: 0.5 });
     assert.equal(over.affiliateCommissionAmount, 0);
   });
@@ -83,39 +93,50 @@ describe('settlement with affiliate commission (borne by the seller)', () => {
     const s = sale({ affiliateRate: 0.25 });
     const half = reverseSettlement(s, 500_000, 0);
     assert.equal(half.affiliateCommissionAmount, 125_000);
-    assert.equal(half.sellerNetAmount, 235_000);
+    assert.equal(half.sellerNetAmount, 240_000);
   });
 });
 
-describe('affiliate PIT withholding (configurable, pending legal review)', () => {
+describe('affiliate PIT withholding: 10% when a single payment >= 2,000,000 VND, 0% with Mẫu 08/CK-TNCN', () => {
   const cfg = affiliateConfig({});
-  test('defaults: 30 days, 10% on every commission (threshold 0)', () => {
+  test('defaults: 30 days, 10%, threshold 2,000,000 VND', () => {
     assert.equal(cfg.attributionDays, 30);
     assert.equal(cfg.pit.rate, 0.1);
-    assert.equal(cfg.pit.thresholdVnd, 0);
+    assert.equal(cfg.pit.thresholdVnd, 2_000_000);
+    assert.equal(cfg.pit.commitmentExempts, true);
     assert.equal(affiliateConfig({ AFFILIATE_ATTRIBUTION_DAYS: '7' }).attributionDays, 7);
   });
-  test('250,000 VND commission: 10% withheld (no minimum)', () => {
+  test('250,000 VND commission: below 2M, nothing withheld (old "every commission" rule is gone)', () => {
     const c = calculateAffiliateCommission({ baseAmount: 1_000_000, rate: 0.25, currency: 'VND', digits: 0, config: cfg });
     assert.equal(c.amount, 250_000);
-    assert.equal(c.pitAmount, 25_000);
-    assert.equal(c.netAmount, 225_000);
-    const small = calculateAffiliateCommission({ baseAmount: 10_000, rate: 0.1, currency: 'VND', digits: 0, config: cfg });
-    assert.equal(small.pitAmount, 100);
+    assert.equal(c.pitAmount, 0);
+    assert.equal(c.netAmount, 250_000);
+    assert.equal(c.pitRule, 'BELOW_2M_SINGLE_PAYMENT');
     const zero = calculateAffiliateCommission({ baseAmount: 1_000_000, rate: 0, currency: 'VND', digits: 0, config: cfg });
     assert.equal(zero.pitAmount, 0);
   });
-  test('2,500,000 VND commission: 10% withheld', () => {
+  test('exactly 2,000,000 VND is withheld (>=); 2,500,000 VND -> 250,000 PIT', () => {
+    const at = calculateAffiliateCommission({ baseAmount: 8_000_000, rate: 0.25, currency: 'VND', digits: 0, config: cfg });
+    assert.equal(at.amount, 2_000_000);
+    assert.equal(at.pitAmount, 200_000);
+    assert.equal(at.pitRule, 'VN_PIT_10PCT_SINGLE_PAYMENT_GTE_2M');
     const c = calculateAffiliateCommission({ baseAmount: 10_000_000, rate: 0.25, currency: 'VND', digits: 0, config: cfg });
     assert.equal(c.pitAmount, 250_000);
     assert.equal(c.netAmount, 2_250_000);
+    const below = calculateAffiliateCommission({ baseAmount: 7_999_996, rate: 0.25, currency: 'VND', digits: 0, config: cfg });
+    assert.equal(below.pitAmount, 0);
   });
-  test('optional threshold still works when configured; USD is withheld too', () => {
-    const th = affiliateConfig({ AFFILIATE_PIT_THRESHOLD_VND: '2000000' });
-    const at = calculateAffiliateCommission({ baseAmount: 8_000_000, rate: 0.25, currency: 'VND', digits: 0, config: th });
-    assert.equal(at.pitAmount, 0);
+  test('approved Mẫu 08/CK-TNCN -> 0% even above 2M', () => {
+    const c = calculateAffiliateCommission({ baseAmount: 10_000_000, rate: 0.25, currency: 'VND', digits: 0, config: cfg, pitCommitmentApproved: true });
+    assert.equal(c.pitAmount, 0);
+    assert.equal(c.netAmount, 2_500_000);
+    assert.equal(c.pitRule, 'EXEMPT_CAM_KET_08_CK_TNCN');
+  });
+  test('USD commissions are converted to VND for the threshold; PIT can be disabled', () => {
+    const small = calculateAffiliateCommission({ baseAmount: 40, rate: 0.25, currency: 'USD', config: cfg });
+    assert.equal(small.pitAmount, 0);
     const usd = calculateAffiliateCommission({ baseAmount: 400, rate: 0.25, currency: 'USD', config: cfg });
-    assert.equal(usd.amount, 100);
+    assert.equal(usd.amount, 100); // 2,650,000 VND at 26,500
     assert.equal(usd.pitAmount, 10);
     const off = calculateAffiliateCommission({
       baseAmount: 10_000_000, rate: 0.25, currency: 'VND', digits: 0,

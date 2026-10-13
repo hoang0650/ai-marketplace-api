@@ -1,14 +1,49 @@
 const express = require('express');
 const SellerProfile = require('../models/SellerProfile');
+const Order = require('../models/Order');
 const LegalDocument = require('../models/LegalDocument');
 const LegalAcceptance = require('../models/LegalAcceptance');
 const { authenticate, requireRoles } = require('../middleware/auth');
-const { getOrCreateSellerProfile, sellerApprovalGate, LICENSED_SELLER_TYPES } = require('../utils/seller-compliance');
+const { getOrCreateSellerProfile, sellerApprovalGate, LICENSED_SELLER_TYPES, validateSellerTaxInfo } = require('../utils/seller-compliance');
 const { normalizeSellerType } = require('../finance/seller-types');
 const { writeAuditLog } = require('../utils/audit');
-const { PLATFORM_COMMISSION_RATE, SELLER_TAX_RATE } = require('../finance/constants');
+const { PLATFORM_COMMISSION_RATE } = require('../finance/constants');
+const { publicTaxPolicy, sellerTaxRateFor } = require('../finance/seller-tax-policy');
 
 const router = express.Router();
+
+/** Keep the versioned SellerTaxProfile (used by settlement) in step with the declared type + MST. */
+async function syncSellerTaxProfile(userId, profile) {
+  const SellerTaxProfile = require('../models/SellerTaxProfile');
+  const current = await SellerTaxProfile.findOne({ sellerId: userId, effectiveTo: null }).sort({ version: -1 });
+  const sellerType = normalizeSellerType(profile.sellerType);
+  if (
+    current &&
+    current.sellerType === sellerType &&
+    current.taxIdentificationNumber === profile.taxCode &&
+    current.businessRegistrationNumber === (profile.businessRegistrationNumber || '')
+  ) {
+    return current;
+  }
+  if (current) {
+    current.effectiveTo = new Date();
+    await current.save();
+  }
+  return SellerTaxProfile.create({
+    sellerId: userId,
+    sellerType,
+    country: current?.country || 'VN',
+    taxResidency: current?.taxResidency || 'VN',
+    taxIdentificationNumber: profile.taxCode || '',
+    businessRegistrationNumber: profile.businessRegistrationNumber || '',
+    withholdingRequired: sellerType === 'INDIVIDUAL',
+    taxClassification: sellerType === 'INDIVIDUAL' ? 'PLATFORM_WITHHOLDS_ND117_2025' : 'SELF_DECLARES',
+    effectiveFrom: new Date(),
+    effectiveTo: null,
+    verificationStatus: 'PENDING',
+    version: (current?.version || 0) + 1,
+  });
+}
 
 function mapSellerProfile(doc) {
   if (!doc) return null;
@@ -41,6 +76,9 @@ function mapSellerProfile(doc) {
     requiresBusinessLicense: LICENSED_SELLER_TYPES.has(normalizeSellerType(o.sellerType)),
     /** eKYC must be verified before approval and before any withdrawal. */
     requiresKyc: true,
+    /** Tax policy 2026-10: seller type + MST are mandatory; the rate follows the type. */
+    sellerTypeDeclared: !!o.sellerTypeDeclaredAt,
+    taxRate: sellerTaxRateFor(o.sellerType, 'AI_API'),
     createdAt: o.createdAt ? new Date(o.createdAt).toISOString() : null,
     updatedAt: o.updatedAt ? new Date(o.updatedAt).toISOString() : null,
   };
@@ -60,6 +98,9 @@ router.get('/me', authenticate, async (req, res, next) => {
 router.post('/apply', authenticate, async (req, res, next) => {
   try {
     const body = req.body || {};
+    const existing = await SellerProfile.findOne({ user: req.user._id }).lean();
+    const taxInfo = validateSellerTaxInfo(body, existing || {});
+    if (!taxInfo.ok) return res.status(400).json({ message: taxInfo.message, code: taxInfo.code });
     const profile = await getOrCreateSellerProfile(req.user, {
       displayName: body.displayName,
       legalName: body.legalName,
@@ -79,6 +120,10 @@ router.post('/apply', authenticate, async (req, res, next) => {
     for (const key of fields) {
       if (body[key] !== undefined) profile[key] = body[key];
     }
+    const typeChanged = !profile.sellerTypeDeclaredAt || profile.sellerType !== taxInfo.sellerType;
+    profile.sellerType = taxInfo.sellerType;
+    profile.taxCode = String(profile.taxCode || '').replace(/\s+/g, '');
+    if (typeChanged) profile.sellerTypeDeclaredAt = new Date();
     if (body.bankAccountMetadata && typeof body.bankAccountMetadata === 'object') {
       profile.bankAccountMetadata = {
         bankName: String(body.bankAccountMetadata.bankName || '').slice(0, 120),
@@ -93,6 +138,7 @@ router.post('/apply', authenticate, async (req, res, next) => {
     profile.identityVerificationStatus = 'pending';
     profile.complianceStatus = 'under_review';
     await profile.save();
+    await syncSellerTaxProfile(req.user._id, profile).catch((err) => console.error('[seller tax profile]', err.message));
 
     await writeAuditLog({
       actorId: req.user._id,
@@ -242,6 +288,11 @@ router.patch('/:id/status', authenticate, requireRoles('admin'), async (req, res
 router.get('/me/earnings', authenticate, async (req, res, next) => {
   try {
     const paid = await Order.find({ seller: req.user._id, status: { $in: ['paid', 'refunded'] } }).lean();
+    const sp = await SellerProfile.findOne({ user: req.user._id }).select('sellerType').lean();
+    const sellerProfileType = normalizeSellerType(sp?.sellerType);
+    const sumPolicy = (k) => paid.reduce((s, o) => s + (Number(o.taxPolicy?.[k]) || 0), 0);
+    const taxVatWithheld = sumPolicy('vatAmount');
+    const taxPitWithheld = sumPolicy('pitAmount');
     const grossSales = paid.reduce((s, o) => s + (Number(o.amount) || 0), 0);
     const platformFee = paid.reduce(
       (s, o) => s + (Number(o.commissionAmount ?? (o.ownershipType === 'PLATFORM_DIRECT' ? 0 : o.platformFee)) || 0),
@@ -257,8 +308,12 @@ router.get('/me/earnings', authenticate, async (req, res, next) => {
       grossSales,
       platformFee,
       platformCommissionRate: PLATFORM_COMMISSION_RATE,
-      sellerTaxRate: SELLER_TAX_RATE,
+      sellerTaxRate: sellerTaxRateFor(sellerProfileType, 'AI_API').total,
+      sellerType: sellerProfileType,
+      taxPolicy: publicTaxPolicy(),
       taxWithholding,
+      taxVatWithheld,
+      taxPitWithheld,
       paymentFees,
       storeFees,
       refunds,
@@ -282,6 +337,9 @@ router.get('/me/payouts', authenticate, async (req, res, next) => {
   }
 });
 
+/** Public tax policy (rates by seller type) for dashboards and the registration form. */
+router.get('/tax-policy', (_req, res) => res.json(publicTaxPolicy()));
+
 router.get('/me/tax-profile', authenticate, async (req, res, next) => {
   try {
     const { currentSellerTaxProfile } = require('../finance/settlement-service');
@@ -298,6 +356,17 @@ router.post('/me/tax-profile', authenticate, async (req, res, next) => {
     const { normalizeSellerType } = require('../finance/seller-types');
     const { writeAuditLog } = require('../utils/audit');
     const current = await SellerTaxProfile.findOne({ sellerId: req.user._id, effectiveTo: null }).sort({ version: -1 });
+    // Seller type + MST stay mandatory and must match the seller profile (tax policy 2026-10).
+    const sellerProfile = await SellerProfile.findOne({ user: req.user._id });
+    const taxInfo = validateSellerTaxInfo(
+      {
+        sellerType: req.body?.sellerType || current?.sellerType || sellerProfile?.sellerType,
+        taxCode: req.body?.taxIdentificationNumber || req.body?.taxCode || current?.taxIdentificationNumber || sellerProfile?.taxCode,
+        businessRegistrationNumber: req.body?.businessRegistrationNumber || current?.businessRegistrationNumber || sellerProfile?.businessRegistrationNumber,
+      },
+      {},
+    );
+    if (!taxInfo.ok) return res.status(400).json({ message: taxInfo.message, code: taxInfo.code });
     const nextVersion = (current?.version || 0) + 1;
     if (current) {
       current.effectiveTo = new Date();
@@ -305,23 +374,29 @@ router.post('/me/tax-profile', authenticate, async (req, res, next) => {
     }
     const created = await SellerTaxProfile.create({
       sellerId: req.user._id,
-      sellerType: normalizeSellerType(req.body?.sellerType || current?.sellerType),
+      sellerType: taxInfo.sellerType,
       country: String(req.body?.country || current?.country || 'VN').toUpperCase().slice(0, 8),
       taxResidency: String(req.body?.taxResidency || req.body?.country || current?.taxResidency || 'VN')
         .toUpperCase()
         .slice(0, 8),
-      taxIdentificationNumber: String(req.body?.taxIdentificationNumber || req.body?.taxCode || '').slice(0, 50),
+      taxIdentificationNumber: String(req.body?.taxIdentificationNumber || req.body?.taxCode || current?.taxIdentificationNumber || sellerProfile?.taxCode || '').replace(/\s+/g, '').slice(0, 50),
       businessRegistrationNumber: String(req.body?.businessRegistrationNumber || '').slice(0, 100),
       vatStatus: String(req.body?.vatStatus || '').slice(0, 80),
       taxMethod: String(req.body?.taxMethod || '').slice(0, 80),
       invoiceMethod: String(req.body?.invoiceMethod || '').slice(0, 80),
-      withholdingRequired: !!req.body?.withholdingRequired,
+      withholdingRequired: taxInfo.sellerType === 'INDIVIDUAL',
       taxClassification: String(req.body?.taxClassification || '').slice(0, 80),
       effectiveFrom: new Date(),
       effectiveTo: null,
       verificationStatus: 'PENDING',
       version: nextVersion,
     });
+    if (sellerProfile && (sellerProfile.sellerType !== taxInfo.sellerType || sellerProfile.taxCode !== created.taxIdentificationNumber)) {
+      sellerProfile.sellerType = taxInfo.sellerType;
+      sellerProfile.taxCode = created.taxIdentificationNumber;
+      sellerProfile.sellerTypeDeclaredAt = new Date();
+      await sellerProfile.save();
+    }
     await writeAuditLog({
       actorId: req.user._id,
       action: 'SELLER_TAX_PROFILE_CHANGED',

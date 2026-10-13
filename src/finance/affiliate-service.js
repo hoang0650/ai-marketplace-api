@@ -7,6 +7,7 @@ const WalletTx = require('../models/WalletTx');
 const { roundMoney } = require('./constants');
 const { calculateAffiliateCommission } = require('./affiliate-engine');
 const { affiliateConfig } = require('../config/affiliate');
+const { isPitCommitmentApproved } = require('../utils/pit-commitment');
 const { recordAdjustmentLines, newEntryId } = require('./ledger-service');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -62,10 +63,13 @@ async function recordAffiliateCommission({ order, settlement, click, holdUntil }
   if (!click || !(settlement.affiliateCommissionAmount > 0)) return null;
   const existing = await AffiliateCommission.findOne({ order: order._id });
   if (existing) return existing;
+  const affiliateUser = await User.findById(click.affiliate).select('pitCommitment').lean().catch(() => null);
+  const pitCommitmentApproved = isPitCommitmentApproved(affiliateUser, order.createdAt || new Date());
   const calc = calculateAffiliateCommission({
     baseAmount: settlement.grossAmount,
     rate: settlement.affiliateRate,
     currency: order.currency,
+    pitCommitmentApproved,
   });
   const commission = await AffiliateCommission.create({
     order: order._id,
@@ -83,6 +87,8 @@ async function recordAffiliateCommission({ order, settlement, click, holdUntil }
     pitRate: calc.pitRate,
     pitAmount: calc.pitAmount,
     pitRule: calc.pitRule,
+    amountVnd: calc.amountVnd,
+    pitCommitmentApplied: calc.pitRule === 'EXEMPT_CAM_KET_08_CK_TNCN',
     netAmount: calc.netAmount,
     holdUntil,
   });

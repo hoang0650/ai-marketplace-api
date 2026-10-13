@@ -177,6 +177,7 @@ function extForMime(mime) {
     'image/jpg': 'jpg',
     'image/png': 'png',
     'image/webp': 'webp',
+    'application/pdf': 'pdf',
     'audio/mpeg': 'mp3',
     'audio/mp3': 'mp3',
     'audio/wav': 'wav',
@@ -244,7 +245,7 @@ async function uploadKycBuffer(buffer, { userId, side, filename, contentType = '
     .trim()
     .replace(/[^\w\-]+/g, '');
   if (!uid) throw new Error('userId required for KYC upload');
-  const safeSide = ['front', 'back', 'license'].includes(String(side || '')) ? String(side) : 'doc';
+  const safeSide = ['front', 'back', 'license', 'pit-commitment'].includes(String(side || '')) ? String(side) : 'doc';
   const objectName = `${cfg.kycPrefix}/${uid}/${safeSide}-${Date.now()}-${crypto.randomBytes(8).toString('hex')}.${ext}`;
   await minio.putObject(cfg.bucket, objectName, buffer, buffer.length, {
     'Content-Type': contentType || 'image/jpeg',

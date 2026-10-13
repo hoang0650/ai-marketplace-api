@@ -27,7 +27,17 @@ function publicConfig() {
     maxRate: cfg.maxRate,
     attribution: 'last_click',
     holdHours: Number(process.env.PAYOUT_HOLD_HOURS || 48),
-    pit: { enabled: cfg.pit.enabled, rate: cfg.pit.rate, thresholdVnd: cfg.pit.thresholdVnd, legalReview: true },
+    pit: {
+      enabled: cfg.pit.enabled,
+      rate: cfg.pit.rate,
+      thresholdVnd: cfg.pit.thresholdVnd,
+      /** 10% PIT when a single commission payment is >= thresholdVnd, 0% with an approved Mẫu 08/CK-TNCN. */
+      rule: 'SINGLE_PAYMENT_GTE_THRESHOLD',
+      commitmentForm: 'Mẫu 08/CK-TNCN',
+      commitmentExempts: cfg.pit.commitmentExempts,
+      yearEndCertificate: true,
+      legalReview: true,
+    },
   };
 }
 
@@ -112,7 +122,9 @@ function mapCommission(c, order, now = new Date()) {
     baseAmount: c.baseAmount,
     rate: c.rate,
     amount: c.amount,
+    pitRate: c.pitRate || 0,
     pitAmount: c.pitAmount,
+    pitRule: c.pitRule || '',
     netAmount: c.netAmount,
     reversedAmount: c.reversedAmount || 0,
     state: c.status === 'reversed' || live <= 0 ? 'reversed' : isCommissionHeld(c, order, now) ? 'pending' : 'available',
@@ -151,6 +163,7 @@ router.get('/', authenticate, async (req, res, next) => {
       currency: rows[0]?.currency || 'USD',
       recent: rows.slice(0, 50).map((c) => mapCommission(c, byId.get(String(c.order)))),
       config: publicConfig(),
+      pitCommitment: mapPitCommitment(user),
     });
   } catch (err) {
     next(err);
@@ -343,6 +356,178 @@ router.post('/admin/commissions/:orderId/clawback', authenticate, requireRoles('
       reason,
     });
     res.json({ ok: true, clawNet: result.clawNet, status: result.commission.status });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/* PIT commitment (Cam kết Mẫu 08/CK-TNCN) - eKYC-style upload + admin approval */
+/* ------------------------------------------------------------------ */
+const multer = require('multer');
+const {
+  PIT_COMMITMENT_SIDE,
+  PIT_COMMITMENT_MIMES,
+  mapPitCommitment,
+  parsePitCommitmentSubmission,
+} = require('../utils/pit-commitment');
+
+const pitUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 8 * 1024 * 1024 },
+  fileFilter(_req, file, cb) {
+    if (PIT_COMMITMENT_MIMES.includes(file.mimetype)) cb(null, true);
+    else cb(new Error('Only PDF, jpeg, png or webp files are allowed for Mẫu 08/CK-TNCN'));
+  },
+});
+
+router.get('/pit-commitment', authenticate, async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user._id).select('pitCommitment').lean();
+    res.json(mapPitCommitment(user));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/pit-commitment/document', authenticate, pitUpload.single('file'), async (req, res, next) => {
+  try {
+    const { isMinioEnabled, uploadKycBuffer } = require('../config/minio');
+    if (!isMinioEnabled()) return res.status(503).json({ message: 'Document upload is not configured (MinIO)', code: 'MINIO_NOT_CONFIGURED' });
+    if (!req.file) return res.status(400).json({ message: 'No file uploaded', code: 'NO_FILE' });
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    const c = user.pitCommitment || {};
+    if (c.status === 'pending') return res.status(400).json({ message: 'Awaiting review', code: 'PIT_COMMITMENT_PENDING' });
+    const uploaded = await uploadKycBuffer(req.file.buffer, {
+      userId: user._id,
+      side: PIT_COMMITMENT_SIDE,
+      contentType: req.file.mimetype,
+      filename: req.file.originalname,
+    });
+    user.pitCommitment = {
+      ...(c.toObject ? c.toObject() : c),
+      status: 'draft',
+      objectName: uploaded.objectName,
+      contentType: req.file.mimetype,
+      rejectReason: '',
+      reviewedAt: null,
+      reviewedBy: null,
+    };
+    user.markModified('pitCommitment');
+    await user.save();
+    await invalidateAuthUserCache(user._id);
+    res.status(201).json(mapPitCommitment(user));
+  } catch (err) {
+    if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({ message: 'File must be 8MB or smaller', code: 'FILE_TOO_LARGE' });
+    }
+    next(err);
+  }
+});
+
+/** Owner or admin (?userId=) - short-lived link to the uploaded form. */
+router.get('/pit-commitment/document', authenticate, async (req, res, next) => {
+  try {
+    const { getKycPresignedUrl, isKycObjectForUser } = require('../config/minio');
+    const targetId = req.query.userId && req.user.role === 'admin' ? String(req.query.userId) : String(req.user._id);
+    if (!isId(targetId)) return res.status(400).json({ message: 'Invalid user id' });
+    const user = await User.findById(targetId).select('pitCommitment').lean();
+    const objectName = user?.pitCommitment?.objectName;
+    if (!objectName) return res.status(404).json({ message: 'Document not uploaded', code: 'NO_DOCUMENT' });
+    if (!isKycObjectForUser(objectName, targetId)) return res.status(403).json({ message: 'Forbidden' });
+    const url = await getKycPresignedUrl(objectName, 900);
+    res.json({ url, expiresIn: 900 });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/pit-commitment/submit', authenticate, async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    const parsed = parsePitCommitmentSubmission(req.body, user);
+    if (!parsed.ok) return res.status(400).json({ message: parsed.message, code: parsed.code });
+    const c = user.pitCommitment?.toObject ? user.pitCommitment.toObject() : user.pitCommitment || {};
+    user.pitCommitment = { ...c, ...parsed.data, status: 'pending', submittedAt: new Date(), rejectReason: '' };
+    user.markModified('pitCommitment');
+    await user.save();
+    await invalidateAuthUserCache(user._id);
+    await writeAuditLog({
+      actorId: req.user._id,
+      actorRole: req.user.role,
+      action: 'PIT_COMMITMENT_SUBMITTED',
+      resourceType: 'User',
+      resourceId: user._id,
+      newValue: { year: parsed.data.year },
+    });
+    res.json(mapPitCommitment(user));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/admin/pit-commitments', authenticate, requireRoles('admin'), async (req, res, next) => {
+  try {
+    const status = ['pending', 'approved', 'rejected', 'draft'].includes(String(req.query.status)) ? String(req.query.status) : 'pending';
+    const rows = await User.find({ 'pitCommitment.status': status })
+      .select('_id name email pitCommitment kyc.fullName kyc.personalTaxCode')
+      .sort({ 'pitCommitment.submittedAt': -1 })
+      .limit(200)
+      .lean();
+    res.json(rows.map((u) => ({ userId: String(u._id), name: u.name, email: u.email, fullName: u.kyc?.fullName || '', ...mapPitCommitment(u) })));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/admin/pit-commitments/:userId/review', authenticate, requireRoles('admin'), async (req, res, next) => {
+  try {
+    if (!isId(req.params.userId)) return res.status(400).json({ message: 'Invalid user id' });
+    const decision = String(req.body?.decision || '').toLowerCase();
+    if (!['approved', 'rejected', 'approve', 'reject'].includes(decision)) {
+      return res.status(400).json({ message: 'decision must be approved or rejected' });
+    }
+    const approved = decision.startsWith('approve');
+    const reason = String(req.body?.reason || '').trim().slice(0, 1000);
+    if (!approved && reason.length < 3) return res.status(400).json({ message: 'reason required to reject' });
+    const user = await User.findById(req.params.userId);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    const c = user.pitCommitment?.toObject ? user.pitCommitment.toObject() : user.pitCommitment || {};
+    if (c.status !== 'pending') return res.status(400).json({ message: 'No pending commitment', code: 'NOT_PENDING' });
+    user.pitCommitment = {
+      ...c,
+      status: approved ? 'approved' : 'rejected',
+      reviewedAt: new Date(),
+      reviewedBy: req.user._id,
+      rejectReason: approved ? '' : reason,
+    };
+    user.markModified('pitCommitment');
+    await user.save();
+    await invalidateAuthUserCache(user._id);
+    await writeAuditLog({
+      actorId: req.user._id,
+      actorRole: req.user.role,
+      action: approved ? 'PIT_COMMITMENT_APPROVED' : 'PIT_COMMITMENT_REJECTED',
+      resourceType: 'User',
+      resourceId: user._id,
+      newValue: { year: c.year, status: user.pitCommitment.status },
+      reason,
+    });
+    res.json({ userId: String(user._id), ...mapPitCommitment(user) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** The affiliate's own year-end withholding data (chứng từ khấu trừ thuế TNCN). */
+router.get('/pit-certificate', authenticate, async (req, res, next) => {
+  try {
+    const { buildPitCertificates } = require('../finance/tax-report');
+    const year = Number(req.query.year) || new Date().getFullYear();
+    const rows = await buildPitCertificates({ year, affiliateId: req.user._id });
+    res.json(rows.find((r) => r.kind === 'AFFILIATE') || { year, totalIncomeVnd: 0, totalPitWithheldVnd: 0, payments: 0 });
   } catch (err) {
     next(err);
   }

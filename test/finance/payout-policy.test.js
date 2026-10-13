@@ -11,7 +11,8 @@ const {
   EMPLOYER_FEE_RATE,
 } = require('../../src/finance/payout-policy');
 
-test('seller/talent/freelancer policy carries 20% platform fee + 8% tax', () => {
+test('seller/talent/freelancer policy carries 20% platform fee + type-based tax (individual 7% default)', () => {
+  assert.equal(SELLER_TAX_RATE, 0.07);
   for (const persona of ['seller', 'talent', 'freelancer']) {
     const policy = policyFor(persona);
     assert.equal(policy.canWithdraw, true);
@@ -32,9 +33,18 @@ test('quote charges seller rates when chargeAtWithdraw is forced on', () => {
   const policy = { ...policyFor('seller'), chargeAtWithdraw: true };
   const q = quoteWithdrawal(100, policy);
   assert.equal(q.platformFee, 20);
-  assert.equal(q.tax, 8);
-  assert.equal(q.net, 72);
-  assert.equal(q.totalFee, 28);
+  assert.equal(q.tax, 7);
+  assert.equal(q.net, 73);
+  assert.equal(q.totalFee, 27);
+});
+
+test('household business / company sellers have no tax in the withdraw policy', () => {
+  for (const sellerType of ['HOUSEHOLD_BUSINESS', 'COMPANY', 'household_business', 'enterprise']) {
+    const policy = { ...policyFor('seller', { sellerType }), chargeAtWithdraw: true };
+    assert.equal(policy.taxRate, 0);
+    assert.equal(quoteWithdrawal(100, policy).net, 80);
+  }
+  assert.equal(policyFor('seller', { sellerType: 'INDIVIDUAL' }).taxRate, 0.07);
 });
 
 test('employer pays 1% and needs the VND minimum balance', () => {

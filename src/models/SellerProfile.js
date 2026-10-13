@@ -30,6 +30,8 @@ const sellerProfileSchema = new mongoose.Schema(
       ],
       default: 'individual',
     },
+    /** Set when the seller explicitly chose the type at registration (mandatory, tax policy 2026-10). */
+    sellerTypeDeclaredAt: { type: Date, default: null },
     legalName: { type: String, default: '', trim: true, maxlength: 300 },
     displayName: { type: String, default: '', trim: true, maxlength: 200 },
     taxCode: { type: String, default: '', trim: true, maxlength: 50 },

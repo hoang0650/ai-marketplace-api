@@ -82,3 +82,12 @@ Customer pays listed price (commission is seller-borne by default)
 Web/wallet checkout: store fee = 0. In-app purchase `salesChannel=GOOGLE_PLAY` (CHPlay) or `APP_STORE` applies the store snapshot. Store fees are **not** platform commission and **not** tax.
 
 Platform-owned: commission rate snapshot **0**, `sellerNet = 0`, `platformRevenue = gross − storeFee`.
+
+## Tax policy 2026-10 (seller type based)
+
+- Seller type is mandatory at registration (`POST /v1/sellers/apply`: `sellerType` = INDIVIDUAL | HOUSEHOLD_BUSINESS | COMPANY, `taxCode` MST — individuals may use the 12-digit CCCD — and the ĐKKD number for HKD/companies). It is mirrored into the versioned `SellerTaxProfile` used by settlement.
+- `finance/seller-tax-policy.js` (rates in `config/tax.js`, env-tunable): INDIVIDUAL — platform withholds per NĐ 117/2025/NĐ-CP: 7% (5% GTGT + 2% TNCN) for services/software/digital products (default), 1.5% (1% + 0.5%) for `PHYSICAL_GOODS`; no withholding while calendar-year revenue incl. the order ≤ `TAX_INDIVIDUAL_ANNUAL_THRESHOLD_VND` (default 100,000,000). HOUSEHOLD_BUSINESS / COMPANY — 0%; companies get a 10% VAT invoice for the 20% fee (`platformFeeInvoice`).
+- Base = price after discount (order gross). Orders snapshot `sellerType`, `taxPolicy` (rates, VAT/PIT amounts, rule) and `platformFeeInvoice`. The legacy flat rule (10% of the 80% share = 8%) is set INACTIVE by `ensureTaxRules`; admin ACTIVE TaxRules still override when they match.
+- Example 1,000,000 VND, affiliate 25%: individual — fee 200,000, tax 70,000, affiliate 250,000, seller 480,000; HKD/company — fee 200,000, tax 0, affiliate 250,000, seller 550,000.
+- Affiliate PIT: 10% when a single commission payment ≥ 2,000,000 VND; 0% with an approved Mẫu 08/CK-TNCN for the year (`/v1/affiliate/pit-commitment*`, admin review at `/v1/affiliate/admin/pit-commitments`).
+- Reports: `GET /v1/admin/tax-reports/quarterly?year=&quarter=&format=xlsx|csv|json` (individual + HKD revenue, VAT/PIT withheld, affiliate PIT; file in months 1/4/7/10) and `GET /v1/admin/tax-reports/pit-certificates?year=` (year-end chứng từ khấu trừ thuế TNCN data). Affiliates see their own data at `GET /v1/affiliate/pit-certificate`.

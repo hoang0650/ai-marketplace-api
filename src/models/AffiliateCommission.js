@@ -22,6 +22,10 @@ const affiliateCommissionSchema = new mongoose.Schema(
     pitRate: { type: Number, default: 0 },
     pitAmount: { type: Number, default: 0 },
     pitRule: { type: String, default: '' },
+    /** Commission (gross) in VND at payment time - for the year-end PIT certificate / quarterly report. */
+    amountVnd: { type: Number, default: 0 },
+    /** True when an approved Mẫu 08/CK-TNCN exempted this payment from withholding. */
+    pitCommitmentApplied: { type: Boolean, default: false },
     netAmount: { type: Number, required: true, min: 0 },
     holdUntil: { type: Date, required: true },
     status: { type: String, enum: ['active', 'reversed'], default: 'active', index: true },
@@ -32,5 +36,7 @@ const affiliateCommissionSchema = new mongoose.Schema(
   },
   { timestamps: true },
 );
+
+affiliateCommissionSchema.index({ affiliate: 1, createdAt: 1 });
 
 module.exports = mongoose.model('AffiliateCommission', affiliateCommissionSchema);

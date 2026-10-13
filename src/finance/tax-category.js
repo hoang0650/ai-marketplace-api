@@ -14,6 +14,8 @@ const TAX_CATEGORIES = [
   'SOFTWARE_LICENSE',
   'VOICE',
   'MEDIA_LICENSE',
+  /** Physical goods (if a category ever sells them) - individual sellers use the 1.5% goods rate. */
+  'PHYSICAL_GOODS',
   'OTHER',
 ];
 
@@ -27,6 +29,8 @@ const PRODUCT_TYPE_MAP = {
   SOFTWARE: 'SOFTWARE_LICENSE',
   VOICE: 'VOICE',
   MEDIA_LICENSE: 'MEDIA_LICENSE',
+  PHYSICAL: 'PHYSICAL_GOODS',
+  PHYSICAL_GOODS: 'PHYSICAL_GOODS',
 };
 
 const CATEGORY_MAP = {
@@ -50,6 +54,7 @@ const CATEGORY_MAP = {
 function taxCategoryFromProduct(product = {}) {
   const explicit = String(product.taxCategory || '').toUpperCase();
   if (TAX_CATEGORIES.includes(explicit)) return explicit;
+  if (String(product.productKind || '').toUpperCase() === 'PHYSICAL') return 'PHYSICAL_GOODS';
   const pt = String(product.productType || '').toUpperCase();
   if (PRODUCT_TYPE_MAP[pt]) return PRODUCT_TYPE_MAP[pt];
   if (CATEGORY_MAP[product.category]) return CATEGORY_MAP[product.category];
