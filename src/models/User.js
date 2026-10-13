@@ -18,8 +18,16 @@ const kycSchema = new mongoose.Schema(
     orgName: { type: String, default: '', trim: true, maxlength: 300 },
     orgTaxCode: { type: String, default: '', trim: true, maxlength: 20 },
     orgAddress: { type: String, default: '', trim: true, maxlength: 500 },
+    /** Stable KYC record id (kyc_<hex>) so admins can reference a record; set on first upload/submit or lazily by the admin queue. */
+    recordId: { type: String, default: '', index: true },
     frontObjectName: { type: String, default: '' },
+    frontFileName: { type: String, default: '', maxlength: 255 },
+    frontFileSize: { type: Number, default: 0 },
+    frontContentType: { type: String, default: '' },
     backObjectName: { type: String, default: '' },
+    backFileName: { type: String, default: '', maxlength: 255 },
+    backFileSize: { type: Number, default: 0 },
+    backContentType: { type: String, default: '' },
     /** Organizations: business registration certificate / licence scan (household or company). */
     licenseObjectName: { type: String, default: '' },
     /** Business licence is a PDF (older uploads may be images). */

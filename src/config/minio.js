@@ -369,7 +369,13 @@ function mediaHosts() {
   return hosts;
 }
 
+/** Size/content type of a private KYC object (null if missing). */
+async function statKycObject(objectName) {
+  return statTrainingObject(objectName);
+}
+
 module.exports = {
+  statKycObject,
   DEFAULT_ENDPOINT,
   DEFAULT_PUBLIC_URL,
   DEFAULT_BUCKET,

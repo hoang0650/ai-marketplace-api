@@ -10,6 +10,7 @@ const {
   isKycObjectForUser,
   getKycPresignedUrl,
   getKycObjectStream,
+  statKycObject,
 } = require('../config/minio');
 const {
   KYC_DOC_SIDES,
@@ -21,6 +22,9 @@ const {
   objectNameForSide,
   parseKycSubmission,
   licenseFileOf,
+  ensureKycRecordId,
+  newKycRecordId,
+  kycDocumentsOf,
 } = require('../utils/kyc');
 const { UPLOAD_MAX_BYTES, isAllowedUploadMime, validateKycDocument } = require('../utils/kyc-upload');
 
@@ -110,12 +114,11 @@ router.post('/documents/:side', authenticate, uploadOne, async (req, res, next) 
     });
 
     const kyc = ensureKyc(user);
+    ensureKycRecordId(kyc);
     kyc[`${side}ObjectName`] = uploaded.objectName;
-    if (side === LICENSE_SIDE) {
-      kyc.licenseFileName = String(file.originalname || 'license.pdf').slice(0, 255);
-      kyc.licenseFileSize = file.size || file.buffer.length;
-      kyc.licenseContentType = check.contentType;
-    }
+    kyc[`${side}FileName`] = String(file.originalname || `${side}`).slice(0, 255);
+    kyc[`${side}FileSize`] = file.size || file.buffer.length;
+    kyc[`${side}ContentType`] = check.contentType;
     if (status === 'none' || status === 'rejected') {
       kyc.status = 'draft';
       if (status === 'rejected') {
@@ -233,6 +236,7 @@ router.post('/submit', authenticate, async (req, res, next) => {
       });
     }
     Object.assign(kyc, parsed.data);
+    ensureKycRecordId(kyc);
     kyc.status = 'pending';
     kyc.submittedAt = new Date();
     kyc.rejectReason = '';
@@ -265,7 +269,14 @@ router.get('/admin/queue', authenticate, requireRoles('admin'), async (req, res,
     const q = String(req.query.q || '').trim().slice(0, 100);
     if (q) {
       const re = new RegExp(escapeRegex(q), 'i');
+      // A pasted MinIO key like aimarkets/kyc/<userId>/front-… also finds the user by id.
+      const idInQ = (q.match(/\b[a-f0-9]{24}\b/i) || [])[0];
       filter.$or = [
+        ...(idInQ ? [{ _id: idInQ.toLowerCase() }] : []),
+        { 'kyc.recordId': re },
+        { 'kyc.frontObjectName': re },
+        { 'kyc.backObjectName': re },
+        { 'kyc.licenseObjectName': re },
         { email: re },
         { name: re },
         { 'kyc.fullName': re },
@@ -288,6 +299,19 @@ router.get('/admin/queue', authenticate, requireRoles('admin'), async (req, res,
       ]),
     ]);
     const countBy = Object.fromEntries(counts.map((c) => [c._id, c.n]));
+    // Backfill a record id for older KYC records so admins can reference them.
+    const missing = users.filter((u) => u.kyc && !u.kyc.recordId);
+    if (missing.length) {
+      for (const u of missing) u.kyc.recordId = newKycRecordId();
+      await User.bulkWrite(
+        missing.map((u) => ({
+          updateOne: {
+            filter: { _id: u._id, $or: [{ 'kyc.recordId': '' }, { 'kyc.recordId': { $exists: false } }] },
+            update: { $set: { 'kyc.recordId': u.kyc.recordId } },
+          },
+        })),
+      );
+    }
 
     res.json({
       counts: { pending: countBy.pending || 0, verified: countBy.verified || 0, rejected: countBy.rejected || 0 },
@@ -299,10 +323,37 @@ router.get('/admin/queue', authenticate, requireRoles('admin'), async (req, res,
           name: u.name,
           role: u.role,
           reviewedBy: reviewer ? { name: reviewer.name || '', email: reviewer.email || '' } : null,
-          kyc: mapKyc(u, { includeSensitive: true }),
+          kyc: mapKyc(u, { includeSensitive: true, includeObjectKeys: true }),
         };
       }),
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** GET /v1/kyc/admin/:userId/documents — admin only: MinIO keys + file name/size (size from MinIO when not recorded). */
+router.get('/admin/:userId/documents', authenticate, requireRoles('admin'), async (req, res, next) => {
+  try {
+    const user = await User.findById(String(req.params.userId)).lean();
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    const k = kycOf(user);
+    const documents = kycDocumentsOf(k);
+    if (isMinioEnabled()) {
+      await Promise.all(
+        documents.map(async (d) => {
+          try {
+            const st = await statKycObject(d.objectKey);
+            d.exists = Boolean(st);
+            if (st && !d.size) d.size = st.size;
+            if (st && st.contentType && !k[`${d.side}ContentType`]) d.contentType = st.contentType;
+          } catch {
+            d.exists = null;
+          }
+        }),
+      );
+    }
+    res.json({ userId: String(user._id), recordId: k.recordId || '', prefix: `kyc/${user._id}/`, documents });
   } catch (err) {
     next(err);
   }
@@ -354,7 +405,7 @@ router.patch('/admin/:userId', authenticate, requireRoles('admin'), async (req, 
       userAgent: String(req.headers['user-agent'] || ''),
     });
 
-    res.json({ ok: true, userId: String(user._id), kyc: mapKyc(user, { includeSensitive: true }) });
+    res.json({ ok: true, userId: String(user._id), kyc: mapKyc(user, { includeSensitive: true, includeObjectKeys: true }) });
   } catch (err) {
     next(err);
   }

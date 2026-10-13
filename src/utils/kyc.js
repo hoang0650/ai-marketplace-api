@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const User = require('../models/User');
 
 /** Two sides of the ID document (CCCD / passport) — required for every applicant. */
@@ -53,7 +54,36 @@ function subjectTypeOf(kyc) {
   return User.KYC_SUBJECT_TYPES.includes(kyc?.subjectType) ? kyc.subjectType : 'individual';
 }
 
-function mapKyc(user, { includeSensitive = false } = {}) {
+function newKycRecordId() {
+  return `kyc_${crypto.randomBytes(12).toString('hex')}`;
+}
+
+/** Ensure the embedded KYC record has a stable id; returns it. Mutates kyc. */
+function ensureKycRecordId(kyc) {
+  if (!kyc.recordId) kyc.recordId = newKycRecordId();
+  return kyc.recordId;
+}
+
+/** Per-document storage info for admins: MinIO key + file name/size/type. */
+function kycDocumentsOf(k) {
+  return KYC_DOC_SIDES.filter((side) => hasDoc(k, side)).map((side) => {
+    const objectKey = String(k[`${side}ObjectName`] || '');
+    const fallbackType = /\.pdf$/i.test(objectKey) ? 'application/pdf' : 'image/jpeg';
+    return {
+      side,
+      objectKey,
+      fileName: k[`${side}FileName`] || objectKey.split('/').pop() || '',
+      size: Number(k[`${side}FileSize`]) || 0,
+      contentType: k[`${side}ContentType`] || fallbackType,
+    };
+  });
+}
+
+/**
+ * includeSensitive: owner/admin personal fields (ID number, tax code).
+ * includeObjectKeys: admin only, MinIO object keys + record id for storage housekeeping.
+ */
+function mapKyc(user, { includeSensitive = false, includeObjectKeys = false } = {}) {
   const k = kycOf(user);
   const status = kycStatus(user);
   const subjectType = subjectTypeOf(k);
@@ -81,14 +111,20 @@ function mapKyc(user, { includeSensitive = false } = {}) {
     withdrawAllowed: status === 'verified' || user?.role === 'admin',
   };
   if (!includeSensitive) return base;
-  return {
+  const out = {
     ...base,
     idNumber: k.idNumber || '',
     personalTaxCode: k.personalTaxCode || '',
-    frontObjectName: k.frontObjectName || '',
-    backObjectName: k.backObjectName || '',
-    licenseObjectName: k.licenseObjectName || '',
   };
+  if (includeObjectKeys) {
+    out.recordId = k.recordId || '';
+    out.userId = user?._id ? String(user._id) : '';
+    out.frontObjectName = k.frontObjectName || '';
+    out.backObjectName = k.backObjectName || '';
+    out.licenseObjectName = k.licenseObjectName || '';
+    out.documents = kycDocumentsOf(k);
+  }
+  return out;
 }
 
 /** Document sides an applicant must upload: ID front/back, plus the business licence for organizations. */
@@ -200,6 +236,9 @@ function parseKycSubmission(body, fallbackName = '') {
 }
 
 module.exports = {
+  newKycRecordId,
+  ensureKycRecordId,
+  kycDocumentsOf,
   licenseFileOf,
   KYC_SIDES,
   KYC_DOC_SIDES,
