@@ -17,6 +17,8 @@ const { mapWallet } = require('../utils/mappers');
 
 const router = express.Router();
 const admin = [authenticate, requireRoles('admin')];
+/** Tax exports: admin or staff with the 'finance.tax' permission (kế toán thuế). */
+const taxStaff = [authenticate, require('../middleware/auth').requireAdminPermission(require('../utils/roles').ADMIN_PERMISSION.TAX)];
 
 router.get('/revenue', ...admin, async (_req, res, next) => {
   try {
@@ -353,7 +355,7 @@ router.put('/wallet-txs/:id', ...admin, async (req, res, next) => {
  * VAT/PIT withheld for individuals, PIT withheld from affiliates. ?year=2026&quarter=3&format=xlsx|csv|json
  * Submit on the tax authority portal in months 1, 4, 7, 10.
  */
-router.get('/tax-reports/quarterly', ...admin, async (req, res, next) => {
+router.get('/tax-reports/quarterly', ...taxStaff, async (req, res, next) => {
   try {
     const { buildQuarterlyReport, renderQuarterlyReport } = require('../finance/tax-report');
     const report = await buildQuarterlyReport({ year: req.query.year, quarter: req.query.quarter });
@@ -376,7 +378,7 @@ router.get('/tax-reports/quarterly', ...admin, async (req, res, next) => {
 });
 
 /** Year-end PIT withholding certificate data (chứng từ khấu trừ thuế TNCN). ?year=2026&format=xlsx|csv|json */
-router.get('/tax-reports/pit-certificates', ...admin, async (req, res, next) => {
+router.get('/tax-reports/pit-certificates', ...taxStaff, async (req, res, next) => {
   try {
     const { buildPitCertificates, renderPitCertificates } = require('../finance/tax-report');
     const year = Number(req.query.year);

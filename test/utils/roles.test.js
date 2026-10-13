@@ -11,17 +11,31 @@ const {
   withAdmin,
   isSignupRole,
   isEarnerRole,
+  LEGACY_WORK_ROLES,
+  ADMIN_PERMISSION,
+  hasAdminPermission,
+  normalizeAdminPermissions,
 } = require('../../src/utils/roles');
 
 test('role enum covers the six marketplace roles', () => {
   assert.deepEqual(USER_ROLES, ['buyer', 'seller', 'talent', 'freelancer', 'employer', 'admin']);
 });
 
-test('admin is the only role users cannot self-assign', () => {
-  assert.ok(!SIGNUP_ROLES.includes(ROLE.ADMIN));
+test('signup offers buyer and seller only (Work roles are legacy, admin never)', () => {
+  assert.deepEqual([...SIGNUP_ROLES], ['buyer', 'seller']);
   assert.equal(isSignupRole('admin'), false);
-  assert.equal(isSignupRole('employer'), true);
+  for (const r of ['employer', 'freelancer', 'talent']) assert.equal(isSignupRole(r), false, r);
+  assert.deepEqual([...LEGACY_WORK_ROLES], ['talent', 'freelancer', 'employer']);
   assert.equal(isSignupRole('creator'), true, 'legacy creator maps to seller');
+});
+
+test('finance.tax permission: admins always, staff only when granted, others never', () => {
+  assert.equal(hasAdminPermission({ role: 'admin' }, ADMIN_PERMISSION.TAX), true);
+  assert.equal(hasAdminPermission({ role: 'buyer', adminPermissions: ['finance.tax'] }, 'finance.tax'), true);
+  assert.equal(hasAdminPermission({ role: 'buyer' }, 'finance.tax'), false);
+  assert.equal(hasAdminPermission({ role: 'seller', adminPermissions: ['users.delete'] }, 'users.delete'), false);
+  assert.equal(hasAdminPermission(null, 'finance.tax'), false);
+  assert.deepEqual(normalizeAdminPermissions(['finance.tax', 'finance.tax', 'root', '']), ['finance.tax']);
 });
 
 test('legacy creator normalizes to seller', () => {

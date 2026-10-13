@@ -8,7 +8,8 @@ const AffiliateClick = require('../models/AffiliateClick');
 const AffiliateCommission = require('../models/AffiliateCommission');
 const config = require('../config/env');
 const { affiliateConfig } = require('../config/affiliate');
-const { authenticate, optionalAuth, requireRoles, invalidateAuthUserCache } = require('../middleware/auth');
+const { authenticate, optionalAuth, requireRoles, requireAdminPermission, invalidateAuthUserCache } = require('../middleware/auth');
+const { ADMIN_PERMISSION, hasAdminPermission } = require('../utils/roles');
 const { parseAffiliateRate, effectiveAffiliateRate } = require('../finance/affiliate-engine');
 const { isCommissionHeld, reverseAffiliateCommission } = require('../finance/affiliate-service');
 const { roundMoney } = require('../finance/constants');
@@ -343,7 +344,7 @@ router.get('/seller', authenticate, async (req, res, next) => {
 });
 
 /** Seller: store-wide default (0 = not in the program). New orders only. */
-router.put('/seller/default-rate', authenticate, requireRoles('seller', 'talent', 'admin'), async (req, res, next) => {
+router.put('/seller/default-rate', authenticate, requireRoles('seller', 'admin'), async (req, res, next) => {
   try {
     const parsed = parseAffiliateRate(req.body?.rate);
     if (!parsed.ok) return res.status(400).json({ message: parsed.message, code: parsed.code });
@@ -452,7 +453,7 @@ router.post('/pit-commitment/document', authenticate, pitUpload.single('file'), 
 router.get('/pit-commitment/document', authenticate, async (req, res, next) => {
   try {
     const { getKycPresignedUrl, isKycObjectForUser } = require('../config/minio');
-    const targetId = req.query.userId && req.user.role === 'admin' ? String(req.query.userId) : String(req.user._id);
+    const targetId = req.query.userId && hasAdminPermission(req.user, ADMIN_PERMISSION.TAX) ? String(req.query.userId) : String(req.user._id);
     if (!isId(targetId)) return res.status(400).json({ message: 'Invalid user id' });
     const user = await User.findById(targetId).select('pitCommitment').lean();
     const objectName = user?.pitCommitment?.objectName;
@@ -490,7 +491,7 @@ router.post('/pit-commitment/submit', authenticate, async (req, res, next) => {
   }
 });
 
-router.get('/admin/pit-commitments', authenticate, requireRoles('admin'), async (req, res, next) => {
+router.get('/admin/pit-commitments', authenticate, requireAdminPermission(ADMIN_PERMISSION.TAX), async (req, res, next) => {
   try {
     const status = ['pending', 'approved', 'rejected', 'draft'].includes(String(req.query.status)) ? String(req.query.status) : 'pending';
     const rows = await User.find({ 'pitCommitment.status': status })
@@ -504,7 +505,7 @@ router.get('/admin/pit-commitments', authenticate, requireRoles('admin'), async 
   }
 });
 
-router.post('/admin/pit-commitments/:userId/review', authenticate, requireRoles('admin'), async (req, res, next) => {
+router.post('/admin/pit-commitments/:userId/review', authenticate, requireAdminPermission(ADMIN_PERMISSION.TAX), async (req, res, next) => {
   try {
     if (!isId(req.params.userId)) return res.status(400).json({ message: 'Invalid user id' });
     const decision = String(req.body?.decision || '').toLowerCase();

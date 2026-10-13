@@ -90,6 +90,8 @@ const userSchema = new mongoose.Schema(
     avatarUrl: { type: String, default: '' },
     /** buyer | seller | talent | freelancer | employer | admin — see utils/roles.js */
     role: { type: String, enum: ['buyer', 'seller', 'talent', 'freelancer', 'employer', 'admin'], default: 'buyer' },
+    /** Least-privilege staff permissions (e.g. 'finance.tax' for kế toán thuế); admins need none. */
+    adminPermissions: { type: [String], default: [] },
     creatorSlug: { type: String, trim: true, sparse: true, unique: true },
     bio: { type: String, default: '' },
     coverUrl: { type: String, default: '' },

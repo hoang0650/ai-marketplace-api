@@ -131,6 +131,7 @@ function publicUser(user) {
     avatarUrl: u.avatarUrl || undefined,
     coverUrl: u.coverUrl || undefined,
     role: normalizeRole(u.role),
+    adminPermissions: Array.isArray(u.adminPermissions) ? u.adminPermissions : [],
     creatorSlug: u.creatorSlug || undefined,
     bio: u.bio || undefined,
     kycStatus,
@@ -348,6 +349,16 @@ function requireRoles(...roles) {
   };
 }
 
+/** Admin, or a staff account granted `permission` (least privilege, see utils/roles.js). */
+function requireAdminPermission(permission) {
+  const { hasAdminPermission } = require('../utils/roles');
+  return (req, res, next) => {
+    if (!req.user) return res.status(401).json({ message: 'Unauthorized', code: 'UNAUTHORIZED' });
+    if (!hasAdminPermission(req.user, permission)) return res.status(403).json({ message: 'Forbidden', code: 'FORBIDDEN' });
+    next();
+  };
+}
+
 /** Gate by capability name (see utils/roles.js). Admin always passes. */
 function requireCapability(capability) {
   return (req, res, next) => {
@@ -382,6 +393,7 @@ module.exports = {
   extractAccessToken,
   extractRefreshToken,
   publicUser,
+  requireAdminPermission,
   invalidateAuthUserCache,
   persistAuthCaches,
   requireAuthSession,

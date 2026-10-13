@@ -280,6 +280,7 @@ function adminUserDto(u, extra = {}) {
     email: u.email,
     name: u.name,
     role: u.role,
+    adminPermissions: Array.isArray(u.adminPermissions) ? u.adminPermissions : [],
     creatorSlug: u.creatorSlug || '',
     avatarUrl: u.avatarUrl || '',
     coverUrl: u.coverUrl || '',
@@ -343,6 +344,34 @@ router.patch('/users/:id/status', authenticate, requireRoles('admin'), async (re
     applyStatus(u, { status, days: req.body?.days, reason: req.body?.reason }, 'accountStatus');
     await u.save();
     await invalidateAuthUserCache(u._id);
+    res.json(adminUserDto(u));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Least-privilege staff permissions (admin only). Example: grant 'finance.tax' to a kế toán thuế
+ * account so it can export tax reports and review Mẫu 08/CK-TNCN without full admin rights.
+ */
+router.patch('/users/:id/permissions', authenticate, requireRoles('admin'), async (req, res, next) => {
+  try {
+    const { normalizeAdminPermissions, ADMIN_PERMISSIONS } = require('../utils/roles');
+    if (!Array.isArray(req.body?.adminPermissions)) {
+      return res.status(400).json({ message: `adminPermissions must be an array of: ${ADMIN_PERMISSIONS.join(', ')}` });
+    }
+    const u = await User.findById(req.params.id);
+    if (!u) return res.status(404).json({ message: 'User not found' });
+    const before = [...(u.adminPermissions || [])];
+    u.adminPermissions = normalizeAdminPermissions(req.body.adminPermissions);
+    await u.save();
+    await invalidateAuthUserCache(u._id);
+    try {
+      const { writeAuditLog } = require('../utils/audit');
+      await writeAuditLog({ actorId: req.user._id, actorRole: 'admin', action: 'admin.user.permissions', resourceType: 'User', resourceId: String(u._id), oldValue: { adminPermissions: before }, newValue: { adminPermissions: u.adminPermissions } });
+    } catch {
+      /* audit is best-effort */
+    }
     res.json(adminUserDto(u));
   } catch (err) {
     next(err);

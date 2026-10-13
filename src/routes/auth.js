@@ -23,10 +23,8 @@ const { ROLE, SIGNUP_ROLES, isSignupRole } = require('../utils/roles');
 const ROLE_LABELS = {
   [ROLE.BUYER]: 'Người mua',
   [ROLE.SELLER]: 'Người bán',
-  [ROLE.TALENT]: 'Talent',
-  [ROLE.FREELANCER]: 'Freelancer',
-  [ROLE.EMPLOYER]: 'Nhà tuyển dụng / HR',
 };
+// Work/Hire is discontinued: talent / freelancer / employer are legacy roles, not offered at signup.
 
 /** Short-lived token carrying the verified Google identity for the signup form. */
 function signGoogleSignupToken(claims) {

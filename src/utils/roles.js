@@ -1,13 +1,21 @@
 /**
  * Marketplace roles — single source of truth for role names and capabilities.
  *
- * role: buyer | seller | talent | freelancer | employer | admin
- * - buyer      : buys only
- * - seller     : publishes products/services (shop, coupons, compute, content)
- * - talent     : creates ONE talent profile (recruited)
- * - freelancer : applies to jobs (does the work)
- * - employer   : posts jobs / HR hiring
- * - admin      : platform ops (bypasses capability gates)
+ * Active roles (Quy chế 2.1, policy 2026-10):
+ * - buyer  : buys with the AI Markets wallet only; may withdraw the wallet balance after eKYC
+ * - seller : third-party seller; seller type is mandatory (INDIVIDUAL / HOUSEHOLD_BUSINESS / COMPANY)
+ *            with MST (and ĐKKD for household business / company) — see utils/seller-compliance.js
+ * - admin  : ban quản trị (full platform ops, bypasses capability gates)
+ *
+ * Affiliate (người tiếp thị liên kết) is a CAPABILITY of any eKYC-verified account, not a role
+ * (routes/affiliate.js): seller-funded 0–25%, withdrawals >= 2,000,000 VND with 10% PIT or Mẫu 08.
+ *
+ * Least-privilege admin permissions (`User.adminPermissions`): a non-admin account (e.g. kế toán
+ * thuế) can be granted only `finance.tax` (tax exports + Mẫu 08/CK-TNCN queue). Admins keep full access.
+ *
+ * Legacy Work roles (talent | freelancer | employer): Work/Hire is shut down (410). The enum keeps
+ * them so existing accounts still load and can withdraw their remaining balance, but they are no
+ * longer offered at signup.
  *
  * Strict split: each role only does its own job. `admin` is always allowed.
  * Legacy `creator` is an alias for `seller` (see normalizeRole / migration).
@@ -26,7 +34,29 @@ const ROLE = Object.freeze({
 const USER_ROLES = Object.freeze(Object.values(ROLE));
 
 /** Roles a user may pick for themselves at signup (never admin). */
-const SIGNUP_ROLES = Object.freeze([ROLE.BUYER, ROLE.SELLER, ROLE.TALENT, ROLE.FREELANCER, ROLE.EMPLOYER]);
+const SIGNUP_ROLES = Object.freeze([ROLE.BUYER, ROLE.SELLER]);
+
+/** Roles kept only for existing accounts (Work/Hire discontinued). */
+const LEGACY_WORK_ROLES = Object.freeze([ROLE.TALENT, ROLE.FREELANCER, ROLE.EMPLOYER]);
+
+/** Least-privilege admin permissions grantable to non-admin staff accounts. */
+const ADMIN_PERMISSION = Object.freeze({
+  /** Tax exports (quarterly report, PIT certificates) and Mẫu 08/CK-TNCN review. */
+  TAX: 'finance.tax',
+});
+const ADMIN_PERMISSIONS = Object.freeze(Object.values(ADMIN_PERMISSION));
+
+/** Admin always passes; other accounts only with the explicit permission. */
+function hasAdminPermission(user, permission) {
+  if (!user) return false;
+  if (isAdmin(user)) return true;
+  const granted = Array.isArray(user.adminPermissions) ? user.adminPermissions : [];
+  return ADMIN_PERMISSIONS.includes(permission) && granted.includes(permission);
+}
+
+function normalizeAdminPermissions(list) {
+  return [...new Set((Array.isArray(list) ? list : []).map((p) => String(p || '').trim()).filter((p) => ADMIN_PERMISSIONS.includes(p)))];
+}
 
 /** Roles that earn money on the platform (eligible for payout / eKYC). */
 const EARNER_ROLES = Object.freeze([ROLE.SELLER, ROLE.TALENT, ROLE.FREELANCER]);
@@ -93,6 +123,11 @@ module.exports = {
   ROLE,
   USER_ROLES,
   SIGNUP_ROLES,
+  LEGACY_WORK_ROLES,
+  ADMIN_PERMISSION,
+  ADMIN_PERMISSIONS,
+  hasAdminPermission,
+  normalizeAdminPermissions,
   EARNER_ROLES,
   CAPABILITIES,
   normalizeRole,
