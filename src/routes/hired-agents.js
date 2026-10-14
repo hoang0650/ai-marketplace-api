@@ -9,6 +9,7 @@ const {
   getSubscriptionStatus,
   setAutoRenew,
   subscribeAgent,
+  refundFailedRental,
 } = require('../finance/agent-subscription');
 const { AIMARKETS_PROVIDER_MARKUP } = require('../utils/openclaw-pricing');
 
@@ -142,7 +143,20 @@ router.get('/subscriptions/:agentId', authenticate, async (req, res, next) => {
  */
 router.post('/subscriptions/:agentId', authenticate, async (req, res, next) => {
   try {
-    res.json(await subscribeAgent(req.user, req.params.agentId));
+    const idempotencyKey = req.get('Idempotency-Key') || req.body?.idempotencyKey;
+    res.json(await subscribeAgent(req.user, req.params.agentId, { idempotencyKey }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /v1/agents/subscriptions/:agentId/refund — body { walletTxId, reason }.
+ * Refunds a just-made rental whose workspace failed to provision (once, own charge, 30 min window).
+ */
+router.post('/subscriptions/:agentId/refund', authenticate, async (req, res, next) => {
+  try {
+    res.json(await refundFailedRental(req.user, req.params.agentId, req.body?.walletTxId, { reason: req.body?.reason }));
   } catch (err) {
     next(err);
   }
