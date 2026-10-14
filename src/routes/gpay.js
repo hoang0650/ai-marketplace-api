@@ -12,6 +12,8 @@ const config = require('../config/env');
 const { DEFAULT_VND_PER_USD } = require('../config/fx');
 const {
   gpayEnabled,
+  gpayFeatureEnabled,
+  gpayPortalConfigured,
   gpayVaEnabled,
   gpayPortalEnabled,
   gpaySandbox,
@@ -70,6 +72,18 @@ function canSimulate(user) {
   return isAdmin(user);
 }
 
+/**
+ * GPAY_ENABLED feature flag (default OFF): reject creating new GPay payments.
+ * Webhook / return / order-status routes are NOT gated so in-flight payments still settle.
+ */
+function requireGpayEnabled(_req, res, next) {
+  if (gpayFeatureEnabled()) return next();
+  return res.status(503).json({
+    message: 'GPay top-up is temporarily disabled',
+    code: 'GPAY_DISABLED',
+  });
+}
+
 /** Validates `amountVnd` from the body; sends 400 and returns 0 when invalid. */
 function readAmountVnd(req, res) {
   const amountVnd = Math.round(Number(req.body?.amountVnd) || 0);
@@ -113,7 +127,8 @@ router.get('/config', optionalAuth, (req, res) => {
   const qrEnabled = gpayEnabled() && gpayVaEnabled();
   const enabled = portalEnabled || qrEnabled;
   res.json({
-    available: config.gpayVaEnabled !== false,
+    available: gpayFeatureEnabled(),
+    featureEnabled: gpayFeatureEnabled(),
     enabled,
     portalEnabled,
     qrEnabled,
@@ -132,7 +147,7 @@ router.get('/config', optionalAuth, (req, res) => {
  * Top up through GPay's payment gateway (ATM / international card / VA on
  * GPay's page). Returns `billUrl` to open; GPay redirects back to /v1/gpay/return.
  */
-router.post('/checkout', authenticate, async (req, res, next) => {
+router.post('/checkout', requireGpayEnabled, authenticate, async (req, res, next) => {
   try {
     if (!gpayPortalEnabled()) {
       return res.status(503).json({ message: 'GPay gateway is not configured', code: 'GPAY_NOT_CONFIGURED' });
@@ -176,7 +191,7 @@ router.post('/checkout', authenticate, async (req, res, next) => {
 });
 
 /** Top up with a dynamic VietQR (GPay QR Payment); the webhook credits the wallet. */
-router.post('/qr', authenticate, async (req, res, next) => {
+router.post('/qr', requireGpayEnabled, authenticate, async (req, res, next) => {
   try {
     if (!gpayVaEnabled()) {
       return res.status(503).json({ message: 'GPay is not configured', code: 'GPAY_NOT_CONFIGURED' });
@@ -221,7 +236,8 @@ router.get('/orders/:requestId', authenticate, async (req, res, next) => {
     let tx = await WalletTx.findOne({ gpayRequestId: String(req.params.requestId), user: req.user._id });
     if (!tx) return res.status(404).json({ message: 'GPay order not found', code: 'GPAY_UNKNOWN_ORDER' });
 
-    if (tx.status === 'pending' && tx.gpayBillId && gpayPortalEnabled()) {
+    // Reconcile even while GPAY_ENABLED is off, so bills created before the switch still settle.
+    if (tx.status === 'pending' && tx.gpayBillId && gpayPortalConfigured()) {
       try {
         const info = await getBillInfo({ merchantOrderId: tx.gpayRequestId, gpayBillId: tx.gpayBillId });
         const event = verifyWebhookSignature(info) ? resolveOrderEvent(info) : null;
@@ -251,7 +267,7 @@ router.get('/return', (req, res) => {
 /**
  * The caller's GPay Virtual Account (legacy VA flow). Creates one on first request.
  */
-router.post('/account', authenticate, async (req, res, next) => {
+router.post('/account', requireGpayEnabled, authenticate, async (req, res, next) => {
   try {
     if (!gpayVaEnabled()) {
       return res.status(503).json({ message: 'GPay is not configured', code: 'GPAY_NOT_CONFIGURED' });
@@ -445,7 +461,7 @@ router.post('/webhook', async (req, res, next) => {
 });
 
 /** Sandbox helper: simulate a payment so the flow is testable without GPay. */
-router.post('/sandbox/credit', authenticate, async (req, res, next) => {
+router.post('/sandbox/credit', requireGpayEnabled, authenticate, async (req, res, next) => {
   try {
     if (!canSimulate(req.user)) {
       return res.status(403).json({ message: 'Sandbox simulation is disabled', code: 'GPAY_NOT_SANDBOX' });

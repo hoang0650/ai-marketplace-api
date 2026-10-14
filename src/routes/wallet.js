@@ -79,15 +79,17 @@ router.get('/payout-policy', authenticate, async (req, res, next) => {
 });
 
 /**
- * SePay / bank-transfer top-up is retired. Web tops up via GPay (ATM / card / VietQR);
+ * SePay top-up is retired. Web tops up via GPay (ATM / card / VietQR) when GPAY_ENABLED=true;
  * mobile tops up via Apple IAP / Google Play Billing. These rails only fund the wallet —
  * orders are paid exclusively from the AI Markets wallet balance.
  */
 router.post('/deposit', authenticate, (_req, res) => {
+  const { gpayFeatureEnabled } = require('../utils/gpay-client');
   res.status(410).json({
     code: 'SEPAY_DISABLED',
-    message:
-      'Bank transfer top-up is no longer available. Top up with GPay (ATM / card / VietQR) on the website, or in-app purchase in the iOS/Android app.',
+    message: gpayFeatureEnabled()
+      ? 'Bank transfer top-up is no longer available. Top up with GPay (ATM / card / VietQR) on the website, or in-app purchase in the iOS/Android app.'
+      : 'This top-up endpoint is no longer available. Top up from the wallet page, or with in-app purchase in the iOS/Android app.',
   });
 });
 
