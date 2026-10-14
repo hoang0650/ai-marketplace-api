@@ -78,6 +78,7 @@ const kycRoutes = require('./routes/kyc');
 const contentRoutes = require('./routes/content');
 const paypalRoutes = require('./routes/paypal');
 const gpayRoutes = require('./routes/gpay');
+const communityAgentRoutes = require('./routes/community-agents');
 const iapRoutes = require('./routes/iap');
 const gpuRoutes = require('./routes/gpu');
 
@@ -238,6 +239,7 @@ function createApp() {
   app.use('/v1/agent-connect', agentConnectRoutes);
   app.use('/v1/deployments', deploymentRoutes);
   app.use('/v1/playground', playgroundRoutes);
+  app.use('/v1/community-agents', communityAgentRoutes());
   app.use('/v1/agents', agentsRoutes);
   app.use('/v1/agents', hiredAgentRoutes);
   app.use('/v1/servers', serverRoutes);
