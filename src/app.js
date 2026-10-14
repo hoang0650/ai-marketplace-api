@@ -26,6 +26,7 @@ const wishlistRoutes = require('./routes/wishlist');
 const cartRoutes = require('./routes/cart');
 const orderRoutes = require('./routes/orders');
 const walletRoutes = require('./routes/wallet');
+const { userRouter: bankTopupUserRoutes, adminRouter: bankTopupAdminRoutes } = require('./routes/bank-topup');
 const usageRoutes = require('./routes/usage');
 const dashboardRoutes = require('./routes/dashboard');
 const notificationRoutes = require('./routes/notifications');
@@ -216,6 +217,8 @@ function createApp() {
   app.use('/v1/cart', cartRoutes);
   app.use('/v1/orders', orderRoutes);
   app.use('/v1/wallet', walletRoutes);
+  app.use('/v1/wallet/bank-transfer', bankTopupUserRoutes);
+  app.use('/v1/admin/bank-deposits', bankTopupAdminRoutes);
   app.use('/v1/usage', usageRoutes);
   app.use('/v1/dashboard', dashboardRoutes);
   app.use('/v1/notifications', notificationRoutes);
