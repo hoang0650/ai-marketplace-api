@@ -96,8 +96,14 @@ const config = {
   /**
    * GPay (G-Pay Vietnam) — runs alongside PayPal for wallet top-up.
    * Virtual Account = VND collection account per user (webhook credits the wallet).
+   *
+   * Feature flag (temporarily OFF): GPay top-up is disabled unless GPAY_ENABLED is
+   * explicitly `true`/`1`. Default is OFF because Dokploy redeploys wipe runtime env
+   * vars, so an unset variable must never re-open the gateway. When OFF, creating new
+   * GPay payments is rejected (503 GPAY_DISABLED) but the webhook, return URL and
+   * order status endpoints keep working so in-flight transactions still settle.
    */
-  gpayVaEnabled: process.env.GPAY_ENABLED !== '0' && process.env.GPAY_ENABLED !== 'false',
+  gpayVaEnabled: ['1', 'true', 'yes', 'on'].includes(String(process.env.GPAY_ENABLED || '').trim().toLowerCase()),
   gpaySandbox: process.env.GPAY_SANDBOX !== 'false',
   gpayMerchantCode: (process.env.GPAY_MERCHANT_CODE || '').trim(),
   gpayPassword: (process.env.GPAY_PASSWORD || '').trim(),
