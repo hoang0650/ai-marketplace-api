@@ -18,6 +18,7 @@ const {
 } = require('../utils/openclaw-pricing');
 const { issueMarketTicket, aimarketsGatewayToken } = require('../utils/openclaw-ticket');
 const { serviceSecretOk } = require('../utils/service-secret');
+const { issueIsolatedSshSession } = require('../services/ssh-sandbox');
 const byokRoutes = require('./openclaw-byok');
 const { approveOwnPairing, PairingError } = require('../services/openclaw-pairing');
 
@@ -290,55 +291,28 @@ router.post('/ssh/generate', authenticate, async (req, res, next) => {
       });
     }
     await assertActiveSubscription(req.user, 'openclaw');
-    const agentId = String(req.body?.agentId || 'openclaw');
-    const { host, port, username } = resolveSshTarget(req.user, req.body || {});
-
-    if (!host) {
-      return res.status(503).json({
-        success: false,
-        message:
-          'SSH host not configured. Set OPENCLAW_SSH_HOST (or OPENCLAW_SSH_HOST_TEMPLATE) or pass host in the request body.',
-      });
-    }
-
-    await SshSession.updateMany(
-      { user: req.user._id, agentId, revokedAt: null, expiresAt: { $gt: new Date() } },
-      { $set: { revokedAt: new Date() } }
-    );
-
-    const password = randomPassword();
-    const expiresAt = new Date(Date.now() + SSH_TTL_MS);
-    const { command, withPasswordHint } = buildSshCommand({ username, host, port, password });
-
-    const session = await SshSession.create({
-      user: req.user._id,
-      agentId,
-      host,
-      port,
-      username,
-      password,
-      command,
-      expiresAt,
-    });
-
+    // Credentials are verified by the SSH sandbox gateway (infra/ssh-gateway) on a
+    // non-22 port, which drops the login into this buyer's own sandbox container.
+    // Only a scrypt hash is stored; the password is shown once in this response.
+    const issued = await issueIsolatedSshSession({ SshSession, user: req.user, agentId: 'openclaw' });
     return res.status(201).json({
       success: true,
-      id: session._id.toString(),
-      agentId,
-      host,
-      port,
-      username,
-      password,
-      command,
-      commandWithPassword: withPasswordHint,
-      expiresAt: expiresAt.toISOString(),
+      id: issued.session._id.toString(),
+      agentId: 'openclaw',
+      authMethod: 'password',
+      host: issued.host,
+      port: issued.port,
+      username: issued.username,
+      password: issued.password,
+      command: issued.command,
+      commandWithPassword: `sshpass -p '${issued.password}' ${issued.command}`,
+      expiresAt: issued.expiresAt.toISOString(),
       expiresInMinutes: 60,
-      note: 'Valid for 60 minutes. Existing connections stay open after expiry.',
+      note: 'Valid for 60 minutes. The password is shown only once. Your sandbox and open connections close on expiry or revoke.',
       howTo: [
         'On your desktop (Windows / macOS / Linux), open a terminal.',
-        `Run: ${command}`,
-        `When prompted for password, paste: ${password}`,
-        'Or use sshpass (Linux/macOS): ' + withPasswordHint,
+        `Run: ${issued.command}`,
+        'When prompted for password, paste the password shown above.',
       ],
     });
   } catch (err) {
@@ -371,9 +345,11 @@ router.get('/ssh/active', authenticate, async (req, res, next) => {
         host: session.host,
         port: session.port,
         username: session.username,
-        password: session.password,
+        // Isolated sessions store only a hash; the password was shown once at generation.
+        ...(session.password
+          ? { password: session.password, commandWithPassword: buildSshCommand(session).withPasswordHint }
+          : { passwordShownOnce: true }),
         command: session.command,
-        commandWithPassword: buildSshCommand(session).withPasswordHint,
         expiresAt: new Date(session.expiresAt).toISOString(),
         expiresInMinutes: Math.max(0, Math.round((new Date(session.expiresAt) - Date.now()) / 60000)),
         note: 'Valid for 60 minutes. Existing connections stay open after expiry.',

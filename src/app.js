@@ -33,6 +33,7 @@ const affiliateRoutes = require('./routes/affiliate');
 const billingRoutes = require('./routes/billing');
 const adminRoutes = require('./routes/admin');
 const openclawRoutes = require('./routes/openclaw');
+const sshGatewayRoutes = require('./routes/ssh-gateway');
 const hermesRoutes = require('./routes/hermes');
 const nanoclawRoutes = require('./routes/nanoclaw');
 const spacebotRoutes = require('./routes/spacebot');
@@ -225,6 +226,7 @@ function createApp() {
   app.use('/v1/admin', adminFinanceRoutes);
   app.use('/v1/payments', paymentRoutes);
   app.use('/v1/openclaw', openclawRoutes);
+  app.use('/v1/ssh-gateway', sshGatewayRoutes);
   app.use('/v1/hermes', hermesRoutes);
   app.use('/v1/nanoclaw', nanoclawRoutes);
   app.use('/v1/spacebot', spacebotRoutes);

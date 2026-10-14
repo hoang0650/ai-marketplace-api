@@ -1,0 +1,78 @@
+# Per-buyer SSH sandbox gateway. Runs as plain docker compose (not a swarm stack)
+# next to Dokploy. Never touches the host sshd on port 22.
+name: aim-ssh-gateway
+
+services:
+  gateway:
+    build: .
+    image: aimarkets/ssh-gateway:latest
+    restart: unless-stopped
+    ports:
+      - "${SSH_GATEWAY_PUBLIC_PORT:-2422}:2222"
+    environment:
+      AIMARKETS_API_URL: ${AIMARKETS_API_URL:-https://api.aimarkets.vn/v1}
+      SSH_GATEWAY_SHARED_SECRET: ${SSH_GATEWAY_SHARED_SECRET:?set in .env}
+      DOCKER_HOST: tcp://docker-proxy:2375
+      SANDBOX_IMAGE: ${SANDBOX_IMAGE:-aimarkets/sandbox-base:latest}
+      SANDBOX_NETWORK: aim-sbx-net
+      SANDBOX_MEMORY_MB: ${SANDBOX_MEMORY_MB:-1024}
+      SANDBOX_CPUS: ${SANDBOX_CPUS:-1}
+      SANDBOX_PIDS_LIMIT: ${SANDBOX_PIDS_LIMIT:-256}
+      SANDBOX_RUNTIME: ${SANDBOX_RUNTIME:-}
+    volumes:
+      - gw-data:/data
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 256m
+    networks: [gw-egress, gw-docker]
+    depends_on: [docker-proxy]
+
+  # Only the gateway can reach this; it exposes containers + exec, nothing else.
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:0.3.0
+    restart: unless-stopped
+    environment:
+      CONTAINERS: 1
+      EXEC: 1
+      POST: 1
+      ALLOW_START: 1
+      ALLOW_STOP: 1
+      IMAGES: 0
+      NETWORKS: 0
+      VOLUMES: 0
+      SERVICES: 0
+      SWARM: 0
+      NODES: 0
+      SECRETS: 0
+      CONFIGS: 0
+      BUILD: 0
+      INFO: 0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [gw-docker]
+
+  # Build-only service so `docker compose build` produces the sandbox image.
+  sandbox-image:
+    build: ./sandbox-image
+    image: aimarkets/sandbox-base:latest
+    profiles: [build]
+
+volumes:
+  gw-data:
+
+networks:
+  gw-egress: {}
+  gw-docker:
+    internal: true
+  # Sandboxes only. No inter-container traffic; fixed subnet so the host
+  # firewall (DOCKER-USER) can block private ranges and the host itself.
+  aim-sbx-net:
+    name: aim-sbx-net
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "false"
+      com.docker.network.bridge.name: aim-sbx0
+    ipam:
+      config:
+        - subnet: 172.31.250.0/24

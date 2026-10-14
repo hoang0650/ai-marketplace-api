@@ -1,0 +1,15 @@
+{
+  "name": "aimarkets-ssh-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SSH gateway that drops each buyer into their own isolated sandbox container",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "ssh2": "^1.16.0"
+  }
+}
