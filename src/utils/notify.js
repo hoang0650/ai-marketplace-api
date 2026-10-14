@@ -38,6 +38,8 @@ const COPY = {
   'stream.stoppedNoFunds': ['Phiên stream đã dừng', 'Phiên stream "{name}" đã dừng do hết số dư. Nạp tiền để chơi tiếp.'],
   'agent.renewSoon': ['Agent sắp tự động gia hạn', 'Gói {brand} sẽ tự động gia hạn {price} vào {date}. Hãy giữ đủ số dư ví, hoặc tắt tự động gia hạn trong trang agent nếu không muốn tiếp tục.'],
   'agent.expiringSoon': ['Agent sắp hết hạn', 'Gói {brand} hết hạn vào {date}. Gia hạn để không bị gián đoạn.'],
+  'agent.rented': ['Đã thuê agent', 'Đã trừ {price} từ ví để thuê {brand} {days} ngày, hiệu lực đến {date}. Mở trang agent để khởi chạy và kết nối.'],
+  'agent.rentRefunded': ['Đã hoàn phí thuê agent', '{brand} chưa khởi tạo được nên {price} đã được hoàn lại vào ví.'],
   'agent.renewed': ['Đã tự động gia hạn agent', 'Gói {brand} đã gia hạn {price} từ số dư ví, hiệu lực đến {date}.'],
   'agent.renewFailed': ['Chưa gia hạn được agent', 'Số dư ví không đủ để gia hạn {brand} ({price}). Nạp tiền trước {date} để tránh bị tạm dừng; hệ thống sẽ tự thử lại.'],
   'agent.expired': ['Agent đã tạm dừng', 'Gói {brand} đã hết hạn. Dữ liệu được giữ đến {purgeDate}; gia hạn trước ngày này để tiếp tục sử dụng.'],

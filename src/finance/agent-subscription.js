@@ -6,6 +6,7 @@ const { requireAvailableFunds } = require('../utils/wallet');
 const { newEntryId } = require('./ledger-service');
 const { vndToUsd } = require('./payout-policy');
 const { isAdmin } = require('../utils/roles');
+const { notifyUser } = require('../utils/notify');
 
 /**
  * Platform-hosted agents are rented per month (prepaid from the wallet).
@@ -121,11 +122,42 @@ async function hasActiveSubscriptionByUserId(userId, agentId) {
   return describe(id, doc, { exempt: isAdmin(user) }).active;
 }
 
+/** A second manual charge for the same agent inside this window is treated as a double click. */
+const DUPLICATE_WINDOW_MS = 20 * 1000;
+/** Failed-provisioning refunds are only accepted this long after the charge. */
+const REFUND_WINDOW_MS = 30 * 60 * 1000;
+
+/** Per-process lock so two concurrent requests for the same user+agent can never both charge. */
+const chargeLocks = new Set();
+
+function cleanIdempotencyKey(raw) {
+  const key = String(raw || '').trim().slice(0, 80);
+  return /^[A-Za-z0-9._:-]{8,80}$/.test(key) ? key : '';
+}
+
+function vndText(vnd) {
+  return `${Math.round(vnd || 0).toLocaleString('vi-VN')} ₫`;
+}
+
+function chargeSummary(tx, fee) {
+  return {
+    walletTxId: tx?._id ? String(tx._id) : null,
+    chargedAmount: tx?.amount ?? fee.amount,
+    chargedVnd: tx?.meta?.feeVnd ?? fee.vnd,
+    chargedCurrency: tx?.currency || fee.currency,
+    chargedAt: iso(tx?.createdAt) || null,
+  };
+}
+
 /**
  * Charge one period from the wallet and extend `paidUntil` by `periodDays`
  * from max(now, current paidUntil) — renewing early never loses paid days.
+ *
+ * Manual rentals are idempotent: the same `idempotencyKey` (one per Launch click)
+ * returns the original charge instead of charging again, and a second manual
+ * charge for the same agent within DUPLICATE_WINDOW_MS is refused with 409.
  */
-async function subscribeAgent(user, agentId, { now = new Date(), source = 'manual' } = {}) {
+async function subscribeAgent(user, agentId, { now = new Date(), source = 'manual', idempotencyKey } = {}) {
   const id = normalizeAgentId(agentId);
   if (!id) {
     const err = new Error('Unknown agent');
@@ -137,56 +169,211 @@ async function subscribeAgent(user, agentId, { now = new Date(), source = 'manua
     return { ...(await getSubscriptionStatus(user, id)), charged: false };
   }
 
-  await requireAvailableFunds(user._id, fee.amount, { currency: fee.currency });
+  const key = source === 'manual' ? cleanIdempotencyKey(idempotencyKey) : '';
+  const lockKey = `${user._id}:${id}`;
+  if (source === 'manual') {
+    if (chargeLocks.has(lockKey)) {
+      const err = new Error('This rental is already being processed — please wait a moment.');
+      err.status = 409;
+      err.code = 'RENTAL_IN_PROGRESS';
+      throw err;
+    }
+    chargeLocks.add(lockKey);
+  }
+  try {
+    if (source === 'manual') {
+      const recent = await WalletTx.findOne({
+        user: user._id,
+        type: 'debit',
+        'meta.kind': 'agent_subscription',
+        'meta.agentId': id,
+        'meta.source': 'manual',
+        ...(key ? {} : { createdAt: { $gte: new Date(now.getTime() - DUPLICATE_WINDOW_MS) } }),
+        ...(key ? { 'meta.idempotencyKey': key } : {}),
+      })
+        .sort({ createdAt: -1 })
+        .lean();
+      if (recent && key) {
+        const doc = await AgentSubscription.findOne({ user: user._id, agentId: id }).lean();
+        return { ...describe(id, doc, { now }), charged: false, duplicate: true, ...chargeSummary(recent, fee) };
+      }
+      if (recent) {
+        const err = new Error('This agent was just rented — refresh to see your plan instead of paying twice.');
+        err.status = 409;
+        err.code = 'RENTAL_DUPLICATE';
+        throw err;
+      }
+      if (key) {
+        // Different key but a charge landed seconds ago: still a double submit.
+        const fresh = await WalletTx.findOne({
+          user: user._id,
+          type: 'debit',
+          'meta.kind': 'agent_subscription',
+          'meta.agentId': id,
+          'meta.source': 'manual',
+          createdAt: { $gte: new Date(now.getTime() - DUPLICATE_WINDOW_MS) },
+        }).lean();
+        if (fresh) {
+          const err = new Error('This agent was just rented — refresh to see your plan instead of paying twice.');
+          err.status = 409;
+          err.code = 'RENTAL_DUPLICATE';
+          throw err;
+        }
+      }
+    }
 
-  const label = AGENT_LABELS[id];
-  const meta = { kind: 'agent_subscription', agentId: id, feeVnd: fee.vnd, periodDays: fee.periodDays, source };
-  await WalletTx.create({
+    await requireAvailableFunds(user._id, fee.amount, { currency: fee.currency });
+
+    const label = AGENT_LABELS[id];
+    const meta = { kind: 'agent_subscription', agentId: id, feeVnd: fee.vnd, periodDays: fee.periodDays, source };
+    if (key) meta.idempotencyKey = key;
+    const tx = await WalletTx.create({
+      user: user._id,
+      type: 'debit',
+      amount: fee.amount,
+      currency: fee.currency,
+      note: `${source === 'auto' ? 'Tự động gia hạn' : 'Phí thuê'} agent ${label} (${fee.periodDays} ngày)`,
+      meta,
+    });
+
+    const doc = await AgentSubscription.findOneAndUpdate(
+      { user: user._id, agentId: id },
+      [
+        {
+          $set: {
+            paidUntil: { $add: [{ $max: ['$paidUntil', now] }, fee.periodDays * DAY_MS] },
+            startedAt: { $ifNull: ['$startedAt', now] },
+            periods: { $add: [{ $ifNull: ['$periods', 0] }, 1] },
+            autoRenew: { $ifNull: ['$autoRenew', true] },
+            lastChargedAt: now,
+            lastFeeVnd: fee.vnd,
+            lastAmount: fee.amount,
+            currency: fee.currency,
+            renewFailedFor: null,
+            lastRenewAttemptAt: null,
+            purgeDueAt: null,
+            purgedAt: null,
+            purgeStatus: '',
+          },
+        },
+      ],
+      { upsert: true, new: true },
+    ).lean();
+
+    await LedgerEntry.create({
+      entryId: newEntryId('agsub'),
+      buyerId: user._id,
+      type: 'PLATFORM_REVENUE',
+      amount: fee.amount,
+      currency: fee.currency,
+      direction: 'credit',
+      ownershipType: 'PLATFORM_DIRECT',
+      reference: `agent:${id}:subscription:${doc?._id || ''}`,
+      meta: { ...meta, paidUntil: doc?.paidUntil },
+    }).catch((err) => console.error('[ledger] agent subscription', err.message));
+
+    if (source === 'manual') {
+      await notifyUser(
+        user._id,
+        'agent.rented',
+        { brand: label, price: vndText(fee.vnd), days: fee.periodDays, date: iso(doc?.paidUntil)?.slice(0, 10) },
+        `/hire-agent/${id}`,
+      ).catch((err) => console.error('[notify] agent rented', err.message));
+    }
+
+    return { ...describe(id, doc, { now }), charged: true, ...chargeSummary({ _id: tx?._id, amount: fee.amount, currency: fee.currency, meta, createdAt: tx?.createdAt || now }, fee) };
+  } finally {
+    if (source === 'manual') chargeLocks.delete(lockKey);
+  }
+}
+
+/**
+ * Refund a manual rental whose workspace could not be provisioned/launched.
+ * Only the buyer's own charge, only once, only within REFUND_WINDOW_MS; the
+ * paid period is removed from `paidUntil` again.
+ */
+async function refundFailedRental(user, agentId, walletTxId, { now = new Date(), reason = '' } = {}) {
+  const id = normalizeAgentId(agentId);
+  if (!id || !walletTxId || !/^[a-f0-9]{24}$/i.test(String(walletTxId))) {
+    const err = new Error('Unknown rental');
+    err.status = 400;
+    throw err;
+  }
+  const tx = await WalletTx.findOne({
+    _id: walletTxId,
     user: user._id,
     type: 'debit',
-    amount: fee.amount,
-    currency: fee.currency,
-    note: `${source === 'auto' ? 'Tự động gia hạn' : 'Phí thuê'} agent ${label} (${fee.periodDays} ngày)`,
-    meta,
+    'meta.kind': 'agent_subscription',
+    'meta.agentId': id,
+    'meta.source': 'manual',
+  }).lean();
+  if (!tx) {
+    const err = new Error('Rental charge not found');
+    err.status = 404;
+    throw err;
+  }
+  if (tx.meta?.refundedAt) {
+    return { refunded: false, alreadyRefunded: true, amount: tx.amount, currency: tx.currency, feeVnd: tx.meta.feeVnd };
+  }
+  if (now.getTime() - new Date(tx.createdAt).getTime() > REFUND_WINDOW_MS) {
+    const err = new Error('The automatic refund window has passed — please contact support.');
+    err.status = 409;
+    err.code = 'REFUND_WINDOW_PASSED';
+    throw err;
+  }
+  // Claim the refund atomically so two calls can never both credit.
+  const claimed = await WalletTx.findOneAndUpdate(
+    { _id: tx._id, 'meta.refundedAt': { $exists: false } },
+    { $set: { 'meta.refundedAt': now, 'meta.refundReason': String(reason || '').slice(0, 200) } },
+    { new: true },
+  ).lean();
+  if (!claimed) {
+    return { refunded: false, alreadyRefunded: true, amount: tx.amount, currency: tx.currency, feeVnd: tx.meta?.feeVnd };
+  }
+  const label = AGENT_LABELS[id];
+  const days = Number(tx.meta?.periodDays) || periodDays();
+  const credit = await WalletTx.create({
+    user: user._id,
+    type: 'credit',
+    amount: tx.amount,
+    currency: tx.currency,
+    note: `Hoàn phí thuê agent ${label} (khởi tạo thất bại)`,
+    meta: { kind: 'agent_subscription_refund', agentId: id, refundOf: String(tx._id), feeVnd: tx.meta?.feeVnd },
   });
-
   const doc = await AgentSubscription.findOneAndUpdate(
     { user: user._id, agentId: id },
     [
       {
         $set: {
-          paidUntil: { $add: [{ $max: ['$paidUntil', now] }, fee.periodDays * DAY_MS] },
-          startedAt: { $ifNull: ['$startedAt', now] },
-          periods: { $add: [{ $ifNull: ['$periods', 0] }, 1] },
-          autoRenew: { $ifNull: ['$autoRenew', true] },
-          lastChargedAt: now,
-          lastFeeVnd: fee.vnd,
-          lastAmount: fee.amount,
-          currency: fee.currency,
-          renewFailedFor: null,
-          lastRenewAttemptAt: null,
-          purgeDueAt: null,
-          purgedAt: null,
-          purgeStatus: '',
+          paidUntil: { $subtract: ['$paidUntil', days * DAY_MS] },
+          periods: { $max: [0, { $subtract: [{ $ifNull: ['$periods', 1] }, 1] }] },
         },
       },
     ],
-    { upsert: true, new: true },
+    { new: true },
   ).lean();
-
   await LedgerEntry.create({
-    entryId: newEntryId('agsub'),
+    entryId: newEntryId('agref'),
     buyerId: user._id,
-    type: 'PLATFORM_REVENUE',
-    amount: fee.amount,
-    currency: fee.currency,
-    direction: 'credit',
+    type: 'REFUND',
+    amount: tx.amount,
+    currency: tx.currency,
+    direction: 'debit',
     ownershipType: 'PLATFORM_DIRECT',
-    reference: `agent:${id}:subscription:${doc?._id || ''}`,
-    meta: { ...meta, paidUntil: doc?.paidUntil },
-  }).catch((err) => console.error('[ledger] agent subscription', err.message));
-
-  return { ...describe(id, doc, { now }), charged: true };
+    reference: `agent:${id}:subscription-refund:${tx._id}`,
+    meta: { kind: 'agent_subscription_refund', agentId: id, refundOf: String(tx._id) },
+  }).catch((err) => console.error('[ledger] agent refund', err.message));
+  await notifyUser(user._id, 'agent.rentRefunded', { brand: label, price: vndText(tx.meta?.feeVnd) }, `/hire-agent/${id}`).catch(
+    (err) => console.error('[notify] agent refund', err.message),
+  );
+  return {
+    refunded: true,
+    amount: tx.amount,
+    currency: tx.currency,
+    feeVnd: tx.meta?.feeVnd,
+    refundTxId: credit?._id ? String(credit._id) : null,
+    status: describe(id, doc, { now, exempt: isAdmin(user) }),
+  };
 }
 
 /** Turn wallet auto-renewal on/off for one agent plan. */
@@ -221,4 +408,6 @@ module.exports = {
   assertActiveSubscription,
   hasActiveSubscriptionByUserId,
   subscribeAgent,
+  refundFailedRental,
+  cleanIdempotencyKey,
 };
