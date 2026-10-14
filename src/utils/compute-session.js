@@ -314,9 +314,23 @@ async function registerExternalNode(user, body) {
   const webhookUrl = String(body?.webhookUrl || '').slice(0, 500);
   const healthUrl = String(body?.healthUrl || '').slice(0, 500);
   const iframeUrl = String(body?.iframeUrl || '').slice(0, 500);
-  if (webhookUrl) await assertSafeHttpUrl(webhookUrl);
+  if (webhookUrl) await assertSafeHttpUrl(webhookUrl, { httpsOnly: true });
   if (healthUrl) await assertSafeHttpUrl(healthUrl);
   if (iframeUrl) await assertSafeHttpUrl(iframeUrl, { httpsOnly: true });
+  const webhookSecret = String(body?.webhookSecret || '').trim();
+  if (webhookSecret && webhookSecret.length < 16) {
+    const err = new Error('Webhook secret must be at least 16 characters');
+    err.status = 400;
+    err.code = 'WEBHOOK_SECRET_TOO_SHORT';
+    throw err;
+  }
+  const hasStaticStream = Boolean(String(body?.streamHost || '').trim() && Number(body?.streamPort) > 0);
+  if (!webhookUrl && !hasStaticStream && !iframeUrl) {
+    const err = new Error('An external node needs a webhook URL, a stream host + port, or an iframe URL');
+    err.status = 400;
+    err.code = 'NODE_TARGET_REQUIRED';
+    throw err;
+  }
   const doc = await GpuServer.create({
     owner: user._id,
     projectId: String(body?.projectId || 'marketplace'),
@@ -329,7 +343,7 @@ async function registerExternalNode(user, body) {
     product: product._id,
     external: true,
     webhookUrl,
-    webhookSecret: String(body?.webhookSecret || '').slice(0, 256),
+    webhookSecret: webhookSecret.slice(0, 256),
     streamKind: String(body?.streamKind || '').slice(0, 40),
     streamHost: assertSafeStreamHost(String(body?.streamHost || '').slice(0, 200)),
     streamPort: Number(body?.streamPort || 0),
@@ -388,6 +402,30 @@ async function registerComputeNode(user, body) {
   return registerExternalNode(user, body);
 }
 
+/** Owner-only editable settings (never includes the webhook secret itself). */
+function sellerNodeConfig(doc) {
+  return {
+    webhookUrl: doc.webhookUrl || '',
+    hasWebhookSecret: Boolean(doc.webhookSecret),
+    streamHost: doc.streamHost || '',
+    streamPort: doc.streamPort || 0,
+    streamPath: doc.streamPath || '',
+    streamKind: doc.streamKind || '',
+    streamTls: Boolean(doc.streamTls),
+    iframeUrl: doc.iframeUrl || '',
+    healthUrl: doc.healthUrl || '',
+    gpu: doc.gpu || '',
+    mobileStream: doc.mobileStream
+      ? {
+          iframeUrl: doc.mobileStream.iframeUrl || '',
+          host: doc.mobileStream.host || '',
+          port: doc.mobileStream.port || 0,
+          path: doc.mobileStream.path || '',
+        }
+      : null,
+  };
+}
+
 function publicNode(doc, product) {
   const hosting = doc.external ? 'external' : doc.product ? 'aimarkets' : 'lab';
   return {
@@ -418,6 +456,7 @@ function publicNode(doc, product) {
 }
 
 module.exports = {
+  sellerNodeConfig,
   isComputeCategory,
   resolveProduct,
   findExternalNode,
