@@ -104,6 +104,8 @@ const config = {
    * order status endpoints keep working so in-flight transactions still settle.
    */
   gpayVaEnabled: ['1', 'true', 'yes', 'on'].includes(String(process.env.GPAY_ENABLED || '').trim().toLowerCase()),
+  /** Manual VietQR bank top-up (see config/bank-transfer.js). */
+  bankTopupEnabled: !!(String(process.env.BANK_ACCOUNT || '').trim() && String(process.env.BANK_ACCOUNT_NAME || '').trim()),
   gpaySandbox: process.env.GPAY_SANDBOX !== 'false',
   gpayMerchantCode: (process.env.GPAY_MERCHANT_CODE || '').trim(),
   gpayPassword: (process.env.GPAY_PASSWORD || '').trim(),
