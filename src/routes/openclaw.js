@@ -19,6 +19,7 @@ const {
 const { issueMarketTicket, aimarketsGatewayToken } = require('../utils/openclaw-ticket');
 const { serviceSecretOk } = require('../utils/service-secret');
 const byokRoutes = require('./openclaw-byok');
+const { approveOwnPairing, PairingError } = require('../services/openclaw-pairing');
 
 const router = express.Router();
 router.use('/byok', byokRoutes);
@@ -125,37 +126,26 @@ function slugUser(user) {
   return `oc-${base || 'user'}-${idShort}`;
 }
 
-function resolveSshTarget(user, body = {}) {
+/**
+ * SSH target is derived from the signed-in buyer only. Client-supplied host,
+ * port or username are ignored so a buyer can never point the generated
+ * credentials (or the command shown on the setup page) at another user's
+ * agent or a shared/root account.
+ */
+function resolveSshTarget(user, _body = {}) {
   const hostTemplate =
     process.env.OPENCLAW_SSH_HOST_TEMPLATE ||
     process.env.OPENCLAW_SSH_HOST ||
     '{userId}.openclaw.aimarkets.vn';
   const userId = String(user?._id || 'anon');
-  const allowCustom = process.env.OPENCLAW_SSH_ALLOW_CUSTOM_HOST === '1';
-  const rawHost = String(body.host || body.serverHost || '')
-    .trim()
-    .toLowerCase()
-    .replace(/^https?:\/\//, '')
-    .replace(/\/$/, '');
-  // Never accept leftover PHHotel sandbox hosts from old UI placeholders.
-  const isPhhotelHost = /(^|\.)phhotel\.vn$/i.test(rawHost);
-  const isAimarketsHost = /(^|\.)openclaw\.aimarkets\.vn$/i.test(rawHost) || /(^|\.)aimarkets\.vn$/i.test(rawHost);
-  const hostFromBody =
-    rawHost && !isPhhotelHost && (allowCustom || isAimarketsHost) ? rawHost : '';
-  const host =
-    hostFromBody ||
-    (hostTemplate
-      ? hostTemplate
-          .replace(/\{userId\}/g, userId)
-          .replace(/\{username\}/g, slugUser(user))
-          .replace(/\{email\}/g, String(user?.email || '').split('@')[0])
-      : '');
-  const port = Number(body.port || process.env.OPENCLAW_SSH_PORT || 22);
-  const username =
-    String(body.username || process.env.OPENCLAW_SSH_USER || '').trim() || slugUser(user);
+  const host = hostTemplate
+    .replace(/\{userId\}/g, userId)
+    .replace(/\{username\}/g, slugUser(user))
+    .replace(/\{email\}/g, String(user?.email || '').split('@')[0]);
+  const port = Number(process.env.OPENCLAW_SSH_PORT || 22);
+  const username = slugUser(user);
   return { host, port: Number.isFinite(port) && port > 0 ? port : 22, username };
 }
-
 function buildSshCommand({ username, host, port, password }) {
   const portPart = port && Number(port) !== 22 ? ` -p ${port}` : '';
   const base = `ssh${portPart} ${username}@${host}`;
@@ -262,31 +252,23 @@ router.post('/launch', authenticate, async (req, res, next) => {
   }
 });
 
+/**
+ * Approve one of the buyer's OWN pending device pairings (see services/openclaw-pairing).
+ * Previously this proxied to AI_URL (default https://ai.aimarkets.vn), which has no
+ * backend on the AI Markets stack, so every call failed with a 500 "Approve failed".
+ */
 router.post('/device-pairings/approve', authenticate, async (req, res, next) => {
   try {
-    const userId = String(req.user?._id || req.user?.id || '').trim();
-    const aiUrl = aiBaseUrl();
-    if (!aiUrl) {
-      return res.status(503).json({ success: false, message: 'AI_URL is not configured.' });
-    }
-    const qs = new URLSearchParams({ audience: 'aimarkets', user_id: userId });
-    const body = {
-      ...(req.body || {}),
-      role: req.body?.role || 'operator',
-      scopes: req.body?.scopes || ['operator.read', 'operator.write', 'operator.admin', 'operator.pairing'],
-      user_id: userId,
-    };
-    const upstream = await fetch(`${aiUrl}/admin/openclaw/device-pairings/approve?${qs}`, {
-      method: 'POST',
-      headers: { ...aiAdminHeaders(req), 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+    await assertActiveSubscription(req.user, 'openclaw');
+    const result = await approveOwnPairing({
+      userId: String(req.user?._id || req.user?.id || ''),
+      requestId: req.body?.requestId || req.body?.request_id,
     });
-    const data = await upstream.json().catch(() => ({}));
-    return res.status(upstream.status === 404 ? 200 : upstream.status).json({
-      success: Boolean(data?.success),
-      message: data?.message,
-    });
+    return res.json({ success: true, message: 'Device approved.', ...result });
   } catch (err) {
+    if (err instanceof PairingError) {
+      return res.status(err.status).json({ success: false, code: err.code, message: err.message });
+    }
     next(err);
   }
 });

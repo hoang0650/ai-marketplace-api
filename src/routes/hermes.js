@@ -99,7 +99,8 @@ function resolveSshTarget(user, body = {}) {
     '{userId}.hermes.aimarkets.vn';
   const userId = String(user?._id || 'anon');
   const allowCustom = process.env.HERMES_SSH_ALLOW_CUSTOM_HOST === '1';
-  const rawHost = String(body.host || body.serverHost || '')
+  // Per-user scoping: the client can never choose the SSH host/port/user.
+  const rawHost = String('')
     .trim()
     .toLowerCase()
     .replace(/^https?:\/\//, '')
@@ -117,9 +118,9 @@ function resolveSshTarget(user, body = {}) {
           .replace(/\{username\}/g, slugUser(user))
           .replace(/\{email\}/g, String(user?.email || '').split('@')[0])
       : '');
-  const port = Number(body.port || process.env.HERMES_SSH_PORT || 22);
+  const port = Number(process.env.HERMES_SSH_PORT || 22);
   const username =
-    String(body.username || process.env.HERMES_SSH_USER || '').trim() || slugUser(user);
+    String(process.env.HERMES_SSH_USER || '').trim() || slugUser(user);
   return { host, port: Number.isFinite(port) && port > 0 ? port : 22, username };
 }
 

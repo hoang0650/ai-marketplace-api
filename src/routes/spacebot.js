@@ -114,7 +114,8 @@ function resolveSshTarget(user, body = {}) {
     '{userId}.spacebot.aimarkets.vn';
   const userId = String(user?._id || 'anon');
   const allowCustom = process.env.SPACEBOT_SSH_ALLOW_CUSTOM_HOST === '1';
-  const rawHost = String(body.host || body.serverHost || '')
+  // Per-user scoping: the client can never choose the SSH host/port/user.
+  const rawHost = String('')
     .trim()
     .toLowerCase()
     .replace(/^https?:\/\//, '')
@@ -131,9 +132,9 @@ function resolveSshTarget(user, body = {}) {
           .replace(/\{username\}/g, slugUser(user))
           .replace(/\{email\}/g, String(user?.email || '').split('@')[0])
       : '');
-  const port = Number(body.port || process.env.SPACEBOT_SSH_PORT || 2222);
+  const port = Number(process.env.SPACEBOT_SSH_PORT || 2222);
   const username =
-    String(body.username || process.env.SPACEBOT_SSH_USER || '').trim() || 'root';
+    String(process.env.SPACEBOT_SSH_USER || '').trim() || 'root';
   return { host, port: Number.isFinite(port) && port > 0 ? port : 2222, username };
 }
 
@@ -241,6 +242,15 @@ router.post('/device-pairings/approve', authenticate, async (_req, res) => {
 
 router.post('/ssh/generate', authenticate, async (req, res, next) => {
   try {
+    // SpaceBot sshd runs as root. Only hand out keys when each buyer has an isolated
+    // SpaceBot container; on a shared instance a key would be shared root for everyone.
+    if (process.env.SPACEBOT_SSH_PER_USER_ISOLATION !== '1') {
+      return res.status(403).json({
+        success: false,
+        code: 'ssh_not_isolated',
+        message: 'SSH is disabled for SpaceBot until each buyer runs an isolated instance.',
+      });
+    }
     await assertActiveSubscription(req.user, 'spacebot');
     const agentId = String(req.body?.agentId || 'spacebot');
     const { host, port, username } = resolveSshTarget(req.user, req.body || {});
