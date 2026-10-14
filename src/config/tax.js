@@ -11,8 +11,8 @@ const rate = (raw, fallback) => Math.max(0, Math.min(1, num(raw, fallback)));
  * Seller tax policy (2026-10). Rates are env-tunable so ops can follow the rule book without a deploy.
  *
  * - INDIVIDUAL (cá nhân kinh doanh): the platform (which has a payment function) withholds and pays
- *   VAT + PIT on the seller's behalf per Nghị định 117/2025/NĐ-CP, Luật Thuế TNCN and
- *   Thông tư 40/2021/TT-BTC:
+ *   VAT + PIT on the seller's behalf per Nghị định 252/2026/NĐ-CP, Luật Thuế TNCN and
+ *   Thông tư 18/2026/TT-BTC:
  *     services / software / digital products (default for AI Markets): 5% GTGT + 2% TNCN = 7%
  *     physical goods:                                                    1% GTGT + 0.5% TNCN = 1.5%
  *   Base = price after discount (order gross). No withholding while the seller's calendar-year

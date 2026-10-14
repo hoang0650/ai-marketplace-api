@@ -11,10 +11,10 @@ const {
   EMPLOYER_FEE_RATE,
 } = require('../../src/finance/payout-policy');
 
-test('seller/talent/freelancer policy carries 20% platform fee + type-based tax (individual 7% default)', () => {
+test('seller/talent/freelancer policy carries 20% platform fee + type-based tax (individual 7% digital)', () => {
   assert.equal(SELLER_TAX_RATE, 0.07);
   for (const persona of ['seller', 'talent', 'freelancer']) {
-    const policy = policyFor(persona);
+    const policy = policyFor(persona, { sellerType: 'INDIVIDUAL' });
     assert.equal(policy.canWithdraw, true);
     assert.equal(policy.platformFeeRate, SELLER_PLATFORM_FEE_RATE);
     assert.equal(policy.taxRate, SELLER_TAX_RATE);
@@ -30,7 +30,7 @@ test('seller/talent/freelancer policy carries 20% platform fee + type-based tax 
 });
 
 test('quote charges seller rates when chargeAtWithdraw is forced on', () => {
-  const policy = { ...policyFor('seller'), chargeAtWithdraw: true };
+  const policy = { ...policyFor('seller', { sellerType: 'INDIVIDUAL' }), chargeAtWithdraw: true };
   const q = quoteWithdrawal(100, policy);
   assert.equal(q.platformFee, 20);
   assert.equal(q.tax, 7);

@@ -34,7 +34,7 @@ function rateFromEnv(key, fallback) {
 }
 
 const SELLER_PLATFORM_FEE_RATE = rateFromEnv('WITHDRAW_SELLER_PLATFORM_FEE_RATE', 0.2);
-const { sellerTaxRateFor } = require('./seller-tax-policy');
+const { sellerTaxRateFor, productTaxKind } = require('./seller-tax-policy');
 
 /** Explicit env override (legacy); unset = rate follows the seller type (tax policy 2026-10). */
 const SELLER_TAX_RATE_OVERRIDE = rateFromEnv('WITHDRAW_SELLER_TAX_RATE', null);
@@ -66,8 +66,36 @@ function sellerTaxRate(sellerType) {
   return sellerType ? sellerTaxRateFor(sellerType, 'AI_API').total : SELLER_TAX_RATE;
 }
 
+/**
+ * Tax shown on the withdraw screen for a seller, from the seller's actual tax profile/type and the
+ * kinds of products they sell (Quy chế: individual 7% digital / 1.5% physical goods; household
+ * business & company 0%). Never assumes 7% for an undeclared seller type.
+ *   mode 'override'  : legacy env WITHDRAW_SELLER_TAX_RATE
+ *   mode 'unknown'   : seller type not declared -> taxRate null, prompt to complete the tax profile
+ *   mode 'none'      : seller type is not withheld (household business, company, ...) -> 0%
+ *   mode 'single'    : one product kind -> that rate
+ *   mode 'per_order' : digital + physical products -> rate per order (breakdown), taxRate null
+ */
+function sellerTaxSummary({ sellerType, sellerTypeKnown, productKinds } = {}) {
+  const fee = SELLER_PLATFORM_FEE_RATE;
+  const rate6 = (n) => Math.round((Number(n) || 0) * 1e6) / 1e6;
+  const row = (kind, rate) => ({ kind, rate, totalFeeRate: rate6(fee + rate) });
+  if (SELLER_TAX_RATE_OVERRIDE !== null) {
+    return { mode: 'override', taxRate: SELLER_TAX_RATE_OVERRIDE, breakdown: [row('ALL', SELLER_TAX_RATE_OVERRIDE)] };
+  }
+  const known = sellerTypeKnown === undefined ? !!sellerType : !!sellerTypeKnown;
+  if (!known) return { mode: 'unknown', taxRate: null, breakdown: [] };
+  const kinds = [...new Set((productKinds || []).map((k) => (String(k).toUpperCase() === 'GOODS' ? 'GOODS' : 'DIGITAL')))].sort();
+  const list = kinds.length ? kinds : ['DIGITAL'];
+  const rateOf = (kind) => sellerTaxRateFor(sellerType, kind === 'GOODS' ? 'PHYSICAL_GOODS' : 'AI_API').total;
+  const breakdown = list.map((k) => row(k, rateOf(k)));
+  if (breakdown.every((b) => b.rate === 0)) return { mode: 'none', taxRate: 0, breakdown: [row('ALL', 0)] };
+  if (breakdown.length === 1) return { mode: 'single', taxRate: breakdown[0].rate, breakdown };
+  return { mode: 'per_order', taxRate: null, breakdown };
+}
+
 /** Fee/tax/minimum policy for a persona (admin handled by callers). */
-function policyFor(persona, { sellerType, pitCommitmentApproved = false } = {}) {
+function policyFor(persona, { sellerType, sellerTypeKnown, productKinds, pitCommitmentApproved = false } = {}) {
   if (persona === 'affiliate') {
     const { affiliateConfig } = require('../config/affiliate');
     const cfg = affiliateConfig();
@@ -106,12 +134,19 @@ function policyFor(persona, { sellerType, pitCommitmentApproved = false } = {}) 
     };
   }
   if (SELLER_LIKE.has(persona)) {
+    const tax = sellerTaxSummary({ sellerType, sellerTypeKnown, productKinds });
     return {
       persona,
       canWithdraw: true,
       platformFeeRate: SELLER_PLATFORM_FEE_RATE,
-      taxRate: sellerTaxRate(sellerType),
-      totalFeeRate: roundMoney(SELLER_PLATFORM_FEE_RATE + sellerTaxRate(sellerType)),
+      // Display: null when it depends on the order (mixed kinds) or the seller type is undeclared.
+      taxRate: tax.taxRate,
+      totalFeeRate: tax.taxRate === null ? null : Math.round((SELLER_PLATFORM_FEE_RATE + tax.taxRate) * 1e6) / 1e6,
+      taxMode: tax.mode,
+      taxBreakdown: tax.breakdown,
+      taxProfileIncomplete: tax.mode === 'unknown',
+      /** Rate used only if WITHDRAW_SELLER_CHARGE_AT_WITHDRAW forces charging (unchanged behaviour). */
+      quoteTaxRate: sellerTaxRate(sellerType),
       sellerType: sellerType || null,
       chargeAtWithdraw: SELLER_CHARGE_AT_WITHDRAW,
       minAmount: 0,
@@ -189,9 +224,23 @@ async function resolvePayoutPersona(user, requested) {
   const allowed = wanted && personas.includes(wanted) && !(wanted === 'buyer' && sellerLike);
   const persona = allowed ? wanted : pickPrimary(personas);
   let sellerType;
+  let sellerTypeKnown = false;
+  let productKinds = [];
   if (SELLER_LIKE.has(persona) && user) {
-    const sp = await SellerProfile.findOne({ user: user._id || user.id }).select('sellerType').lean().catch(() => null);
-    sellerType = sp?.sellerType ? require('./seller-types').normalizeSellerType(sp.sellerType) : undefined;
+    const uid = user._id || user.id;
+    const { currentSellerTaxProfile } = require('./settlement-service');
+    const { taxCategoryFromProduct } = require('./tax-category');
+    const Product = require('../models/Product');
+    const [taxProfile, sp, products] = await Promise.all([
+      currentSellerTaxProfile(uid).catch(() => null),
+      SellerProfile.findOne({ user: uid }).select('sellerType sellerTypeDeclaredAt').lean().catch(() => null),
+      Product.find({ creator: uid }).select('taxCategory productKind productType category').limit(500).lean().catch(() => []),
+    ]);
+    const raw = taxProfile?.sellerType || sp?.sellerType;
+    sellerType = raw ? require('./seller-types').normalizeSellerType(raw) : undefined;
+    // Known = a tax profile exists, the type was explicitly declared, or a non-default type is stored.
+    sellerTypeKnown = !!(taxProfile?.sellerType || sp?.sellerTypeDeclaredAt || (sp?.sellerType && !/^individual$/i.test(sp.sellerType)));
+    productKinds = (products || []).map((p) => productTaxKind(taxCategoryFromProduct(p)));
   }
   let pitCommitmentApproved = false;
   if (persona === 'affiliate' && user) {
@@ -199,7 +248,7 @@ async function resolvePayoutPersona(user, requested) {
     const u = await User.findById(user._id || user.id).select('pitCommitment').lean().catch(() => null);
     pitCommitmentApproved = require('../utils/pit-commitment').isPitCommitmentApproved(u, new Date());
   }
-  return { personas, persona, policy: policyFor(persona, { sellerType, pitCommitmentApproved }) };
+  return { personas, persona, policy: policyFor(persona, { sellerType, sellerTypeKnown, productKinds, pitCommitmentApproved }) };
 }
 
 /** Apply the persona fee/tax to a gross withdrawal amount. */
@@ -207,7 +256,8 @@ function quoteWithdrawal(grossAmount, policy) {
   const gross = roundMoney(grossAmount);
   const chargeAtWithdraw = policy?.canWithdraw === false ? false : policy?.chargeAtWithdraw !== false;
   const platformFee = chargeAtWithdraw ? roundMoney(gross * Number(policy?.platformFeeRate || 0)) : 0;
-  const tax = chargeAtWithdraw ? roundMoney(gross * Number(policy?.taxRate || 0)) : 0;
+  const taxRate = policy?.quoteTaxRate ?? policy?.taxRate;
+  const tax = chargeAtWithdraw ? roundMoney(gross * Number(taxRate || 0)) : 0;
   const net = roundMoney(Math.max(0, gross - platformFee - tax));
   return {
     gross,
@@ -234,6 +284,7 @@ function mapPolicy(policy) {
     requiresNoDispute: policy.requiresNoDispute,
     requiresKyc: policy.persona !== 'admin',
     sellerType: policy.sellerType || null,
+    ...(policy.taxMode ? { taxMode: policy.taxMode, taxBreakdown: policy.taxBreakdown || [], taxProfileIncomplete: !!policy.taxProfileIncomplete } : {}),
     ...(policy.persona === 'affiliate' ? { pitRule: policy.pitRule, pitCommitmentApproved: !!policy.pitCommitmentApproved } : {}),
   };
 }
@@ -261,6 +312,7 @@ module.exports = {
   VND_PER_USD,
   vndToUsd,
   policyFor,
+  sellerTaxSummary,
   detectPersonas,
   pickPrimary,
   resolvePayoutPersona,
