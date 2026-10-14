@@ -15,12 +15,16 @@ test('transfer content format and uniqueness', () => {
   assert.equal(randomNonce().length, 6);
 });
 
-test('USD -> VND conversion at 26500, rounded up to 1,000d', () => {
+test('USD -> VND conversion at 26500, exact (no rounding)', () => {
+  assert.deepEqual(convertAmount({ amount: 1, currency: 'USD' }, 26500), { amountUsd: 1, amountVnd: 26500, vndPerUsd: 26500 });
+  assert.deepEqual(convertAmount({ amount: 1.01, currency: 'USD' }, 26500), { amountUsd: 1.01, amountVnd: 26765, vndPerUsd: 26500 });
   assert.deepEqual(convertAmount({ amount: 10, currency: 'USD' }, 26500), { amountUsd: 10, amountVnd: 265000, vndPerUsd: 26500 });
-  assert.deepEqual(convertAmount({ amount: 1.5, currency: 'USD' }, 26500), { amountUsd: 1.51, amountVnd: 40000, vndPerUsd: 26500 });
+  assert.deepEqual(convertAmount({ amount: 1.5, currency: 'USD' }, 26500), { amountUsd: 1.5, amountVnd: 39750, vndPerUsd: 26500 });
 });
 
 test('VND -> USD conversion', () => {
+  assert.deepEqual(convertAmount({ amount: 26500, currency: 'VND' }, 26500), { amountUsd: 1, amountVnd: 26500, vndPerUsd: 26500 });
+  assert.deepEqual(convertAmount({ amount: 12345, currency: 'VND' }, 26500), { amountUsd: 0.47, amountVnd: 12345, vndPerUsd: 26500 });
   assert.deepEqual(convertAmount({ amount: 530000, currency: 'VND' }, 26500), { amountUsd: 20, amountVnd: 530000, vndPerUsd: 26500 });
   assert.deepEqual(convertAmount({ amount: 100000, currency: 'vnd' }, 26500), { amountUsd: 3.77, amountVnd: 100000, vndPerUsd: 26500 });
 });
