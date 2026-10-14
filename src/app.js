@@ -38,6 +38,7 @@ const nanoclawRoutes = require('./routes/nanoclaw');
 const spacebotRoutes = require('./routes/spacebot');
 const openwebuiRoutes = require('./routes/openwebui');
 const paperclipRoutes = require('./routes/paperclip');
+const agentConnectRoutes = require('./routes/agent-connect');
 const deploymentRoutes = require('./routes/deployments');
 const runpodRoutes = require('./routes/runpod');
 const mediaRoutes = require('./routes/media');
@@ -229,6 +230,7 @@ function createApp() {
   app.use('/v1/spacebot', spacebotRoutes);
   app.use('/v1/openwebui', openwebuiRoutes);
   app.use('/v1/paperclip', paperclipRoutes);
+  app.use('/v1/agent-connect', agentConnectRoutes);
   app.use('/v1/deployments', deploymentRoutes);
   app.use('/v1/playground', playgroundRoutes);
   app.use('/v1/agents', agentsRoutes);
