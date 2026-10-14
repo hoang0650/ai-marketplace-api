@@ -5,7 +5,7 @@ const { authenticate } = require('../middleware/auth');
 const { effectiveStatus } = require('../utils/moderation');
 const { assertActiveSubscription } = require('../finance/agent-subscription');
 const { issueCommandToken, verifyCommandToken, readCommandToken, RUNTIMES } = require('../utils/agent-command-token');
-const { approveOwnPairing, PairingError } = require('../services/openclaw-pairing');
+const { approveOwnPairing, listOwnPairings, PairingError } = require('../services/openclaw-pairing');
 const { issueRuntimeTicket } = require('../utils/runtime-sso-ticket');
 const { applyTemplate, buildSsoLaunchUrl } = require('./runtime-sso');
 
@@ -62,14 +62,14 @@ function runtimeParam(req, res) {
   return runtime;
 }
 
-/** Accepts the buyer's normal login (JWT) or a command token for exactly this runtime + action. */
-function userOrCommandToken(action) {
+/** Accepts the buyer's normal login (JWT) or a command token for exactly this runtime + one of `actions`. */
+function userOrCommandToken(actions) {
   return async (req, res, next) => {
     const runtime = runtimeParam(req, res);
     if (!runtime) return undefined;
     const token = readCommandToken(req);
     if (!token) return authenticate(req, res, next);
-    const claims = verifyCommandToken(token, { runtime, action });
+    const claims = verifyCommandToken(token, { runtime, action: actions });
     if (!claims) {
       return res.status(401).json({
         success: false,
@@ -92,8 +92,42 @@ function userOrCommandToken(action) {
   };
 }
 
-function q(value) {
+/** Placeholder the setup page replaces with the buyer's real pairing request id. */
+const REQUEST_ID_PLACEHOLDER = 'REQUEST_ID';
+
+function posixQuote(value) {
   return `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
+
+/** Double-quoted arg for Windows cmd.exe + curl.exe (MSVC argv rules: \" is a literal quote). */
+function cmdQuote(value) {
+  return `"${String(value).replace(/"/g, '\\"')}"`;
+}
+
+function psQuote(value) {
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+/**
+ * One HTTP call rendered for every shell buyers actually use. Single line each:
+ * cmd.exe has no `\` line continuation and no single quotes, and Windows
+ * PowerShell aliases `curl` to Invoke-WebRequest.
+ */
+function httpCommandVariants({ method, url, token, body }) {
+  const auth = `Authorization: AgentCommand ${token}`;
+  const json = body ? JSON.stringify(body) : '';
+  const posix = [`curl -fsS -X ${method} ${posixQuote(url)} -H ${posixQuote(auth)}`]
+    .concat(body ? [`-H 'Content-Type: application/json' -d ${posixQuote(json)}`] : [])
+    .join(' ');
+  const cmd = [`curl.exe -sS -X ${method} ${cmdQuote(url)} -H ${cmdQuote(auth)}`]
+    .concat(body ? [`-H "Content-Type: application/json" -d ${cmdQuote(json)}`] : [])
+    .join(' ');
+  const powershell = [
+    `Invoke-RestMethod -Method ${method} -Uri ${psQuote(url)} -Headers @{ Authorization = ${psQuote(`AgentCommand ${token}`)} }`,
+  ]
+    .concat(body ? [`-ContentType 'application/json' -Body ${psQuote(json)}`] : [])
+    .join(' ');
+  return { posix, cmd, powershell };
 }
 
 function buildCommands({ runtime, userId, ssh }) {
@@ -102,13 +136,34 @@ function buildCommands({ runtime, userId, ssh }) {
   const expiresAt = new Date(Date.now() + COMMAND_TTL_MS).toISOString();
   const commands = [];
   if (f.pairing) {
+    const listToken = issueCommandToken({ userId, runtime, action: 'pairing.list', ttlMs: COMMAND_TTL_MS });
+    if (listToken) {
+      const variants = httpCommandVariants({ method: 'GET', url: `${api}/v1/agent-connect/${runtime}/pairing/pending`, token: listToken });
+      commands.push({
+        id: 'pairing-list',
+        title: 'List your pending device requests',
+        description: 'Shows pairing requests opened from your own workspace, with their request ids.',
+        command: variants.posix,
+        variants,
+        scope: `${runtime}:${userId}:pairing.list`,
+        expiresAt,
+      });
+    }
     const token = issueCommandToken({ userId, runtime, action: 'pairing.approve', ttlMs: COMMAND_TTL_MS });
     if (token) {
+      const variants = httpCommandVariants({
+        method: 'POST',
+        url: `${api}/v1/agent-connect/${runtime}/pairing/approve`,
+        token,
+        body: { requestId: REQUEST_ID_PLACEHOLDER },
+      });
       commands.push({
         id: 'pairing-approve',
         title: 'Approve a device pairing request',
-        description: 'Approves only a pending request opened from your own workspace. Replace <REQUEST_ID>.',
-        command: `curl -fsS -X POST ${api}/v1/agent-connect/${runtime}/pairing/approve -H ${q(`Authorization: AgentCommand ${token}`)} -H 'Content-Type: application/json' -d '{"requestId":"<REQUEST_ID>"}'`,
+        description: `Approves only a pending request opened from your own workspace. Replace ${REQUEST_ID_PLACEHOLDER} with the id shown in the Control UI.`,
+        command: variants.posix,
+        variants,
+        placeholder: REQUEST_ID_PLACEHOLDER,
         scope: `${runtime}:${userId}:pairing.approve`,
         expiresAt,
       });
@@ -117,11 +172,13 @@ function buildCommands({ runtime, userId, ssh }) {
   if (f.sso) {
     const token = issueCommandToken({ userId, runtime, action: 'launch', ttlMs: COMMAND_TTL_MS });
     if (token) {
+      const variants = httpCommandVariants({ method: 'POST', url: `${api}/v1/agent-connect/${runtime}/launch`, token });
       commands.push({
         id: 'cli-launch',
         title: `Get a sign-in link for your ${f.label}`,
         description: 'Prints a one-time (2 minute) sign-in link for your own workspace.',
-        command: `curl -fsS -X POST ${api}/v1/agent-connect/${runtime}/launch -H ${q(`Authorization: AgentCommand ${token}`)}`,
+        command: variants.posix,
+        variants,
         scope: `${runtime}:${userId}:launch`,
         expiresAt,
       });
@@ -135,6 +192,7 @@ function buildCommands({ runtime, userId, ssh }) {
             title: 'SSH into your agent',
             description: 'Temporary login for your own agent only. Paste the password when asked.',
             command: ssh.command,
+            variants: { posix: ssh.command, cmd: ssh.command, powershell: ssh.command },
             scope: `${runtime}:${userId}:ssh`,
             expiresAt: new Date(ssh.expiresAt).toISOString(),
           }
@@ -175,7 +233,20 @@ router.get('/:runtime/commands', authenticate, async (req, res, next) => {
   }
 });
 
-router.post('/:runtime/pairing/approve', userOrCommandToken('pairing.approve'), async (req, res, next) => {
+router.get('/:runtime/pairing/pending', userOrCommandToken(['pairing.list', 'pairing.manage']), async (req, res, next) => {
+  try {
+    const runtime = String(req.params.runtime).toLowerCase();
+    if (!RUNTIME_FEATURES[runtime].pairing) return res.json({ success: true, pending: [] });
+    await assertActiveSubscription(req.user, runtime);
+    const pending = await listOwnPairings({ userId: String(req.user._id) });
+    res.set('Cache-Control', 'no-store');
+    return res.json({ success: true, pending });
+  } catch (err) {
+    return sendError(res, err, next);
+  }
+});
+
+router.post('/:runtime/pairing/approve', userOrCommandToken(['pairing.approve', 'pairing.manage']), async (req, res, next) => {
   try {
     const runtime = String(req.params.runtime).toLowerCase();
     if (!RUNTIME_FEATURES[runtime].pairing) {
@@ -192,7 +263,7 @@ router.post('/:runtime/pairing/approve', userOrCommandToken('pairing.approve'), 
   }
 });
 
-router.post('/:runtime/launch', userOrCommandToken('launch'), async (req, res, next) => {
+router.post('/:runtime/launch', userOrCommandToken(['launch']), async (req, res, next) => {
   try {
     const runtime = String(req.params.runtime).toLowerCase();
     const sso = RUNTIME_FEATURES[runtime].sso;
@@ -214,4 +285,5 @@ router.post('/:runtime/launch', userOrCommandToken('launch'), async (req, res, n
 
 module.exports = router;
 module.exports.buildCommands = buildCommands;
+module.exports.httpCommandVariants = httpCommandVariants;
 module.exports.RUNTIME_FEATURES = RUNTIME_FEATURES;

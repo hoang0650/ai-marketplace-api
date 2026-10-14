@@ -9,6 +9,20 @@ function parseUsername(username) {
   return m ? { agentId: PREFIX[m[1]], userId: m[2] } : null;
 }
 
+/**
+ * Env for the in-sandbox `openclaw` CLI: a token scoped to this buyer + agent +
+ * pairing.manage that expires with the SSH session. Never a gateway/admin token.
+ */
+function cliEnv(ident) {
+  if (!ident?.cli) return [];
+  return [
+    `AIMARKETS_API_URL=${ident.cli.apiUrl}`,
+    `AIMARKETS_AGENT=${ident.agentId}`,
+    `AIMARKETS_CMD_TOKEN=${ident.cli.token}`,
+    `AIMARKETS_SESSION_EXPIRES_AT=${ident.expiresAt}`,
+  ];
+}
+
 /** Simple per-IP failed-auth limiter. */
 class FailLimiter {
   constructor(windowMs, max) {
@@ -88,7 +102,7 @@ function handleClient(client, info, deps) {
           const containerId = await docker.ensureSandbox(ident, cfg.sandbox);
           current = await docker.exec(
             containerId,
-            { cmd: channelCommand(kind, command), tty, cols: pty?.cols, rows: pty?.rows, term: pty?.term },
+            { cmd: channelCommand(kind, command), tty, cols: pty?.cols, rows: pty?.rows, term: pty?.term, env: cliEnv(ident) },
             cfg.sandbox.uid
           );
           pipe(channel, current, tty, docker);
@@ -183,4 +197,4 @@ async function reapOnce({ api, docker, registry, log }) {
   }
 }
 
-module.exports = { parseUsername, FailLimiter, Registry, handleClient, reapOnce };
+module.exports = { cliEnv, parseUsername, FailLimiter, Registry, handleClient, reapOnce };

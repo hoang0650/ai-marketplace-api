@@ -89,7 +89,7 @@ class DockerClient {
     }
   }
 
-  async exec(containerId, { cmd, tty, cols, rows, term }, uid) {
+  async exec(containerId, { cmd, tty, cols, rows, term, env = [] }, uid) {
     const created = await this.request('POST', `/containers/${containerId}/exec`, {
       AttachStdin: true,
       AttachStdout: true,
@@ -97,7 +97,7 @@ class DockerClient {
       Tty: Boolean(tty),
       User: `${uid}:${uid}`,
       WorkingDir: '/workspace',
-      Env: [`TERM=${/^[\w.-]{1,32}$/.test(term || '') ? term : 'xterm-256color'}`],
+      Env: [`TERM=${/^[\w.-]{1,32}$/.test(term || '') ? term : 'xterm-256color'}`, ...env],
       Cmd: cmd,
       Privileged: false,
     });

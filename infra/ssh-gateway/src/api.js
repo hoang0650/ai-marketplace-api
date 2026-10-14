@@ -1,4 +1,6 @@
 /** Client for the AI Markets API internal SSH gateway endpoints. */
+const TOKEN_RE = /^amc1\.[A-Za-z0-9_-]{10,2048}\.[A-Za-z0-9_-]{20,128}$/;
+
 class ApiClient {
   constructor({ apiBaseUrl, apiSecret, fetchImpl = globalThis.fetch }) {
     this.base = apiBaseUrl;
@@ -23,7 +25,12 @@ class ApiClient {
       const body = await res.json();
       if (!body?.ok || !body.userId || !body.agentId || !body.expiresAt) return null;
       if (Date.parse(body.expiresAt) <= Date.now()) return null;
-      return { sessionId: body.sessionId, userId: body.userId, agentId: body.agentId, expiresAt: body.expiresAt };
+      const out = { sessionId: body.sessionId, userId: body.userId, agentId: body.agentId, expiresAt: body.expiresAt };
+      // Optional per-session CLI token (pairing.manage for this buyer only).
+      if (TOKEN_RE.test(String(body.commandToken || '')) && /^https:\/\/[\w.-]+(:\d+)?$/.test(String(body.apiUrl || ''))) {
+        out.cli = { token: body.commandToken, apiUrl: body.apiUrl };
+      }
+      return out;
     } catch {
       return null;
     }

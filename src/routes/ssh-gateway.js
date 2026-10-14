@@ -3,6 +3,24 @@ const crypto = require('crypto');
 const rateLimit = require('express-rate-limit');
 const SshSession = require('../models/SshSession');
 const { verifyGatewayLogin, listActiveSandboxSessions } = require('../services/ssh-sandbox');
+const { issueCommandToken } = require('../utils/agent-command-token');
+
+/** Agents whose sandbox gets an `openclaw devices ...` style CLI token. */
+const SANDBOX_CLI_AGENTS = new Set(['openclaw']);
+const API_HOST = () => String(process.env.AIMARKETS_API_HOST || 'https://api.aimarkets.vn').replace(/\/$/, '');
+
+/**
+ * Short-lived token handed into the buyer's own sandbox so its CLI can list and
+ * approve that buyer's own device pairings. Bound to (user, agent,
+ * pairing.manage) and expires with the SSH session. Never a gateway/admin token.
+ */
+function sandboxCliToken(result, now = Date.now()) {
+  if (!SANDBOX_CLI_AGENTS.has(result.agentId)) return null;
+  const ttlMs = Date.parse(result.expiresAt) - now;
+  if (!(ttlMs > 0)) return null;
+  const token = issueCommandToken({ userId: result.userId, runtime: result.agentId, action: 'pairing.manage', ttlMs, now });
+  return token ? { commandToken: token, apiUrl: API_HOST() } : null;
+}
 
 /**
  * Internal endpoints for the SSH sandbox gateway only. Guarded by a dedicated
@@ -43,7 +61,7 @@ function createRouter({ Model = SshSession } = {}) {
       const password = String(req.body?.password || '').slice(0, 256);
       const result = await verifyGatewayLogin({ SshSession: Model, username, password });
       if (!result) return res.status(401).json({ ok: false });
-      return res.json({ ok: true, ...result });
+      return res.json({ ok: true, ...result, ...(sandboxCliToken(result) || {}) });
     } catch (err) {
       return next(err);
     }
@@ -64,3 +82,4 @@ function createRouter({ Model = SshSession } = {}) {
 module.exports = createRouter();
 module.exports.createRouter = createRouter;
 module.exports.gatewaySecretOk = gatewaySecretOk;
+module.exports.sandboxCliToken = sandboxCliToken;

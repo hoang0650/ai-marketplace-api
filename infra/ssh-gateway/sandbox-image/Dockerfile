@@ -9,6 +9,7 @@ RUN apt-get update \
  && mkdir -p /workspace && chown 1000:1000 /workspace \
  && find / -xdev -perm /6000 -type f -exec chmod a-s {} + 2>/dev/null || true
 COPY motd /etc/motd
+COPY --chmod=0755 openclaw /usr/local/bin/openclaw
 RUN printf '[ -f /etc/motd ] && cat /etc/motd\nexport PATH="$HOME/.local/bin:$PATH"\nexport npm_config_prefix="$HOME/.npm-global"\nexport PATH="$HOME/.npm-global/bin:$PATH"\n' >> /etc/bash.bashrc
 USER 1000:1000
 WORKDIR /workspace
