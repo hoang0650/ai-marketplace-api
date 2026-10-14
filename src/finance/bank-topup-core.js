@@ -21,9 +21,10 @@ function makeTransferContent(userId, nonce = randomNonce()) {
 }
 
 /**
- * Convert the user's input to { amountUsd, amountVnd }.
- * VND is what the user actually transfers (integer, rounded up to 1,000đ);
- * USD credited = VND / rate rounded to cents.
+ * Convert the user's input to { amountUsd, amountVnd } with no rounding beyond
+ * the wallet's cent precision.
+ *  - USD input: amountUsd is exactly what the user entered (cents); amountVnd = amountUsd * rate.
+ *  - VND input: amountVnd is exactly what the user entered (integer đ); amountUsd = VND / rate (cents).
  */
 function convertAmount({ amount, currency = 'USD' }, vndPerUsd) {
   const rate = Number(vndPerUsd);
@@ -31,13 +32,17 @@ function convertAmount({ amount, currency = 'USD' }, vndPerUsd) {
   if (!Number.isFinite(rate) || rate <= 0) throw new Error('Invalid rate');
   if (!Number.isFinite(n) || n <= 0) return null;
   const cur = String(currency || 'USD').toUpperCase();
+  let amountUsd;
   let amountVnd;
-  if (cur === 'VND') amountVnd = Math.round(n);
-  else if (cur === 'USD') amountVnd = Math.round(n * rate);
-  else return null;
-  amountVnd = Math.ceil(amountVnd / 1000) * 1000;
-  const amountUsd = Math.round((amountVnd / rate) * 100) / 100;
-  if (amountUsd <= 0) return null;
+  if (cur === 'USD') {
+    amountUsd = Math.round(n * 100) / 100;
+    // Integer math on cents avoids float drift (e.g. 1.01 * 26500).
+    amountVnd = Math.round((Math.round(n * 100) * rate) / 100);
+  } else if (cur === 'VND') {
+    amountVnd = Math.round(n);
+    amountUsd = Math.round((amountVnd / rate) * 100) / 100;
+  } else return null;
+  if (amountUsd <= 0 || amountVnd <= 0) return null;
   return { amountUsd, amountVnd, vndPerUsd: rate };
 }
 
