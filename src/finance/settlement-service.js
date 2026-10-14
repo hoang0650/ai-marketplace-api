@@ -50,17 +50,28 @@ async function sellerAnnualRevenueVnd(sellerId, at = new Date()) {
   }
 }
 
+/**
+ * The seller's actual tax profile for settlement: the versioned SellerTaxProfile, else the seller type
+ * declared on SellerProfile, else null (engine default). Same resolution for checkout and usage.
+ */
+async function resolveSellerTaxProfile(sellerId, at = new Date()) {
+  if (!sellerId) return null;
+  const [taxProfile, sellerProfile] = await Promise.all([
+    currentSellerTaxProfile(sellerId, at).catch(() => null),
+    SellerProfile.findOne({ user: sellerId }).select('sellerType').lean().catch(() => null),
+  ]);
+  return taxProfile || (sellerProfile?.sellerType ? { sellerType: sellerProfile.sellerType, sellerId } : null);
+}
+
 async function settleSaleFromDb(input) {
   const sellerId = input.sellerId || input.seller?._id;
-  const [commissionRules, taxRules, taxProfile, sellerProfile, annual] = await Promise.all([
+  const [commissionRules, taxRules, sellerTaxProfile, annual] = await Promise.all([
     loadActiveCommissionRules(),
     loadActiveTaxRules(),
-    currentSellerTaxProfile(sellerId, input.transactionDate),
-    sellerId ? SellerProfile.findOne({ user: sellerId }).select('sellerType').lean().catch(() => null) : null,
+    // Seller type (mandatory at registration) comes from the tax profile, else the seller profile.
+    resolveSellerTaxProfile(sellerId, input.transactionDate),
     input.sellerAnnualRevenueVnd !== undefined ? input.sellerAnnualRevenueVnd : sellerAnnualRevenueVnd(sellerId, input.transactionDate),
   ]);
-  // Seller type (mandatory at registration) comes from the tax profile, else the seller profile.
-  const sellerTaxProfile = taxProfile || (sellerProfile?.sellerType ? { sellerType: sellerProfile.sellerType, sellerId } : null);
   return settleSale({
     ...input,
     commissionRules,
@@ -76,5 +87,6 @@ module.exports = {
   loadActiveTaxRules,
   loadActiveStoreFeeRules,
   currentSellerTaxProfile,
+  resolveSellerTaxProfile,
   sellerAnnualRevenueVnd,
 };

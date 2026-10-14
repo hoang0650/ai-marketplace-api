@@ -2,7 +2,7 @@ const { roundMoney } = require('./constants');
 const { normalizeSellerType } = require('./seller-types');
 const { taxConfig } = require('../config/tax');
 
-/** Seller types whose tax the platform withholds and pays on their behalf (NĐ 117/2025/NĐ-CP). */
+/** Seller types whose tax the platform withholds and pays on their behalf (NĐ 252/2026/NĐ-CP). */
 const WITHHELD_SELLER_TYPES = new Set(['INDIVIDUAL', 'FOREIGN_INDIVIDUAL']);
 /** Seller types that issue their own invoices / self-declare: no platform withholding. */
 const SELF_DECLARING_SELLER_TYPES = new Set(['HOUSEHOLD_BUSINESS', 'COMPANY', 'FOREIGN_COMPANY']);
@@ -97,7 +97,7 @@ function calculateSellerTax({
       pitAmount,
       withheldByPlatform: total > 0,
       rule,
-      legalBasis: 'NĐ 117/2025/NĐ-CP; Luật Thuế TNCN; TT 40/2021/TT-BTC',
+      legalBasis: 'NĐ 252/2026/NĐ-CP; Luật Thuế TNCN; TT 18/2026/TT-BTC',
     },
   };
 }
@@ -128,7 +128,7 @@ function publicTaxPolicy(config) {
     },
     householdBusiness: { withheldByPlatform: false, rate: 0 },
     company: { withheldByPlatform: false, rate: 0, platformIssuesVatInvoiceOnFee: true },
-    legalBasis: ['Nghị định 117/2025/NĐ-CP', 'Luật Thuế TNCN', 'Thông tư 40/2021/TT-BTC'],
+    legalBasis: ['Nghị định 252/2026/NĐ-CP', 'Luật Thuế TNCN', 'Thông tư 18/2026/TT-BTC'],
     legalReview: true,
   };
 }

@@ -2,10 +2,10 @@
  * Tax reporting (tax policy 2026-10).
  *
  * - Quarterly report (admin): revenue of all individual sellers and household businesses, the
- *   VAT/PIT the platform withheld for individuals (NĐ 117/2025/NĐ-CP), and PIT withheld from
+ *   VAT/PIT the platform withheld for individuals (NĐ 252/2026/NĐ-CP), and PIT withheld from
  *   affiliates - for submission on the tax authority portal in months 1, 4, 7 and 10.
  * - Year-end PIT withholding certificates (chứng từ khấu trừ thuế TNCN, Luật Thuế TNCN /
- *   Thông tư 40/2021/TT-BTC): per-person yearly income and PIT withheld.
+ *   Thông tư 18/2026/TT-BTC): per-person yearly income and PIT withheld.
  * Pure builders take plain rows so they can be unit-tested; loaders read MongoDB.
  */
 const { roundMoney } = require('./constants');
@@ -216,7 +216,7 @@ function renderQuarterlyReport(report, format = 'xlsx') {
     ['Báo cáo thuế quý', tag],
     ['Kỳ', `${report.from} → ${report.to}`],
     ['Hạn nộp (tháng)', `${report.filingMonth}/${report.filingYear}`],
-    ['Căn cứ', 'NĐ 117/2025/NĐ-CP; Luật Thuế TNCN; TT 40/2021/TT-BTC'],
+    ['Căn cứ', 'NĐ 252/2026/NĐ-CP; Luật Thuế TNCN; TT 18/2026/TT-BTC'],
   ];
   if (f === 'csv') {
     const rows = [...meta, [], ['NGƯỜI BÁN (cá nhân, hộ kinh doanh)'], ...sellerTable(report.sellers), [], ['AFFILIATE (thuế TNCN khấu trừ)'], ...affiliateTable(report.affiliates)];
@@ -355,7 +355,7 @@ async function buildPitCertificates({ year, affiliateId } = {}) {
       totalIncomeVnd: r.netRevenueVnd,
       totalPitWithheldVnd: r.pitWithheldVnd,
       totalVatWithheldVnd: r.vatWithheldVnd,
-      incomeType: 'Doanh thu kinh doanh của cá nhân trên sàn TMĐT (NĐ 117/2025/NĐ-CP)',
+      incomeType: 'Doanh thu kinh doanh của cá nhân trên sàn TMĐT (NĐ 252/2026/NĐ-CP)',
     }));
   return [...aff, ...sel];
 }
