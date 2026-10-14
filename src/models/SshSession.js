@@ -11,6 +11,13 @@ const sshSessionSchema = new mongoose.Schema(
     authMethod: { type: String, enum: ['password', 'key'], default: 'password' },
     /** Plain password shown once at generation; unset for key sessions. */
     password: { type: String, required: false },
+    /**
+     * scrypt hash of the password for isolated sandbox sessions (SSH gateway).
+     * The plaintext is returned once at generation and never stored.
+     */
+    passwordHash: { type: String, required: false, select: false },
+    /** True when the session logs in through the per-buyer sandbox gateway. */
+    isolated: { type: Boolean, default: false, index: true },
     /** OpenSSH private key (PEM) for key-based sessions; required when authMethod=key. */
     privateKey: { type: String, required: false },
     /** Public key pushed to the agent's `authorized_keys`. */

@@ -1,0 +1,3 @@
+AI Markets sandbox — this is your own isolated container.
+Your files live in /workspace and persist between sessions. /tmp is wiped.
+The session closes when your temporary credentials expire or are revoked.
