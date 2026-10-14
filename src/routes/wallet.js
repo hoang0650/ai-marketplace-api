@@ -360,4 +360,48 @@ router.post('/withdraw', authenticate, async (req, res, next) => {
   }
 });
 
+/**
+ * Seller ledger (Sổ cái): the authenticated user's own sales, usage revenue, fees, tax withheld,
+ * affiliate commission, refunds/clawbacks, withdrawals and adjustments - from stored snapshots.
+ * Query: from, to (YYYY-MM-DD), type (comma list). Running balance is computed over the full
+ * history before filtering, so filtered rows still show the true balance at that point.
+ */
+router.get('/seller-ledger', authenticate, async (req, res, next) => {
+  try {
+    const Order = require('../models/Order');
+    const UsageEvent = require('../models/UsageEvent');
+    const { buildSellerLedger, filterEntries } = require('../finance/seller-ledger');
+    const me = req.user._id;
+    const [orders, usage, txs, balance] = await Promise.all([
+      Order.find({ seller: me, status: { $in: ['paid', 'refunded', 'completed'] } })
+        .select('amount grossAmount currency commissionRate commissionAmount taxAmount taxPolicy storeFeeAmount paymentFeeAmount affiliateRate affiliateCommissionAmount sellerNetAmount sellerNet platformFee financialSnapshot ownershipType status disputeStatus payoutHoldUntil completedAt createdAt productName contractSnapshot.productName')
+        .sort({ createdAt: -1 })
+        .limit(5000)
+        .lean(),
+      UsageEvent.find({ seller: me, sellerNet: { $gt: 0 } })
+        .select('product cost platformFee sellerNet currency createdAt')
+        .sort({ createdAt: -1 })
+        .limit(20000)
+        .lean(),
+      WalletTx.find({ user: me, type: { $in: ['withdraw', 'debit', 'credit'] } })
+        .select('type amount currency note status payoutId reviewedBy createdAt')
+        .sort({ createdAt: -1 })
+        .limit(10000)
+        .lean(),
+      getAvailableBalance(me),
+    ]);
+    const ledger = buildSellerLedger({ orders, usage, txs, balance });
+    const entries = filterEntries(ledger.entries, req.query || {});
+    res.json({
+      summary: ledger.summary,
+      types: ledger.types,
+      holdHours: require('../utils/payout-hold').HOLD_HOURS,
+      total: entries.length,
+      entries: entries.slice(0, 2000).map(({ counts, ...e }) => ({ ...e, counted: counts })),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;
