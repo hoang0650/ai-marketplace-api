@@ -139,3 +139,54 @@ test('setup commands embed only per-user scoped tokens, never shared secrets', (
   assert.ok(buildCommands({ runtime: 'openclaw', userId: UID, ssh: null }).some((c) => c.id === 'pairing-approve'));
   assert.ok(buildCommands({ runtime: 'paperclip', userId: UID, ssh: null }).some((c) => c.id === 'cli-launch'));
 });
+test('pairing.manage tokens live as long as an SSH session and are accepted for list + approve only', () => {
+  const now = Date.now();
+  const t = issueCommandToken({ userId: UID, runtime: 'openclaw', action: 'pairing.manage', ttlMs: 60 * 60 * 1000, now });
+  const c = verifyCommandToken(t, { runtime: 'openclaw', action: ['pairing.list', 'pairing.manage'], now: now + 59 * 60 * 1000 });
+  assert.equal(c.uid, UID);
+  assert.equal(verifyCommandToken(t, { runtime: 'openclaw', action: ['launch'], now }), null);
+  assert.equal(verifyCommandToken(t, { runtime: 'hermes', action: ['pairing.manage'], now }), null);
+  const capped = issueCommandToken({ userId: UID, runtime: 'openclaw', action: 'pairing.manage', ttlMs: 24 * 3600e3, now });
+  assert.ok(verifyCommandToken(capped, { now }).exp - now <= 65 * 60 * 1000);
+});
+
+test('terminal commands: single-line cmd.exe, PowerShell and POSIX variants', () => {
+  const { buildCommands } = require('../src/routes/agent-connect');
+  const approve = buildCommands({ runtime: 'openclaw', userId: UID, ssh: null }).find((c) => c.id === 'pairing-approve');
+  const { cmd, powershell, posix } = approve.variants;
+  for (const v of [cmd, powershell, posix]) {
+    assert.equal(v.includes('\n'), false);
+    assert.equal(v.includes(' \\'), false);
+    assert.ok(v.includes('REQUEST_ID'));
+    assert.ok(v.includes('https://api.aimarkets.vn/v1/agent-connect/openclaw/pairing/approve'));
+  }
+  assert.equal(cmd.includes("'"), false, 'cmd.exe has no single-quote strings');
+  assert.match(cmd, /^curl\.exe /);
+  assert.ok(cmd.includes('-d "{\\"requestId\\":\\"REQUEST_ID\\"}"'));
+  assert.equal(/[<>|&]/.test(cmd), false, 'no cmd.exe metacharacters');
+  assert.match(powershell, /^Invoke-RestMethod /);
+  assert.ok(buildCommands({ runtime: 'openclaw', userId: UID, ssh: null }).some((c) => c.id === 'pairing-list'));
+});
+
+test('listOwnPairings returns only this buyer\'s requests', async () => {
+  const { listOwnPairings } = require('../src/services/openclaw-pairing');
+  const foreign = pending({ requestId: 'other-request-123', browserOrigin: `https://${OTHER}.openclaw.aimarkets.vn` });
+  const admin = pending({ requestId: 'admin-request-123', scopes: ['operator.admin'] });
+  const gw = fakeGateway([pending(), foreign, admin]);
+  const list = await listOwnPairings({ userId: UID, fetchImpl: gw.fetchImpl, env });
+  assert.deepEqual(list.map((p) => [p.requestId, p.approvable]), [[RID, true], ['admin-request-123', false]]);
+  assert.deepEqual(gw.calls.map((c) => c.method), ['device.pair.list']);
+});
+
+test('ssh gateway hands the sandbox a pairing.manage token for openclaw only, expiring with the session', () => {
+  const { sandboxCliToken } = require('../src/routes/ssh-gateway');
+  const now = Date.now();
+  const expiresAt = new Date(now + 45 * 60 * 1000).toISOString();
+  const r = sandboxCliToken({ userId: UID, agentId: 'openclaw', expiresAt }, now);
+  const c = verifyCommandToken(r.commandToken, { runtime: 'openclaw', action: 'pairing.manage', now });
+  assert.equal(c.uid, UID);
+  assert.ok(Math.abs(c.exp - Date.parse(expiresAt)) < 1000);
+  assert.equal(r.commandToken.includes('gateway-admin'), false);
+  assert.equal(sandboxCliToken({ userId: UID, agentId: 'hermes', expiresAt }, now), null);
+  assert.equal(sandboxCliToken({ userId: UID, agentId: 'openclaw', expiresAt: new Date(now - 1).toISOString() }, now), null);
+});

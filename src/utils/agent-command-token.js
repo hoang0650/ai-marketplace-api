@@ -12,9 +12,16 @@ const crypto = require('crypto');
  */
 const USER_ID_RE = /^[a-f0-9]{24}$/;
 const RUNTIMES = new Set(['openclaw', 'hermes', 'nanoclaw', 'spacebot', 'paperclip', 'openwebui']);
-const ACTIONS = new Set(['pairing.approve', 'launch']);
+const ACTIONS = new Set(['pairing.approve', 'pairing.list', 'pairing.manage', 'launch']);
 const DEFAULT_TTL_MS = 10 * 60 * 1000;
 const MAX_TTL_MS = 30 * 60 * 1000;
+// `pairing.manage` is injected into a buyer's SSH sandbox and lives as long as that
+// SSH session (60 min), so it gets a slightly longer cap than copy/paste commands.
+const ACTION_MAX_TTL_MS = { 'pairing.manage': 65 * 60 * 1000 };
+
+function maxTtlFor(action) {
+  return ACTION_MAX_TTL_MS[action] || MAX_TTL_MS;
+}
 
 function commandTokenSecret() {
   return String(
@@ -34,7 +41,7 @@ function issueCommandToken({ userId, runtime, action, ttlMs = DEFAULT_TTL_MS, no
   const uid = String(userId || '').trim().toLowerCase();
   const secret = commandTokenSecret();
   if (!USER_ID_RE.test(uid) || !RUNTIMES.has(runtime) || !ACTIONS.has(action) || !secret) return '';
-  const ttl = Math.max(30 * 1000, Math.min(MAX_TTL_MS, Number(ttlMs) || DEFAULT_TTL_MS));
+  const ttl = Math.max(30 * 1000, Math.min(maxTtlFor(action), Number(ttlMs) || DEFAULT_TTL_MS));
   const payload = Buffer.from(
     JSON.stringify({ v: 1, uid, rt: runtime, act: action, exp: now + ttl, jti: crypto.randomBytes(9).toString('base64url') }),
     'utf8'
@@ -45,6 +52,7 @@ function issueCommandToken({ userId, runtime, action, ttlMs = DEFAULT_TTL_MS, no
 /**
  * @returns {{ uid: string, rt: string, act: string, exp: number, jti: string } | null}
  * Null unless the token is authentic, unexpired AND matches the expected runtime/action.
+ * `action` may be a string or an array of accepted actions.
  */
 function verifyCommandToken(token, { runtime, action, now = Date.now() } = {}) {
   const secret = commandTokenSecret();
@@ -63,9 +71,13 @@ function verifyCommandToken(token, { runtime, action, now = Date.now() } = {}) {
     return null;
   }
   if (data?.v !== 1 || !USER_ID_RE.test(String(data.uid || ''))) return null;
-  if (!Number.isFinite(data.exp) || data.exp < now || data.exp > now + MAX_TTL_MS + 60 * 1000) return null;
+  if (!ACTIONS.has(data.act)) return null;
+  if (!Number.isFinite(data.exp) || data.exp < now || data.exp > now + maxTtlFor(data.act) + 60 * 1000) return null;
   if (runtime && data.rt !== runtime) return null;
-  if (action && data.act !== action) return null;
+  if (action) {
+    const accepted = Array.isArray(action) ? action : [action];
+    if (!accepted.includes(data.act)) return null;
+  }
   return data;
 }
 
