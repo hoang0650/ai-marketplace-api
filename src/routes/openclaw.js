@@ -278,6 +278,17 @@ router.post('/device-pairings/approve', authenticate, async (req, res, next) => 
  */
 router.post('/ssh/generate', authenticate, async (req, res, next) => {
   try {
+    // Nothing provisions a Linux/container user for these credentials yet, and the
+    // OpenClaw gateway is one shared container. Handing out a password for the host
+    // sshd would be a dead login at best and a shared/host account at worst, so fail
+    // closed until each buyer has an isolated sandbox with a provisioner behind it.
+    if (process.env.OPENCLAW_SSH_PER_USER_ISOLATION !== '1') {
+      return res.status(403).json({
+        success: false,
+        code: 'ssh_not_isolated',
+        message: 'SSH is disabled for OpenClaw until each buyer runs an isolated sandbox.',
+      });
+    }
     await assertActiveSubscription(req.user, 'openclaw');
     const agentId = String(req.body?.agentId || 'openclaw');
     const { host, port, username } = resolveSshTarget(req.user, req.body || {});
