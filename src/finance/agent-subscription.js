@@ -244,7 +244,12 @@ async function subscribeAgent(user, agentId, { now = new Date(), source = 'manua
             paidUntil: { $add: [{ $max: ['$paidUntil', now] }, fee.periodDays * DAY_MS] },
             startedAt: { $ifNull: ['$startedAt', now] },
             periods: { $add: [{ $ifNull: ['$periods', 0] }, 1] },
-            autoRenew: { $ifNull: ['$autoRenew', true] },
+            // A new manual rental after a refund starts with the default (auto-renew on) again.
+            autoRenew:
+              source === 'manual'
+                ? { $cond: [{ $ne: [{ $ifNull: ['$lastRefundedAt', null] }, null] }, true, { $ifNull: ['$autoRenew', true] }] }
+                : { $ifNull: ['$autoRenew', true] },
+            lastRefundedAt: source === 'manual' ? null : { $ifNull: ['$lastRefundedAt', null] },
             lastChargedAt: now,
             lastFeeVnd: fee.vnd,
             lastAmount: fee.amount,
@@ -347,6 +352,9 @@ async function refundFailedRental(user, agentId, walletTxId, { now = new Date(),
         $set: {
           paidUntil: { $subtract: ['$paidUntil', days * DAY_MS] },
           periods: { $max: [0, { $subtract: [{ $ifNull: ['$periods', 1] }, 1] }] },
+          // A refunded period must never be re-charged by the auto-renew worker.
+          autoRenew: false,
+          lastRefundedAt: now,
         },
       },
     ],

@@ -215,6 +215,9 @@ test('failed provisioning refunds the rental once and removes the period', async
   assert.equal(created[0].type, 'credit');
   assert.equal(created[0].amount, 7.5);
   assert.deepEqual(sub.mock.calls[0].arguments[1][0].$set.paidUntil, { $subtract: ['$paidUntil', 30 * DAY_MS] });
+  // The refunded period must not be picked up by the auto-renew worker again.
+  assert.equal(sub.mock.calls[0].arguments[1][0].$set.autoRenew, false);
+  assert.ok(sub.mock.calls[0].arguments[1][0].$set.lastRefundedAt instanceof Date);
 
   const again = await refundFailedRental(u, 'openclaw', String(txId));
   assert.equal(again.refunded, false);

@@ -10,6 +10,9 @@ const { getByokProvider, publicProviderList } = require('../utils/byok-providers
 const { apiBase } = require('../utils/training/bundle');
 const files = require('../utils/builder/files');
 const { buildMessages } = require('../utils/builder/prompts');
+
+const LOCAL_PROVIDER = 'local';
+const LOCAL_TEXT_MAX = 2_000_000;
 const llm = require('../utils/builder/llm');
 const { previewResponse } = require('../utils/builder/preview');
 
@@ -42,6 +45,7 @@ const MESSAGES = {
   PROVIDER_TIMEOUT: 'Provider phản hồi quá lâu, đã dừng.',
   MODEL_INVALID: 'Tên model không hợp lệ.',
   GENERATION_BUSY: 'Bạn đang có một lượt build khác chạy. Đợi xong rồi thử lại.',
+  OUTPUT_TOO_LARGE: 'Phản hồi của model quá lớn.',
   EMPTY_OUTPUT: 'Model không trả về file nào. Thử mô tả cụ thể hơn hoặc đổi model mạnh hơn.',
   FILE_PATH_INVALID: 'Đường dẫn file không hợp lệ cho loại project này.',
   FILE_TOO_LARGE: 'File quá lớn.',
@@ -319,9 +323,11 @@ router.patch(
     const body = req.body || {};
     if (body.name !== undefined) doc.name = cleanName(body.name);
     if (body.provider !== undefined) {
-      const spec = body.provider ? getByokProvider(body.provider) : null;
-      if (body.provider && !spec) throw httpError(400, 'PROVIDER_INVALID');
-      doc.provider = spec?.id || '';
+      // 'local' = an OpenAI-compatible endpoint on the user's own machine, called from the browser.
+      const isLocal = String(body.provider).trim().toLowerCase() === LOCAL_PROVIDER;
+      const spec = body.provider && !isLocal ? getByokProvider(body.provider) : null;
+      if (body.provider && !isLocal && !spec) throw httpError(400, 'PROVIDER_INVALID');
+      doc.provider = isLocal ? LOCAL_PROVIDER : spec?.id || '';
     }
     if (body.model !== undefined) doc.model = cleanModel(body.model);
     await doc.save();
@@ -538,6 +544,51 @@ router.post('/projects/:id/generate', async (req, res, next) => {
     running.delete(userId);
   }
 });
+
+// ---------- local provider (browser -> http://localhost OpenAI-compatible endpoint) ----------
+// The server cannot reach the user's localhost, so the browser calls the model itself.
+// These two routes only build the prompt and apply the reply; no key or local URL is ever sent here.
+
+function readLocalPrompt(body) {
+  const prompt = String(body.prompt || '').trim();
+  const previewError = String(body.previewError || '').trim().slice(0, 2000);
+  if (!prompt && !previewError) throw httpError(400, 'PROMPT_REQUIRED');
+  if (prompt.length > PROMPT_MAX) throw httpError(400, 'PROMPT_TOO_LONG');
+  return { prompt, previewError };
+}
+
+/** POST /v1/builder/projects/:id/local-prompt — body { prompt, previewError? } → { messages } */
+router.post(
+  '/projects/:id/local-prompt',
+  wrap(async (req, res) => {
+    const doc = await findOwned(req);
+    const { prompt, previewError } = readLocalPrompt(req.body || {});
+    const messages = buildMessages({ kind: doc.kind, files: doc.files, history: doc.messages, prompt, previewError });
+    res.json({ messages });
+  })
+);
+
+/** POST /v1/builder/projects/:id/local-apply — body { prompt, previewError?, text, model, finishReason? } */
+router.post(
+  '/projects/:id/local-apply',
+  wrap(async (req, res) => {
+    const body = req.body || {};
+    const { prompt, previewError } = readLocalPrompt(body);
+    const text = String(body.text || '');
+    if (!text.trim()) throw httpError(502, 'EMPTY_OUTPUT');
+    if (text.length > LOCAL_TEXT_MAX) throw httpError(413, 'OUTPUT_TOO_LARGE');
+    const model = cleanModel(body.model) || 'local';
+    const doc = await findOwned(req);
+    const outcome = applyGeneration(doc, { prompt, previewError, text, provider: LOCAL_PROVIDER, model });
+    await doc.save();
+    res.json({
+      project: publicProject(doc, true),
+      touched: outcome.touched,
+      rejected: outcome.rejected,
+      truncated: outcome.truncated || body.finishReason === 'length',
+    });
+  })
+);
 
 module.exports = router;
 module.exports.applyGeneration = applyGeneration;

@@ -149,3 +149,25 @@ test('admins are never billed or purged', async (t) => {
   assert.equal(await processSubscription(sub(), now, CFG), 'skip');
   assert.equal(calls.wallet.length, 0);
 });
+
+test('never auto-renews a plan whose last charge was refunded', async (t) => {
+  const calls = setup(t);
+  const doc = sub({
+    paidUntil: new Date(now.getTime() - 5 * 60 * 1000),
+    lastChargedAt: new Date(now.getTime() - 40 * 60 * 1000),
+    lastRefundedAt: new Date(now.getTime() - 10 * 60 * 1000),
+  });
+  const r = await processSubscription(doc, now, CFG);
+  assert.notEqual(r, 'renewed');
+  assert.equal(calls.wallet.length, 0);
+});
+
+test('a refund older than a newer manual charge does not block renewal', async (t) => {
+  const calls = setup(t);
+  const doc = sub({
+    lastRefundedAt: new Date(now.getTime() - 20 * DAY),
+    lastChargedAt: new Date(now.getTime() - 10 * DAY),
+  });
+  assert.equal(await processSubscription(doc, now, CFG), 'renewed');
+  assert.equal(calls.wallet.length, 1);
+});
