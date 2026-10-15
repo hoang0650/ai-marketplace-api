@@ -42,6 +42,17 @@ const eventSchema = new mongoose.Schema(
   { _id: false },
 );
 
+const messageSchema = new mongoose.Schema(
+  {
+    at: { type: Date, default: Date.now },
+    actor: { type: String, enum: ['buyer', 'seller', 'admin', 'system'], required: true },
+    author: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    body: { type: String, required: true, maxlength: 4000 },
+    link: { type: String, default: '', maxlength: 500 },
+  },
+  { _id: true },
+);
+
 const hireProjectSchema = new mongoose.Schema(
   {
     product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true, index: true },
@@ -67,6 +78,10 @@ const hireProjectSchema = new mongoose.Schema(
     terminationNote: { type: String, default: '', maxlength: 4000 },
     complaint: { type: mongoose.Schema.Types.ObjectId, ref: 'Complaint', default: null },
     events: { type: [eventSchema], default: [] },
+    /** Order workspace chat between buyer and seller. */
+    messages: { type: [messageSchema], default: [] },
+    /** 'package' = fixed-price professional service split into phases; 'quote' = legacy flow. */
+    origin: { type: String, enum: ['quote', 'package'], default: 'quote' },
   },
   { timestamps: true },
 );

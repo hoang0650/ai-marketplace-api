@@ -1,5 +1,6 @@
 const express = require('express');
 const Product = require('../models/Product');
+const { PROFESSIONAL_SERVICE_CATEGORIES } = require('../data/categories');
 const Order = require('../models/Order');
 const WalletTx = require('../models/WalletTx');
 const { notifyUser } = require('../utils/notify');
@@ -85,8 +86,14 @@ router.post('/checkout', authenticate, async (req, res, next) => {
 
     const product = await Product.findById(productId);
     if (!product) return res.status(404).json({ message: 'Product not found' });
-    // Professional services (hire-* categories) are fixed packages and check out from the
-    // wallet like every other product — the quote/milestone flow is discontinued.
+    // Professional services are paid per phase (Đề án / Quy chế): never one-shot checkout.
+    if (PROFESSIONAL_SERVICE_CATEGORIES.includes(String(product.category))) {
+      return res.status(409).json({
+        code: 'SERVICE_USE_MILESTONES',
+        message: 'Dịch vụ chuyên môn được thanh toán theo từng giai đoạn sau khi bạn duyệt. Hãy bắt đầu dự án từ trang sản phẩm.',
+        next: { method: 'POST', path: '/v1/hire/packages', productId: String(product._id) },
+      });
+    }
 
     const ownershipType = product.ownershipType || 'THIRD_PARTY_SELLER';
     const licensePick = isLicenseCategory(product.category)
