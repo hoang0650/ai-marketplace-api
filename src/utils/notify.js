@@ -36,6 +36,7 @@ const COPY = {
   'complaint.workAdmin': ['Khiếu nại Work', '{kind} · {job}'],
   'complaint.new': ['Khiếu nại mới', '{text}'],
   'complaint.newAdmin': ['Khiếu nại mới', '{kind}'],
+  'complaint.message': ['{caseRef}: tin nhắn mới trong khiếu nại', 'Có tin nhắn hoặc tệp mới trong hồ sơ khiếu nại.'],
   'complaint.sellerReplied': ['{caseRef}: seller đã phản hồi', 'Seller đã gửi phản hồi. Sàn đang xem xét bằng chứng.'],
   'complaint.sellerRepliedAdmin': ['{caseRef}: seller đã phản hồi', 'Đã nhận phản hồi của seller. Hồ sơ chuyển sang xem xét bằng chứng.'],
   'complaint.appeal': ['{caseRef}: kháng nghị', '{name} yêu cầu xem xét lại nội bộ.'],
@@ -82,6 +83,7 @@ const COPY = {
 const EMAIL_COPY_EN = {
   'complaint.received': ['{caseRef}: complaint received', 'We received your complaint and will handle it per our resolution process. Track its status on the complaints page.'],
   'complaint.new': ['New complaint about your product', '{text}'],
+  'complaint.message': ['{caseRef}: new message on complaint', 'There is a new message or file on the complaint case.'],
   'complaint.sellerReplied': ['{caseRef}: seller responded', 'The seller responded. We are reviewing the evidence.'],
   'complaint.askSeller': ['{caseRef}: response requested', 'AI Markets asks you to respond to this complaint.'],
   'complaint.decision': ['{caseRef}: decision', 'Decision: {decision}. {detail}'],

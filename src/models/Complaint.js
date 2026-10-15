@@ -32,6 +32,28 @@ const eventSchema = new mongoose.Schema(
   { _id: false },
 );
 
+const complaintFileSchema = new mongoose.Schema(
+  {
+    attachment: { type: mongoose.Schema.Types.ObjectId, ref: 'Attachment', required: true },
+    name: { type: String, default: '' },
+    mime: { type: String, default: '' },
+    size: { type: Number, default: 0 },
+    kind: { type: String, enum: ['image', 'file'], default: 'file' },
+  },
+  { _id: false },
+);
+
+const complaintMessageSchema = new mongoose.Schema(
+  {
+    author: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    role: { type: String, enum: ['complainant', 'seller', 'admin'], required: true },
+    body: { type: String, default: '', maxlength: 4000 },
+    attachments: { type: [complaintFileSchema], default: [] },
+    at: { type: Date, default: Date.now },
+  },
+  { _id: true },
+);
+
 const complaintSchema = new mongoose.Schema(
   {
     caseRef: { type: String, default: '', index: true },
@@ -63,6 +85,7 @@ const complaintSchema = new mongoose.Schema(
     openedOrderDispute: { type: Boolean, default: false },
     closedAt: { type: Date, default: null },
     events: { type: [eventSchema], default: [] },
+    messages: { type: [complaintMessageSchema], default: [] },
   },
   { timestamps: { createdAt: true, updatedAt: true } },
 );

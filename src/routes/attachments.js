@@ -4,6 +4,7 @@ const mongoose = require('mongoose');
 const Attachment = require('../models/Attachment');
 const Conversation = require('../models/Conversation');
 const HireProject = require('../models/HireProject');
+const Complaint = require('../models/Complaint');
 const { authenticate } = require('../middleware/auth');
 const { isMinioEnabled, putAttachmentObject, getAttachmentStream } = require('../config/minio');
 const { MAX_BYTES, inspectFile, verifySig, publicAttachment } = require('../utils/attachments');
@@ -20,6 +21,13 @@ async function canAccess(scope, scopeId, user, { write = false } = {}) {
   let doc = null;
   if (scope === 'chat') doc = await Conversation.findById(scopeId).select('buyer seller').lean();
   else if (scope === 'hire') doc = await HireProject.findById(scopeId).select('buyer seller status').lean();
+  else if (scope === 'complaint') {
+    const c = await Complaint.findById(scopeId).select('complainant seller status').lean();
+    if (!c) return false;
+    if ([String(c.complainant), String(c.seller || '')].includes(me)) return !write || c.status !== 'closed';
+    // Admins handle complaints, so they may also attach files to the case thread.
+    return user.role === 'admin' && (!write || c.status !== 'closed');
+  }
   if (!doc) return false;
   if ([String(doc.buyer), String(doc.seller)].includes(me)) return true;
   return !write && user.role === 'admin';
@@ -34,7 +42,7 @@ router.post('/', authenticate, (req, res, next) => {
       if (!isMinioEnabled()) return fail(res, 503, 'MINIO_NOT_CONFIGURED');
       const scope = String(req.body?.scope || '');
       const scopeId = String(req.body?.scopeId || '');
-      if (!['chat', 'hire'].includes(scope)) return fail(res, 400, 'SCOPE_INVALID');
+      if (!['chat', 'hire', 'complaint'].includes(scope)) return fail(res, 400, 'SCOPE_INVALID');
       if (!(await canAccess(scope, scopeId, req.user, { write: true }))) return fail(res, 403, 'ATTACHMENT_FORBIDDEN');
       if (!req.file) return fail(res, 400, 'NO_FILE');
       const recent = await Attachment.countDocuments({ owner: req.user._id, createdAt: { $gte: new Date(Date.now() - 3600e3) } });

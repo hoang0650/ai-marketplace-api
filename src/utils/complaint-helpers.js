@@ -40,6 +40,14 @@ function mapComplaint(doc) {
     closedAt: o.closedAt ? new Date(o.closedAt).toISOString() : null,
     /** Quy chế 2.1 Mục XIII deadlines (ISO, business days skip Sat/Sun VN time). */
     deadlines: complaintDeadlines(o),
+    messages: (o.messages || []).map((m) => ({
+      id: String(m._id || ''),
+      authorId: String(m.author || ''),
+      role: m.role,
+      body: m.body || '',
+      attachments: require('../routes/attachments').mapEmbedded(m.attachments),
+      at: m.at ? new Date(m.at).toISOString() : null,
+    })),
     events: (o.events || []).map((e) => ({
       at: e.at ? new Date(e.at).toISOString() : new Date().toISOString(),
       actorRole: e.actorRole || '',
