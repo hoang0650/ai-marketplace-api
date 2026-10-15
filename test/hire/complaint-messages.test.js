@@ -14,3 +14,9 @@ test('complaint messages store attachments and map with signed links', () => {
   assert.match(m.attachments[0].url, /sig=/);
   assert.throws(() => { const bad = new Complaint({ complainant: c.complainant, kind: 'buyer_seller' }); bad.messages.push({ author: c.complainant, role: 'hacker' }); const e = bad.validateSync(); if (e) throw e; });
 });
+
+test('attachments accept the complaint scope', () => {
+  const Attachment = require('../../src/models/Attachment');
+  const a = new Attachment({ owner: new mongoose.Types.ObjectId(), scope: 'complaint', scopeId: new mongoose.Types.ObjectId(), objectName: 'x', name: 'a.png', mime: 'image/png', size: 1, kind: 'image' });
+  assert.equal(a.validateSync()?.errors?.scope, undefined);
+});
