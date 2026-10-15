@@ -71,6 +71,7 @@ test('Expo QR encodes the Snack exp:// link of an app template', async (t) => {
   t.mock.method(expoSnack, 'ensureSnack', async (key) => { seen.push(key); return { enabled: true, available: true, url: 'exp://u.expo.dev/x?snack=abc' }; });
   const json = await callLayer(expoLayer(/^\/([a-f0-9]{24})\/expo$/), ID);
   assert.equal(json.json.url, 'exp://u.expo.dev/x?snack=abc');
+  assert.match(json.json.landingUrl, new RegExp(`/expo/${ID}$`));
   const svg = await callLayer(expoLayer(/^\/([a-f0-9]{24})\/expo-qr\.svg$/), ID);
   assert.equal(svg.status, 200);
   assert.match(svg.body, /^<svg/);
