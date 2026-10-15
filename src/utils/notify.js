@@ -62,6 +62,8 @@ const COPY = {
   'hire.completed': ['Dự án hoàn tất', 'Tất cả giai đoạn của {product} đã được nghiệm thu.'],
   'device.linked': ['Thiết bị mới đã kết nối', '{device} vừa tiếp tục phiên "{target}" trên tài khoản của bạn. Nếu không phải bạn, hãy thu hồi trong Thiết bị đã kết nối.'],
   'hire.terminated': ['Dự án bị chấm dứt', '{buyer} đã chấm dứt {product}. {reason}'],
+  'hire.message': ['Tin nhắn dự án mới', '{from}: tin nhắn mới trong dự án {product}.'],
+  'hire.complaint': ['Khiếu nại dự án', '{buyer} đã gửi khiếu nại về dự án {product}. Khoản tạm giữ liên quan được giữ đến khi có kết quả.'],
 };
 
 /** English copy for keys mirrored to email (vi users get COPY, others get this). */
