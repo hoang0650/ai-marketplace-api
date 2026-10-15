@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 const attachmentSchema = new mongoose.Schema(
   {
     owner: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-    scope: { type: String, enum: ['chat', 'hire'], required: true },
+    scope: { type: String, enum: ['chat', 'hire', 'complaint'], required: true },
     scopeId: { type: mongoose.Schema.Types.ObjectId, required: true, index: true },
     objectName: { type: String, required: true },
     name: { type: String, required: true, maxlength: 200 },
