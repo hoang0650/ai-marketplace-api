@@ -141,7 +141,7 @@ router.get(/^\/([a-f0-9]{24})\/demo-qr\.svg$/, async (req, res, next) => {
   try {
     const id = req.params[0];
     const product = await Product.findById(id).select('name category moderationStatus suspendedUntil published').lean();
-    const template = product ? await BuilderTemplate.findOne({ product: id }).select('demoEnabled kind').lean() : null;
+    const template = product ? await BuilderTemplate.findOne({ product: id }).select('demoEnabled kind files.path').lean() : null;
     if (!product || !tpl.isTemplateCategory(product.category) || !tpl.demoVisible(product, template)) {
       return res.status(404).type('text/plain').send('Demo not found');
     }
