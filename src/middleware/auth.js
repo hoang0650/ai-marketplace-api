@@ -148,6 +148,7 @@ function publicUser(user) {
     preferences: {
       personalizeContent: !!u.preferences?.personalizeContent,
       personalizeAds: !!u.preferences?.personalizeAds,
+      emailLoginAlerts: u.preferences?.emailLoginAlerts !== false,
     },
     createdAt: user.createdAt ? new Date(user.createdAt).toISOString() : new Date().toISOString(),
   };

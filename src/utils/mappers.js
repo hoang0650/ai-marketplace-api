@@ -21,6 +21,7 @@ function mapProduct(doc, { includeSecrets = false } = {}) {
     category: o.category,
     productType: o.productType || undefined,
     productKind: o.productKind || 'DIGITAL',
+    productKindDefaultedAt: o.productKindDefaultedAt || null,
     ownershipType: o.ownershipType || 'THIRD_PARTY_SELLER',
     sellerId: o.creator ? String(o.creator._id || o.creator) : '',
     sellerSlug: o.creatorSlug,
