@@ -28,6 +28,8 @@ const schema = new mongoose.Schema(
     /** Raw only: train straight from a Hugging Face dataset (owner/name). */
     hfDataset: { type: String, default: '', maxlength: 200 },
     files: { type: [fileSchema], default: [] },
+    /** Imported from a marketplace dataset the user holds a license for (usable only while the license is active). */
+    licensedProduct: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', default: null, index: true },
   },
   { timestamps: true }
 );

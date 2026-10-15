@@ -9,6 +9,7 @@ const svc = require('../utils/gpu-rental/service');
 const { gpuRentalConfig } = require('../utils/gpu-rental/config');
 const minio = require('../config/minio');
 const catalog = require('../utils/training/catalog');
+const { findActiveLicense } = require('../utils/content-drm');
 const bundle = require('../utils/training/bundle');
 const { notifyUser } = require('../utils/notify');
 const { publicProvider, scrubVendor } = require('../utils/white-label');
@@ -23,6 +24,7 @@ const ARTIFACT_PUT_TTL_S = 6 * 3600;
 const ARTIFACT_GET_TTL_S = 3600;
 
 const MESSAGES = {
+  LICENSE_REQUIRED: 'License của dataset này đã hết hạn. Gia hạn để tiếp tục train.',
   MINIO_NOT_CONFIGURED: 'Kho lưu trữ dữ liệu train chưa được cấu hình.',
   DATASET_NOT_FOUND: 'Không tìm thấy bộ dữ liệu.',
   TRAINING_SOURCE_INVALID: 'Loại dữ liệu không hợp lệ (raw, video hoặc audio).',
@@ -145,6 +147,10 @@ async function loadDataset(user, datasetId) {
   if (!mongoose.isValidObjectId(id)) throw catalog.httpError(404, 'DATASET_NOT_FOUND');
   const doc = await TrainingDataset.findOne({ _id: id, owner: user._id });
   if (!doc) throw catalog.httpError(404, 'DATASET_NOT_FOUND');
+  // Imported from a marketplace license: train only while that license is still active.
+  if (doc.licensedProduct && !(await findActiveLicense({ buyerId: user._id, productId: doc.licensedProduct }))) {
+    throw catalog.httpError(402, 'LICENSE_REQUIRED');
+  }
   return doc;
 }
 
