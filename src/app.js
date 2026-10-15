@@ -225,6 +225,7 @@ function createApp() {
   app.use('/v1/usage', usageRoutes);
   app.use('/v1/dashboard', dashboardRoutes);
   app.use('/v1/notifications', notificationRoutes);
+  app.use('/v1/handoff', require('./routes/handoff'));
   app.use('/v1/affiliate', affiliateRoutes);
   app.use('/v1/billing', billingRoutes);
   app.use('/v1/admin/agent-purges', agentPurgesAdminRoutes);

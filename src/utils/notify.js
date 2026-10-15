@@ -60,6 +60,7 @@ const COPY = {
   'hire.revision': ['Khách yêu cầu chỉnh sửa', 'Giai đoạn {phase} của {product} cần chỉnh sửa.'],
   'hire.approved': ['Giai đoạn đã nghiệm thu', 'Giai đoạn {phase} của {product} đã nghiệm thu: {amount} {currency} được ghi có, tạm giữ 48 giờ.'],
   'hire.completed': ['Dự án hoàn tất', 'Tất cả giai đoạn của {product} đã được nghiệm thu.'],
+  'device.linked': ['Thiết bị mới đã kết nối', '{device} vừa tiếp tục phiên "{target}" trên tài khoản của bạn. Nếu không phải bạn, hãy thu hồi trong Thiết bị đã kết nối.'],
   'hire.terminated': ['Dự án bị chấm dứt', '{buyer} đã chấm dứt {product}. {reason}'],
 };
 
@@ -76,6 +77,7 @@ const EMAIL_COPY_EN = {
   'dispute.refundBuyer': ['Refund completed', '{amount} {currency} for {product} has been refunded to your AI Markets wallet.'],
   'dispute.refundSeller': ['Dispute: buyer refunded', 'The payable of {amount} {currency} for {product} was reversed (commission/tax adjusted on the ledger).'],
   'agent.rentRefunded': ['Agent rental refunded', '{brand}: {price} has been refunded to your wallet.'],
+  'device.linked': ['New device connected', '{device} just continued "{target}" on your account. If this wasn\'t you, revoke it under Connected devices.'],
   'order.refunded': ['Order refunded', '{amount} {currency} for {product} has been refunded to your AI Markets wallet.'],
 };
 const EMAIL_KEYS = new Set(Object.keys(EMAIL_COPY_EN));
