@@ -184,6 +184,8 @@ function createApp() {
   app.use('/v1/auth/login', authLimiter);
   app.use('/v1/auth/register', authLimiter);
   app.use('/v1/auth/password', authLimiter);
+  app.use('/v1/auth/forgot-password', authLimiter);
+  app.use('/v1/auth/reset-password', authLimiter);
   app.use('/v1/auth/google/start', authLimiter);
   app.use('/v1/auth/google/login', authLimiter);
   app.use('/v1/auth/refresh-token', refreshLimiter);

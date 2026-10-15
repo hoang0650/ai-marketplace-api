@@ -19,6 +19,16 @@ const {
 } = require('../config/googleAuth');
 const { liftExpired, effectiveStatus, denyMessage } = require('../utils/moderation');
 const { ROLE, SIGNUP_ROLES, isSignupRole } = require('../utils/roles');
+const crypto = require('crypto');
+const { sendTransactional, verifyUnsubscribeToken } = require('../email/send');
+const { siteUrl } = require('../email/templates');
+
+const RESET_TTL_MIN = 30;
+const sha256 = (v) => crypto.createHash('sha256').update(String(v)).digest('hex');
+
+function loginNotice(req, user) {
+  sendTransactional(user, 'loginNotice', { when: new Date(), ip: req.ip, device: req.get('user-agent') || '' });
+}
 
 const ROLE_LABELS = {
   [ROLE.BUYER]: 'Người mua',
@@ -192,6 +202,7 @@ router.post('/register', async (req, res, next) => {
     }
 
     const session = await attachAuthSession(res, user);
+    sendTransactional(user, 'welcome', {});
     return res.status(201).json(session);
   } catch (err) {
     next(err);
@@ -224,11 +235,89 @@ router.post('/login', async (req, res, next) => {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
     await assertAccountActive(user);
-    return res.json(await attachAuthSession(res, user));
+    const session = await attachAuthSession(res, user);
+    loginNotice(req, user);
+    return res.json(session);
   } catch (err) {
     next(err);
   }
 });
+
+/**
+ * Forgot password: always 200 (no account enumeration). Emails a single-use 30-min link
+ * to /reset-password?token=... when the account exists and email is configured.
+ */
+router.post('/forgot-password', async (req, res, next) => {
+  try {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const generic = { ok: true, message: 'Nếu email tồn tại, liên kết đặt lại mật khẩu đã được gửi.' };
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.json(generic);
+    const user = await User.findOne({ email });
+    if (!user || effectiveStatus(user) !== 'active') return res.json(generic);
+    const token = crypto.randomBytes(32).toString('base64url');
+    await User.updateOne(
+      { _id: user._id },
+      { $set: { passwordResetTokenHash: sha256(token), passwordResetExpires: new Date(Date.now() + RESET_TTL_MIN * 60000) } },
+    );
+    sendTransactional(user, 'passwordReset', {
+      resetUrl: siteUrl(`/reset-password?token=${encodeURIComponent(token)}`),
+      minutes: RESET_TTL_MIN,
+    });
+    return res.json(generic);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Complete a forgot-password reset; revokes every session. */
+router.post('/reset-password', async (req, res, next) => {
+  try {
+    const token = String(req.body?.token || '');
+    const newPassword = String(req.body?.newPassword || req.body?.password || '');
+    if (newPassword.length < 8 || newPassword.length > 128) {
+      return res.status(400).json({ message: 'Password must be 8-128 characters', code: 'PASSWORD_LENGTH' });
+    }
+    if (req.body?.confirmPassword !== undefined && String(req.body.confirmPassword) !== newPassword) {
+      return res.status(400).json({ message: 'Mật khẩu xác nhận không khớp', code: 'PASSWORD_MISMATCH' });
+    }
+    if (!token) return res.status(400).json({ message: 'Liên kết không hợp lệ hoặc đã hết hạn', code: 'RESET_INVALID' });
+    const user = await User.findOne({
+      passwordResetTokenHash: sha256(token),
+      passwordResetExpires: { $gt: new Date() },
+    }).select('+passwordResetTokenHash +passwordResetExpires');
+    if (!user) return res.status(400).json({ message: 'Liên kết không hợp lệ hoặc đã hết hạn', code: 'RESET_INVALID' });
+    user.passwordHash = await bcrypt.hash(newPassword, 12);
+    user.passwordChangedAt = new Date();
+    user.tokenVersion = (Number(user.tokenVersion) || 0) + 1;
+    user.passwordResetTokenHash = '';
+    user.passwordResetExpires = null;
+    await user.save();
+    await invalidateAuthUserCache(user._id);
+    sendTransactional(user, 'passwordChanged', { when: user.passwordChangedAt });
+    return res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** One-click unsubscribe from non-critical emails (login notices). GET for mail clients, POST for List-Unsubscribe. */
+async function unsubscribe(req, res, next) {
+  try {
+    const claims = verifyUnsubscribeToken(req.query?.token || req.body?.token);
+    if (!claims) return res.status(400).type('html').send('<p>Liên kết không hợp lệ hoặc đã hết hạn. / Invalid or expired link.</p>');
+    await User.updateOne({ _id: claims.userId }, { $set: { [`preferences.${claims.pref}`]: false } });
+    await invalidateAuthUserCache(claims.userId).catch(() => {});
+    return res
+      .type('html')
+      .send(
+        '<!doctype html><meta charset="utf-8"><title>AI Markets</title><body style="font-family:sans-serif;padding:40px;text-align:center"><h2>AI Markets</h2><p>Đã tắt email thông báo đăng nhập. Bạn có thể bật lại trong Cài đặt.</p><p style="color:#666">Sign-in notice emails turned off. Re-enable them in Settings.</p></body>',
+      );
+  } catch (err) {
+    next(err);
+  }
+}
+router.get('/email/unsubscribe', unsubscribe);
+router.post('/email/unsubscribe', unsubscribe);
 
 router.get('/google/config', (_req, res) => {
   const clientId = getGoogleClientId();
@@ -347,6 +436,7 @@ router.get('/google/callback', async (req, res, next) => {
     const user = await findOrCreateGoogleUser(profile);
     await assertAccountActive(user);
     const session = await attachAuthSession(res, user);
+    loginNotice(req, user);
     if (mobile) {
       const q = new URLSearchParams({
         token: session.token,
@@ -396,7 +486,9 @@ router.post('/google/login', async (req, res, next) => {
 
     const user = await findOrCreateGoogleUser(profile);
     await assertAccountActive(user);
-    return res.json(await attachAuthSession(res, user));
+    const session = await attachAuthSession(res, user);
+    loginNotice(req, user);
+    return res.json(session);
   } catch (err) {
     if (err.statusCode) {
       return res.status(err.statusCode).json({
@@ -583,6 +675,7 @@ router.post('/password', authenticate, async (req, res, next) => {
     user.tokenVersion = (Number(user.tokenVersion) || 0) + 1;
     await user.save();
     await invalidateAuthUserCache(user._id);
+    sendTransactional(user, 'passwordChanged', { when: user.passwordChangedAt });
     return res.json(await attachAuthSession(res, user, { ip: req.ip }));
   } catch (err) {
     next(err);

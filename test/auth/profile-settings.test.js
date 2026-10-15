@@ -46,7 +46,9 @@ test('sanitizePreferences coerces booleans and keeps untouched keys', () => {
   assert.deepEqual(sanitizePreferences({ personalizeAds: 1 }, { personalizeContent: true }), {
     personalizeContent: true,
     personalizeAds: true,
+    emailLoginAlerts: true,
   });
+  assert.equal(sanitizePreferences({ emailLoginAlerts: 0 }, {}).emailLoginAlerts, false);
 });
 
 test('accountActivity lists known events newest first', () => {

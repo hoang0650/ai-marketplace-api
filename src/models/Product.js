@@ -140,6 +140,13 @@ const productSchema = new mongoose.Schema(
     publishedAt: { type: Date, default: Date.now },
     productType: { type: String, default: 'MODEL', index: true },
     taxCategory: { type: String, default: '', trim: true, uppercase: true, index: true },
+    /**
+     * Required seller declaration: DIGITAL (sản phẩm số / dịch vụ) or PHYSICAL (hàng hóa vật lý).
+     * Drives the withheld tax rate for individual sellers (NĐ 252/2026, TT 18/2026): digital 5% GTGT + 2% TNCN,
+     * goods 1% GTGT + 0.5% TNCN. Legacy rows are defaulted to DIGITAL by ensureProductKinds().
+     */
+    productKind: { type: String, enum: ['DIGITAL', 'PHYSICAL', ''], default: '', index: true },
+    productKindDefaultedAt: { type: Date, default: null },
     /** @deprecated Prefer infraProvider — kept for backward compatibility with catalog seeds. */
     provider: { type: String, default: '', trim: true, index: true },
     published: { type: Boolean, default: true, index: true },

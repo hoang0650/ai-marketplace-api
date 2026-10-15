@@ -52,9 +52,14 @@ const CATEGORY_MAP = {
 };
 
 function taxCategoryFromProduct(product = {}) {
-  const explicit = String(product.taxCategory || '').toUpperCase();
-  if (TAX_CATEGORIES.includes(explicit)) return explicit;
+  // The seller's goods/digital declaration wins: it decides the 1.5% vs 7% individual rate.
   if (String(product.productKind || '').toUpperCase() === 'PHYSICAL') return 'PHYSICAL_GOODS';
+  const explicit = String(product.taxCategory || '').toUpperCase();
+  if (TAX_CATEGORIES.includes(explicit)) {
+    // A digital declaration never lands in the goods bucket.
+    if (explicit === 'PHYSICAL_GOODS' && String(product.productKind || '').toUpperCase() === 'DIGITAL') return 'DIGITAL_GOODS';
+    return explicit;
+  }
   const pt = String(product.productType || '').toUpperCase();
   if (PRODUCT_TYPE_MAP[pt]) return PRODUCT_TYPE_MAP[pt];
   if (CATEGORY_MAP[product.category]) return CATEGORY_MAP[product.category];

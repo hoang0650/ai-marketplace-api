@@ -10,6 +10,7 @@ const { ensureComputeTestProducts } = require('./utils/ensure-compute-products')
 const { ensureLegalDocuments } = require('./utils/ensure-legal-documents');
 const { ensureCommissionRules } = require('./utils/ensure-commission-rules');
 const { ensureTaxRules } = require('./utils/ensure-tax-rules');
+const { ensureProductKinds } = require('./utils/ensure-product-kinds');
 const { syncSalesCountsFromOrders } = require('./utils/sales');
 const { attachTerminalGateway } = require('./terminal/gateway');
 const { attachGameStreamProxy } = require('./terminal/stream-proxy');
@@ -46,6 +47,7 @@ connectDb()
   .then(() => ensureRunpodMarketplaceProducts())
   .then(() => ensureAiProviderProducts())
   .then(() => ensureComputeTestProducts())
+  .then(() => ensureProductKinds().catch((err) => console.error('[catalog] productKind backfill failed:', err.message)))
   .then(() => syncSalesCountsFromOrders())
   .then((stats) => {
     if (stats) {

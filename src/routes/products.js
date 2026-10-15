@@ -20,6 +20,14 @@ const { normalizeDevices } = require('../utils/stream-clients');
 const SellerProfile = require('../models/SellerProfile');
 const { parseAffiliateRate, effectiveAffiliateRate } = require('../finance/affiliate-engine');
 
+/** 'DIGITAL' | 'PHYSICAL' | '' (missing/invalid). */
+function normalizeProductKind(v) {
+  const k = String(v || '').trim().toUpperCase();
+  if (k === 'DIGITAL' || k === 'PHYSICAL') return k;
+  if (k === 'GOODS' || k === 'PHYSICAL_GOODS') return 'PHYSICAL';
+  return '';
+}
+
 const router = express.Router();
 
 const LIST_TTL = 60; // s — listings change often (installs, new products)
@@ -199,6 +207,15 @@ router.post('/', authenticate, requireRoles('seller', 'talent', 'admin'), async 
     if (badServicePrice) return res.status(400).json(badServicePrice);
     const affiliate = parseAffiliateRate(body.affiliateRate, { allowNull: true });
     if (!affiliate.ok) return res.status(400).json({ message: affiliate.message, code: affiliate.code });
+    // Required in the web/app forms. An invalid value is rejected; a missing one (older app
+    // builds) falls back to DIGITAL and is stamped productKindDefaultedAt for review.
+    const productKind = normalizeProductKind(body.productKind);
+    if (body.productKind !== undefined && body.productKind !== '' && !productKind) {
+      return res.status(400).json({
+        message: 'Chọn loại sản phẩm: Sản phẩm số hoặc Hàng hóa vật lý',
+        code: 'PRODUCT_KIND_INVALID',
+      });
+    }
     let slug = slugify(body.slug || name);
     if (!slug) slug = `product-${Date.now()}`;
     if (isCatalogProductSlug(slug) && req.user.role !== 'admin') slug = `p-${slug}`;
@@ -279,6 +296,8 @@ router.post('/', authenticate, requireRoles('seller', 'talent', 'admin'), async 
       featured: !!body.featured,
       publishedAt: body.publishedAt ? new Date(body.publishedAt) : new Date(),
       productType: body.productType || inferProductType(body.category, body.tags),
+      productKind: productKind || 'DIGITAL',
+      productKindDefaultedAt: productKind ? null : new Date(),
       published,
       moderationStatus,
     });
@@ -339,6 +358,14 @@ router.put('/:id', authenticate, requireRoles('seller', 'talent', 'admin'), asyn
     ];
     for (const key of fields) {
       if (body[key] !== undefined) product[key] = body[key];
+    }
+    if (body.productKind !== undefined) {
+      const kind = normalizeProductKind(body.productKind);
+      if (!kind) {
+        return res.status(400).json({ message: 'productKind must be DIGITAL or PHYSICAL', code: 'PRODUCT_KIND_INVALID' });
+      }
+      product.productKind = kind;
+      product.productKindDefaultedAt = null;
     }
     if (body.affiliateRate !== undefined) {
       // 0–25% of the price after discount; null = use the store default. Applies to new orders only.
@@ -401,6 +428,7 @@ router.delete('/:id', authenticate, requireRoles('seller', 'talent', 'admin'), a
 });
 
 module.exports = router;
+module.exports.normalizeProductKind = normalizeProductKind;
 module.exports.talentCategoryError = talentCategoryError;
 module.exports.hirePricing = hirePricing;
 module.exports.servicePricingError = servicePricingError;
