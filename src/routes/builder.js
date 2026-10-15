@@ -15,6 +15,8 @@ const LOCAL_PROVIDER = 'local';
 const LOCAL_TEXT_MAX = 2_000_000;
 const llm = require('../utils/builder/llm');
 const { previewResponse } = require('../utils/builder/preview');
+const QRCode = require('qrcode');
+const expoSnack = require('../utils/builder/expo-snack');
 
 /**
  * AI App Builder (rork-style): buyers describe a website or mobile app, their own provider key
@@ -223,6 +225,31 @@ async function fillTemplateCreators(docs) {
 }
 
 // ---------- public preview (capability link, sandboxed) ----------
+
+/**
+ * GET /v1/builder/preview-expo/:id/:token[.svg] — Expo Go link (JSON) or its QR (SVG) for an
+ * app project; same capability token as the web preview.
+ */
+router.get(/^\/preview-expo\/([a-f0-9]{24})\/([A-Za-z0-9_-]{16,64})(\.svg)?$/, async (req, res, next) => {
+  try {
+    const [id, token, svg] = [req.params[0], req.params[1], req.params[2]];
+    const doc = await BuilderProject.findById(id).select('name kind files previewToken').lean();
+    const a = Buffer.from(String(doc?.previewToken || ''));
+    const b = Buffer.from(token);
+    if (!doc || a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+      return res.status(404).type('text/plain').send('Preview not found');
+    }
+    const out = doc.kind === 'app'
+      ? await expoSnack.ensureSnack(`prj:${id}`, { name: doc.name, files: doc.files })
+      : { enabled: false, available: false, url: '', error: 'SNACK_NOT_APP' };
+    if (!svg) return res.set('Cache-Control', 'no-store').json(out);
+    if (!out.url) return res.status(404).type('text/plain').send('Expo link unavailable');
+    const body = await QRCode.toString(out.url, { type: 'svg', margin: 1, width: 220 });
+    res.set({ 'Content-Type': 'image/svg+xml; charset=utf-8', 'Cache-Control': 'private, max-age=60' }).send(body);
+  } catch (err) {
+    next(err);
+  }
+});
 
 router.get(/^\/preview\/([a-f0-9]{24})\/([A-Za-z0-9_-]{16,64})(?:\/(.*))?$/, async (req, res, next) => {
   try {
