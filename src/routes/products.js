@@ -207,11 +207,13 @@ router.post('/', authenticate, requireRoles('seller', 'talent', 'admin'), async 
     if (badServicePrice) return res.status(400).json(badServicePrice);
     const affiliate = parseAffiliateRate(body.affiliateRate, { allowNull: true });
     if (!affiliate.ok) return res.status(400).json({ message: affiliate.message, code: affiliate.code });
+    // Required in the web/app forms. An invalid value is rejected; a missing one (older app
+    // builds) falls back to DIGITAL and is stamped productKindDefaultedAt for review.
     const productKind = normalizeProductKind(body.productKind);
-    if (!productKind && req.user.role !== 'admin') {
+    if (body.productKind !== undefined && body.productKind !== '' && !productKind) {
       return res.status(400).json({
         message: 'Chọn loại sản phẩm: Sản phẩm số hoặc Hàng hóa vật lý',
-        code: 'PRODUCT_KIND_REQUIRED',
+        code: 'PRODUCT_KIND_INVALID',
       });
     }
     let slug = slugify(body.slug || name);
@@ -295,6 +297,7 @@ router.post('/', authenticate, requireRoles('seller', 'talent', 'admin'), async 
       publishedAt: body.publishedAt ? new Date(body.publishedAt) : new Date(),
       productType: body.productType || inferProductType(body.category, body.tags),
       productKind: productKind || 'DIGITAL',
+      productKindDefaultedAt: productKind ? null : new Date(),
       published,
       moderationStatus,
     });
