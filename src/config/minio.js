@@ -107,6 +107,7 @@ function getMinioConfig() {
     contentPrefix: cleanPrefix(minioEnv('MINIO_CONTENT_PREFIX'), 'aimarkets/content'),
     kycPrefix: cleanPrefix(minioEnv('MINIO_KYC_PREFIX'), 'aimarkets/kyc'),
     trainingPrefix: cleanPrefix(minioEnv('MINIO_TRAINING_PREFIX'), 'aimarkets/training'),
+    attachmentPrefix: cleanPrefix(minioEnv('MINIO_ATTACHMENT_PREFIX'), 'aimarkets/attachments'),
   };
 }
 
@@ -374,7 +375,25 @@ async function statKycObject(objectName) {
   return statTrainingObject(objectName);
 }
 
+/** Private chat / workspace attachments under aimarkets/attachments/{scope}/{scopeId}/… (never public). */
+async function putAttachmentObject(scope, scopeId, ext, buffer, contentType) {
+  const cfg = await ensurePlaygroundBucket();
+  const objectName = `${cfg.attachmentPrefix}/${scope}/${String(scopeId).replace(/[^\w-]+/g, '')}/${Date.now()}-${crypto.randomBytes(12).toString('hex')}.${ext}`;
+  await getMinioClient().putObject(cfg.bucket, objectName, buffer, buffer.length, {
+    'Content-Type': contentType,
+    'Cache-Control': 'private, no-store',
+  });
+  return objectName;
+}
+
+async function getAttachmentStream(objectName) {
+  const cfg = await ensurePlaygroundBucket();
+  return getMinioClient().getObject(cfg.bucket, objectName);
+}
+
 module.exports = {
+  putAttachmentObject,
+  getAttachmentStream,
   statKycObject,
   DEFAULT_ENDPOINT,
   DEFAULT_PUBLIC_URL,

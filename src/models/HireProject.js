@@ -3,6 +3,17 @@ const mongoose = require('mongoose');
 const STATUSES = ['requested', 'quoted', 'active', 'completed', 'terminated', 'declined', 'cancelled'];
 const MILESTONE_STATUSES = ['pending', 'in_progress', 'submitted', 'approved', 'cancelled'];
 
+const fileRefSchema = new mongoose.Schema(
+  {
+    attachment: { type: mongoose.Schema.Types.ObjectId, ref: 'Attachment', required: true },
+    name: { type: String, default: '' },
+    mime: { type: String, default: '' },
+    size: { type: Number, default: 0 },
+    kind: { type: String, enum: ['image', 'file'], default: 'file' },
+  },
+  { _id: false },
+);
+
 const quoteSchema = new mongoose.Schema(
   {
     amount: { type: Number, default: 0, min: 0 },
@@ -23,6 +34,8 @@ const milestoneSchema = new mongoose.Schema(
     builderProject: { type: mongoose.Schema.Types.ObjectId, ref: 'BuilderProject', default: null },
     demoUrl: { type: String, default: '', maxlength: 500 },
     demoNote: { type: String, default: '', maxlength: 4000 },
+    /** Deliverable files for this phase (private attachments). */
+    files: { type: [fileRefSchema], default: [] },
     submittedAt: { type: Date, default: null },
     approvedAt: { type: Date, default: null },
     revisionNote: { type: String, default: '', maxlength: 2000 },
@@ -47,7 +60,8 @@ const messageSchema = new mongoose.Schema(
     at: { type: Date, default: Date.now },
     actor: { type: String, enum: ['buyer', 'seller', 'admin', 'system'], required: true },
     author: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
-    body: { type: String, required: true, maxlength: 4000 },
+    body: { type: String, default: '', maxlength: 4000 },
+    attachments: { type: [fileRefSchema], default: [] },
     link: { type: String, default: '', maxlength: 500 },
   },
   { _id: true },
