@@ -635,7 +635,7 @@ router.post(
     await fileComplaint(req, doc, { note, requestedAction: req.body?.requestedAction, context: 'Complaint from hire workspace.' });
     pushEvent(doc, 'buyer', 'complaint', note.slice(0, 200));
     await doc.save();
-    await notifyUser(doc.seller, 'hire.complaint', { buyer: doc.buyerName, product: doc.productName }, href(doc)).catch(() => {});
+    // Seller is notified once by fileComplaint (complaint.new → /sell/complaints/:id).
     await respond(res, doc, req.user._id);
   }),
 );
