@@ -267,6 +267,7 @@ function createApp() {
   app.use('/v1/work', workDiscontinued, workRoutes);
   app.use('/v1/hire', hireDiscontinued, hireRoutes);
   app.use('/v1/uploads', uploadRoutes);
+  app.use('/v1/attachments', require('./routes/attachments'));
   app.use('/v1/sellers', sellerRoutes);
   app.use('/v1/legal', legalRoutes);
   app.use('/v1/licenses', licenseRoutes);

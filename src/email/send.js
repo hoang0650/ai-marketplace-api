@@ -74,10 +74,24 @@ function setTransport(fn) {
   transport = fn || sendResendEmail;
 }
 
+/** Seed/test accounts (example.* and the seeded creators.dev studios) never receive real mail. */
+const TEST_DOMAINS = String(process.env.EMAIL_SUPPRESS_DOMAINS || 'example.com,example.org,example.net,creators.dev')
+  .split(',')
+  .map((d) => d.trim().toLowerCase())
+  .filter(Boolean);
+function isTestRecipient(to) {
+  const domain = String(to).split('@').pop();
+  return TEST_DOMAINS.includes(domain) || /\.(test|invalid|example|localhost)$/.test(domain);
+}
+
 async function deliver(user, kind, data = {}) {
   const to = String(data.to || user?.email || '').trim().toLowerCase();
   if (!to || !to.includes('@')) return { skipped: true, reason: 'INVALID_TO' };
   if (transport === sendResendEmail && !isEmailReady()) return { skipped: true, reason: 'EMAIL_OFF' };
+  if (transport === sendResendEmail && isTestRecipient(to)) {
+    console.log(`[mail] suppressed test recipient (${kind}) ${to.replace(/^(.).*@/, '$1***@')}`);
+    return { skipped: true, reason: 'TEST_RECIPIENT' };
+  }
   if (optedOut(user, kind)) return { skipped: true, reason: 'OPTED_OUT' };
   if (rateLimited(to, kind)) return { skipped: true, reason: 'RATE_LIMITED' };
   const extra = OPTIONAL_KINDS[kind] && user?._id ? { unsubscribeUrl: unsubscribeUrl(user._id, kind) } : {};
@@ -95,6 +109,7 @@ function sendTransactional(user, kind, data) {
 }
 
 module.exports = {
+  isTestRecipient,
   sendTransactional,
   deliver,
   setTransport,

@@ -13,6 +13,7 @@ const { openOrderDispute } = require('../utils/open-order-dispute');
 const { caseRefFromId, notifyAdmins, auditComplaint } = require('../utils/complaint-helpers');
 const { writeAuditLog } = require('../utils/audit');
 const { chargeMilestone } = require('../finance/milestone-sale');
+const { resolveAttachments, mapEmbedded } = require('./attachments');
 const { publicProject: publicBuilderProject } = require('./builder');
 const {
   BUILDER_DEMO_KIND,
@@ -144,6 +145,7 @@ function publicHire(doc, me, previews = new Map(), now = new Date()) {
         previewKind: preview?.kind || null,
         demoUrl: m.demoUrl || '',
         demoNote: m.demoNote || '',
+        files: mapEmbedded(m.files),
         submittedAt: iso(m.submittedAt),
         approvedAt: iso(m.approvedAt),
         revisionNote: m.revisionNote || '',
@@ -160,7 +162,7 @@ function publicHire(doc, me, previews = new Map(), now = new Date()) {
     terminationNote: o.terminationNote || '',
     complaintId: o.complaint ? String(o.complaint) : null,
     events: (o.events || []).map((e) => ({ at: iso(e.at), actor: e.actor, action: e.action, note: e.note || '' })),
-    messages: (o.messages || []).map((m) => ({ id: String(m._id), at: iso(m.at), actor: m.actor, body: m.body, link: m.link || '' })),
+    messages: (o.messages || []).map((m) => ({ id: String(m._id), at: iso(m.at), actor: m.actor, body: m.body || '', link: m.link || '', attachments: mapEmbedded(m.attachments) })),
     origin: o.origin || 'quote',
     createdAt: iso(o.createdAt),
     updatedAt: iso(o.updatedAt),
@@ -196,6 +198,13 @@ function pushEvent(doc, actor, action, note = '') {
 const href = (doc) => `/hire/projects/${doc._id}`;
 
 /** Files a buyer→seller complaint for the project; freezes the latest paid phase if still in its 48h hold. */
+/** The project's complaint if it is still being handled (not decided/closed), else null. */
+async function openComplaintOf(doc) {
+  if (!doc.complaint) return null;
+  const c = await Complaint.findById(doc.complaint);
+  return c && !['decided', 'closed'].includes(c.status) ? c : null;
+}
+
 async function fileComplaint(req, doc, { note, requestedAction, context }) {
   const lastPaid = [...(doc.milestones || [])].reverse().find((m) => m.status === 'approved' && m.order);
   const order = lastPaid ? await Order.findById(lastPaid.order) : null;
@@ -216,7 +225,8 @@ async function fileComplaint(req, doc, { note, requestedAction, context }) {
     hireProject: doc._id,
     body: note,
     requestedAction: cleanText(requestedAction, 1000) || 'Xem xét dự án dịch vụ và hoàn tiền giai đoạn liên quan (nếu có).',
-    status: 'received',
+    // Seller must be able to answer (POST /complaints/:id/seller-response requires awaiting_seller).
+    status: 'awaiting_seller',
     openedOrderDispute: opened,
     events: [
       {
@@ -231,6 +241,8 @@ async function fileComplaint(req, doc, { note, requestedAction, context }) {
   complaint.caseRef = caseRefFromId(complaint._id);
   await complaint.save();
   doc.complaint = complaint._id;
+  await notifyUser(doc.seller, 'complaint.new', { text: note.slice(0, 280) }, `/sell/complaints/${complaint._id}`).catch(() => {});
+  await notifyUser(complaint.complainant, 'complaint.received', { caseRef: complaint.caseRef }, `/complaints/${complaint._id}`).catch(() => {});
   await notifyAdmins('complaint.newAdmin', { kind: 'buyer_seller' }, `/admin/complaints/${complaint._id}`).catch(() => {});
   await auditComplaint(req, 'complaint.create', complaint).catch(() => {});
   return complaint;
@@ -417,8 +429,10 @@ router.post(
       if (!bp || (kind && bp.kind !== kind)) throw httpError(400, 'BUILDER_PROJECT_INVALID');
       builderProject = bp._id;
     }
+    const files = await resolveAttachments(req.body?.attachmentIds, { scope: 'hire', scopeId: doc._id, owner: req.user._id });
     if (kind && !builderProject) throw httpError(400, 'DEMO_BUILDER_REQUIRED');
-    if (!kind && !demoUrl && note.length < 8) throw httpError(400, 'DEMO_REQUIRED');
+    if (!kind && !demoUrl && !files.length && note.length < 8) throw httpError(400, 'DEMO_REQUIRED');
+    m.files = files;
     m.builderProject = builderProject;
     m.demoUrl = demoUrl;
     m.demoNote = note;
@@ -475,6 +489,12 @@ router.post(
         { phase: index + 1, product: doc.productName, amount: settlement.sellerNetAmount, currency: doc.currency },
         href(doc),
       ).catch(() => {});
+      await notifyUser(
+        doc.buyer,
+        'hire.charged',
+        { phase: index + 1, product: doc.productName, amount: order.amount, currency: order.currency },
+        href(doc),
+      ).catch(() => {});
       if (done) {
         await notifyUser(doc.seller, 'hire.completed', { product: doc.productName }, href(doc)).catch(() => {});
         await notifyUser(doc.buyer, 'hire.completed', { product: doc.productName }, href(doc)).catch(() => {});
@@ -511,7 +531,12 @@ router.post(
     doc.terminationNote = note;
     pushEvent(doc, 'buyer', 'terminated', reason);
 
-    if (lastApproved?.order) {
+    const already = await openComplaintOf(doc);
+    if (already) {
+      // Do not file a duplicate case: attach the termination to the open complaint instead.
+      already.events.push({ at: new Date(), actorId: req.user._id, actorRole: req.user.role, action: 'hire_terminated', note: `${reason}: ${note}`.slice(0, 2000) });
+      await already.save();
+    } else if (lastApproved?.order) {
       await fileComplaint(req, doc, {
         note,
         requestedAction: req.body?.requestedAction || 'Chấm dứt dự án thuê và hoàn tiền giai đoạn đã thanh toán.',
@@ -525,6 +550,7 @@ router.post(
       { buyer: doc.buyerName, product: doc.productName, reason: note.slice(0, 200) },
       href(doc),
     ).catch(() => {});
+    await notifyUser(doc.buyer, 'hire.terminatedBuyer', { product: doc.productName }, href(doc)).catch(() => {});
     await respond(res, doc, req.user._id);
   }),
 );
@@ -572,7 +598,7 @@ router.post(
     });
     await notifyUser(
       product.creator,
-      'hire.accepted',
+      'hire.packageStarted',
       { buyer: req.user.name, amount: total, currency: doc.currency, product: product.name, count: milestones.length },
       href(doc),
     ).catch(() => {});
@@ -586,9 +612,10 @@ router.post(
     const { doc, role } = await loadForUser(req);
     assertAction(doc, role, 'message');
     const body = cleanText(req.body?.body, 4000);
-    if (!body) throw httpError(400, 'MESSAGE_REQUIRED');
+    const attachments = await resolveAttachments(req.body?.attachmentIds, { scope: 'hire', scopeId: doc._id, owner: req.user._id });
+    if (!body && !attachments.length) throw httpError(400, 'MESSAGE_REQUIRED');
     const link = req.body?.link ? httpsUrl(req.body.link) : '';
-    doc.messages.push({ actor: role, author: req.user._id, body, link });
+    doc.messages.push({ actor: role, author: req.user._id, body, link, attachments });
     if (doc.messages.length > 500) doc.messages.splice(0, doc.messages.length - 500);
     await doc.save();
     const to = role === 'buyer' ? doc.seller : doc.buyer;
@@ -604,10 +631,7 @@ router.post(
     assertAction(doc, role, 'complain');
     const note = cleanText(req.body?.note, 4000);
     if (note.length < 8) throw httpError(400, 'NOTE_REQUIRED');
-    if (doc.complaint) {
-      const c = await Complaint.findById(doc.complaint).select('status').lean();
-      if (c && !['decided', 'closed'].includes(c.status)) throw httpError(409, 'COMPLAINT_OPEN', { complaintId: String(doc.complaint) });
-    }
+    if (await openComplaintOf(doc)) throw httpError(409, 'COMPLAINT_OPEN', { complaintId: String(doc.complaint) });
     await fileComplaint(req, doc, { note, requestedAction: req.body?.requestedAction, context: 'Complaint from hire workspace.' });
     pushEvent(doc, 'buyer', 'complaint', note.slice(0, 200));
     await doc.save();
