@@ -21,6 +21,8 @@ const {
 } = require('../utils/complaint-helpers');
 const { appealWindowOpen } = require('../utils/complaint-sla');
 
+const DECISION_LABEL_VI = { upheld: 'chấp nhận khiếu nại', rejected: 'không chấp nhận khiếu nại', mediated: 'hòa giải' };
+
 const router = express.Router();
 const KINDS = Complaint.KINDS || [
   'buyer_seller',
@@ -234,6 +236,7 @@ router.post('/', authenticate, async (req, res, next) => {
         `/sell/complaints/${complaint._id}`,
       );
     }
+    await notifyUsers([complaint.complainant], 'complaint.received', { caseRef: complaint.caseRef }, `/complaints/${complaint._id}`);
     await notifyAdmins('complaint.newAdmin', { kind }, `/admin/complaints/${complaint._id}`);
     await auditComplaint(req, 'complaint.create', complaint);
     return res.status(201).json(mapComplaint(complaint));
@@ -416,7 +419,7 @@ router.patch('/:id', authenticate, requireRoles('admin'), async (req, res, next)
       await notifyUsers(
         [complaint.complainant, complaint.seller].filter(Boolean),
         'complaint.decision',
-        { caseRef: complaint.caseRef, decision, detail: decisionNote || '' },
+        { caseRef: complaint.caseRef, decision: DECISION_LABEL_VI[decision] || decision, detail: decisionNote || '' },
         `/complaints/${complaint._id}`,
       );
     } else if (action === 'close') {
@@ -427,6 +430,12 @@ router.patch('/:id', authenticate, requireRoles('admin'), async (req, res, next)
       complaint.closedAt = new Date();
       pushEvent(complaint, req, 'closed', note);
       await complaint.save();
+      await notifyUsers(
+        [complaint.complainant, complaint.seller].filter(Boolean),
+        'complaint.closed',
+        { caseRef: complaint.caseRef },
+        `/complaints/${complaint._id}`,
+      );
     } else {
       return res.status(400).json({ message: 'action must be advance, skip_seller, decide, or close' });
     }

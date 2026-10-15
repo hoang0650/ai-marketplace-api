@@ -30,6 +30,8 @@ const COPY = {
   'complaint.sellerRepliedAdmin': ['{caseRef}: seller đã phản hồi', 'Đã nhận phản hồi của seller. Hồ sơ chuyển sang xem xét bằng chứng.'],
   'complaint.appeal': ['{caseRef}: kháng nghị', '{name} yêu cầu xem xét lại nội bộ.'],
   'complaint.askSeller': ['{caseRef}: yêu cầu seller phản hồi', 'Sàn yêu cầu bạn phản hồi khiếu nại này.'],
+  'complaint.received': ['{caseRef}: đã tiếp nhận khiếu nại', 'Sàn đã tiếp nhận khiếu nại của bạn và sẽ phản hồi theo quy trình xử lý. Theo dõi trạng thái tại trang khiếu nại.'],
+  'complaint.closed': ['{caseRef}: đã đóng hồ sơ', 'Hồ sơ khiếu nại đã được đóng.'],
   'complaint.decision': ['{caseRef}: quyết định', 'Quyết định: {decision}. {detail}'],
   'gpu.lowBalance': ['Số dư sắp hết', 'GPU "{name}" còn khoảng {minutes} phút theo số dư hiện tại. Nạp thêm để tránh bị dừng.'],
   'gpu.stoppedNoFunds': ['GPU đã tạm dừng', 'GPU "{name}" đã dừng do hết số dư. Dữ liệu được giữ {hours} giờ; nạp tiền để tiếp tục.'],
@@ -60,6 +62,48 @@ const COPY = {
   'hire.terminated': ['Dự án bị chấm dứt', '{buyer} đã chấm dứt {product}. {reason}'],
 };
 
+/** English copy for keys mirrored to email (vi users get COPY, others get this). */
+const EMAIL_COPY_EN = {
+  'complaint.received': ['{caseRef}: complaint received', 'We received your complaint and will handle it per our resolution process. Track its status on the complaints page.'],
+  'complaint.new': ['New complaint about your product', '{text}'],
+  'complaint.sellerReplied': ['{caseRef}: seller responded', 'The seller responded. We are reviewing the evidence.'],
+  'complaint.askSeller': ['{caseRef}: response requested', 'AI Markets asks you to respond to this complaint.'],
+  'complaint.decision': ['{caseRef}: decision', 'Decision: {decision}. {detail}'],
+  'complaint.closed': ['{caseRef}: case closed', 'The complaint case has been closed.'],
+  'dispute.closedSeller': ['Dispute closed', 'The dispute about {product} was resolved in the seller\'s favour. The payout can now be withdrawn.'],
+  'dispute.closedBuyer': ['Dispute closed', 'The dispute about {product} was resolved in the seller\'s favour.'],
+  'dispute.refundBuyer': ['Refund completed', '{amount} {currency} for {product} has been refunded to your AI Markets wallet.'],
+  'dispute.refundSeller': ['Dispute: buyer refunded', 'The payable of {amount} {currency} for {product} was reversed (commission/tax adjusted on the ledger).'],
+  'agent.rentRefunded': ['Agent rental refunded', '{brand}: {price} has been refunded to your wallet.'],
+};
+const EMAIL_KEYS = new Set(Object.keys(EMAIL_COPY_EN));
+
+/** Mirror selected notifications to email. Fire-and-forget; never throws. */
+function emailNotification(userIds, key, params, href) {
+  if (!EMAIL_KEYS.has(key)) return;
+  if (!require('./mailer').isEmailReady()) return;
+  setImmediate(async () => {
+    try {
+      const { sendTransactional } = require('../email/send');
+      const User = require('../models/User');
+      const users = await User.find({ _id: { $in: userIds } }).select('email name profile.notifyLang preferences').lean();
+      for (const u of users) {
+        const vi = (u.profile?.notifyLang || 'vi') === 'vi';
+        const doc = vi ? buildNotification(key, params) : buildCopy(EMAIL_COPY_EN[key], params);
+        sendTransactional(u, 'notification', { title: doc.title, body: doc.body, href });
+      }
+    } catch (err) {
+      console.error(`[mail] notification ${key}: ${err?.message || err}`);
+    }
+  });
+}
+
+function buildCopy(copy, params = {}) {
+  const p = cleanParams(params);
+  const body = fill(copy[1], p).trim();
+  return { title: fill(copy[0], p).slice(0, 200), body: (p.note ? `${body} ${p.note}` : body).slice(0, 400) };
+}
+
 function fill(template, params) {
   return template.replace(/\{(\w+)\}/g, (_, k) => (params[k] == null ? '' : String(params[k])));
 }
@@ -88,7 +132,9 @@ function buildNotification(key, params = {}) {
 
 async function notifyUser(user, key, params, href) {
   if (!user) return null;
-  return Notification.create({ user, href, ...buildNotification(key, params) });
+  const doc = await Notification.create({ user, href, ...buildNotification(key, params) });
+  emailNotification([user], key, params, href);
+  return doc;
 }
 
 async function notifyMany(userIds, key, params, href) {
@@ -96,6 +142,7 @@ async function notifyMany(userIds, key, params, href) {
   if (!ids.length) return;
   const doc = buildNotification(key, params);
   await Notification.insertMany(ids.map((user) => ({ user, href, ...doc })));
+  emailNotification(ids, key, params, href);
 }
 
 const LEGACY_FIXED = {
@@ -138,4 +185,4 @@ function inferLegacy(title, body) {
   return null;
 }
 
-module.exports = { buildNotification, notifyUser, notifyMany, inferLegacy, NOTIFY_COPY: COPY };
+module.exports = { EMAIL_KEYS, EMAIL_COPY_EN, buildNotification, notifyUser, notifyMany, inferLegacy, NOTIFY_COPY: COPY };

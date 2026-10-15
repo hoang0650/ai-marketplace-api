@@ -31,15 +31,17 @@ async function resolveOrderDispute(order, { resolution, note = '', actorId }) {
   let gross = Number(order.amount) || 0;
   let net = effectiveSellerNet(order);
   if (gross > 0) {
-    const { reversed } = await createRefund({
+    const { reversed, refund, duplicate } = await createRefund({
       order,
       amount: gross,
       reason: text || 'dispute buyer_win',
       actorId,
       eventId: `dispute_refund_${order._id}`,
     });
-    gross = reversed.grossAmount;
-    net = reversed.sellerNetAmount;
+    // Duplicate (retried) resolution: refund already booked - don't crash, don't re-notify.
+    if (duplicate) return order;
+    gross = reversed?.grossAmount ?? refund?.amount ?? gross;
+    net = reversed?.sellerNetAmount ?? net;
   } else {
     order.status = 'refunded';
     order.paymentStatus = 'refunded';

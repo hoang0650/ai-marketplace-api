@@ -67,10 +67,12 @@ function sanitizePreferences(patch, current = {}) {
   const next = {
     personalizeContent: !!current.personalizeContent,
     personalizeAds: !!current.personalizeAds,
+    emailLoginAlerts: current.emailLoginAlerts !== false,
   };
   if (!patch || typeof patch !== 'object') return next;
   if (patch.personalizeContent !== undefined) next.personalizeContent = !!patch.personalizeContent;
   if (patch.personalizeAds !== undefined) next.personalizeAds = !!patch.personalizeAds;
+  if (patch.emailLoginAlerts !== undefined) next.emailLoginAlerts = !!patch.emailLoginAlerts;
   return next;
 }
 

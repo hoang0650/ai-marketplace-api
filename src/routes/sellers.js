@@ -309,6 +309,10 @@ router.get('/me/earnings', authenticate, async (req, res, next) => {
       platformFee,
       platformCommissionRate: PLATFORM_COMMISSION_RATE,
       sellerTaxRate: sellerTaxRateFor(sellerProfileType, 'AI_API').total,
+      sellerTaxRates: {
+        DIGITAL: sellerTaxRateFor(sellerProfileType, 'AI_API'),
+        PHYSICAL: sellerTaxRateFor(sellerProfileType, 'PHYSICAL_GOODS'),
+      },
       sellerType: sellerProfileType,
       taxPolicy: publicTaxPolicy(),
       taxWithholding,
@@ -339,6 +343,27 @@ router.get('/me/payouts', authenticate, async (req, res, next) => {
 
 /** Public tax policy (rates by seller type) for dashboards and the registration form. */
 router.get('/tax-policy', (_req, res) => res.json(publicTaxPolicy()));
+
+/** Withheld tax rate per product kind for the caller's seller type (product form preview). */
+router.get('/me/product-kind-rates', authenticate, async (req, res, next) => {
+  try {
+    const SellerProfile = require('../models/SellerProfile');
+    const { normalizeSellerType } = require('../finance/seller-types');
+    const sp = await SellerProfile.findOne({ user: req.user._id }).select('sellerType sellerTypeDeclaredAt').lean();
+    const sellerType = normalizeSellerType(sp?.sellerType);
+    res.json({
+      sellerType,
+      sellerTypeDeclared: !!sp?.sellerTypeDeclaredAt,
+      rates: {
+        DIGITAL: sellerTaxRateFor(sellerType, 'AI_API'),
+        PHYSICAL: sellerTaxRateFor(sellerType, 'PHYSICAL_GOODS'),
+      },
+      policyVersion: publicTaxPolicy().version,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
 
 router.get('/me/tax-profile', authenticate, async (req, res, next) => {
   try {
