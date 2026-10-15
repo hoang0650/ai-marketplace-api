@@ -18,6 +18,7 @@ const llm = require('../utils/builder/llm');
 const { previewResponse } = require('../utils/builder/preview');
 const QRCode = require('qrcode');
 const expoSnack = require('../utils/builder/expo-snack');
+const bus = require('../realtime/user-bus');
 
 /**
  * AI App Builder (rork-style): buyers describe a website or mobile app, their own provider key
@@ -486,6 +487,7 @@ router.post('/projects/:id/generate', async (req, res, next) => {
     return res.status(err.status && err.status >= 400 ? err.status : 502).json(errorBody(err));
   };
 
+  let genStarted = '';
   if (running.has(userId)) return fail(httpError(409, 'GENERATION_BUSY'));
   running.add(userId);
   const controller = new AbortController();
@@ -506,6 +508,8 @@ router.post('/projects/:id/generate', async (req, res, next) => {
     if (!model) throw httpError(400, 'MODEL_INVALID');
 
     const messages = buildMessages({ kind: doc.kind, files: doc.files, history: doc.messages, prompt, previewError });
+    bus.publish(req.user._id, 'project.generating', { id: String(doc._id), state: 'start', prompt: prompt.slice(0, 200) }, { fromDevice: req.get('x-device-id') });
+    genStarted = String(doc._id);
 
     if (wantsStream) {
       res.status(200).set({
@@ -571,6 +575,7 @@ router.post('/projects/:id/generate', async (req, res, next) => {
     clearTimeout(timer);
     if (heartbeat) clearInterval(heartbeat);
     running.delete(userId);
+    if (genStarted) bus.publish(req.user._id, 'project.generating', { id: genStarted, state: 'end' });
   }
 });
 
