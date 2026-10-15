@@ -259,6 +259,38 @@ router.get('/:id', authenticate, async (req, res, next) => {
   }
 });
 
+/** POST /v1/complaints/:id/messages { body?, attachmentIds? } — case thread for complainant, seller and admin. */
+router.post('/:id/messages', authenticate, async (req, res, next) => {
+  try {
+    if (!isId(req.params.id)) return res.status(404).json({ message: 'Complaint not found' });
+    const complaint = await Complaint.findById(req.params.id);
+    if (!complaint) return res.status(404).json({ message: 'Complaint not found' });
+    if (!canAccessComplaint(req.user, complaint)) return res.status(403).json({ message: 'Forbidden' });
+    if (complaint.status === 'closed') return res.status(409).json({ code: 'COMPLAINT_CLOSED', message: 'Case is closed' });
+    const me = String(req.user._id);
+    const role = String(complaint.complainant) === me ? 'complainant' : complaint.seller && String(complaint.seller) === me ? 'seller' : 'admin';
+    const body = String(req.body?.body || '').trim().slice(0, 4000);
+    const { resolveAttachments } = require('./attachments');
+    let attachments = [];
+    try {
+      attachments = await resolveAttachments(req.body?.attachmentIds, { scope: 'complaint', scopeId: complaint._id, owner: req.user._id });
+    } catch (e) {
+      return res.status(e.status || 400).json({ code: e.code || 'ATTACHMENTS_INVALID', message: e.message });
+    }
+    if (!body && !attachments.length) return res.status(400).json({ code: 'MESSAGE_EMPTY', message: 'Message or attachment required' });
+    complaint.messages.push({ author: req.user._id, role, body, attachments, at: new Date() });
+    pushEvent(complaint, req, 'message', (body || `[${attachments.length} tệp]`).slice(0, 200));
+    await complaint.save();
+    const href = `/complaints/${complaint._id}`;
+    const others = [complaint.complainant, complaint.seller].filter((u) => u && String(u) !== me);
+    if (others.length) await notifyUsers(others, 'complaint.message', { caseRef: complaint.caseRef }, href);
+    if (role !== 'admin') await notifyAdmins('complaint.message', { caseRef: complaint.caseRef }, `/admin/complaints/${complaint._id}`);
+    res.status(201).json(mapComplaint(complaint));
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.post('/:id/seller-response', authenticate, async (req, res, next) => {
   try {
     if (!isId(req.params.id)) return res.status(404).json({ message: 'Complaint not found' });
