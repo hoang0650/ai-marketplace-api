@@ -4,6 +4,12 @@ const TrainingDataset = require('../models/TrainingDataset');
 const { authenticate } = require('../middleware/auth');
 const minio = require('../config/minio');
 const catalog = require('../utils/training/catalog');
+const LicenseKey = require('../models/LicenseKey');
+const Product = require('../models/Product');
+const ContentEpisode = require('../models/ContentEpisode');
+const { effectiveLicenseStatus } = require('../utils/license-keys');
+const { findActiveLicense } = require('../utils/content-drm');
+const { fetchSafeHttp } = require('../utils/safe-http-url');
 
 const router = express.Router();
 
@@ -25,6 +31,9 @@ const MESSAGES = {
   LABEL_INVALID: 'Nhãn chỉ gồm chữ, số, khoảng trắng, dấu gạch (tối đa 60 ký tự).',
   HF_DATASET_INVALID: 'Mã dataset Hugging Face không hợp lệ (dạng owner/name).',
   HF_DATASET_NOT_SUPPORTED: 'Chỉ dữ liệu thô mới dùng được dataset Hugging Face.',
+  LICENSE_REQUIRED: 'Cần license còn hạn cho dataset này.',
+  LICENSED_EMPTY: 'Người bán chưa tải file cho dataset này.',
+  LICENSED_TOO_LARGE: 'Dataset vượt quá dung lượng cho phép để train.',
 };
 
 function sendError(res, next, err) {
@@ -73,6 +82,7 @@ function publicDataset(doc) {
     source: doc.source,
     description: doc.description,
     hfDataset: doc.hfDataset,
+    licensedProduct: doc.licensedProduct ? String(doc.licensedProduct) : null,
     labels: [...new Set(ready.map((f) => f.label).filter(Boolean))].sort(),
     fileCount: ready.length,
     transcribedCount: ready.filter((f) => f.transcript).length,
@@ -115,6 +125,145 @@ router.get(
     if (catalog.isSource(req.query.source)) q.source = req.query.source;
     const rows = await TrainingDataset.find(q).sort({ updatedAt: -1 }).limit(100);
     res.json({ datasets: rows.map(publicDataset), limits: catalog.limits(), tasks: catalog.TASKS });
+  })
+);
+
+const LICENSED_DATASET = new Set(['dataset']);
+const LICENSED_VOICE = new Set(['voice-clone', 'voice-preset']);
+
+/** Active licenses of the caller, newest expiry first, one per product. */
+async function activeLicenses(userId, categories) {
+  const rows = await LicenseKey.find({ buyer: userId, category: { $in: categories } })
+    .sort({ expiresAt: -1 })
+    .limit(200)
+    .lean();
+  const out = new Map();
+  for (const l of rows) {
+    const pid = String(l.product);
+    if (out.has(pid) || effectiveLicenseStatus(l) !== 'active') continue;
+    out.set(pid, l);
+  }
+  return out;
+}
+
+function episodeFilename(e) {
+  const base = String(e.title || `file-${e.index || 1}`).replace(/[^\w.\- ]+/g, '').trim().slice(0, 120) || `file-${e.index || 1}`;
+  return base;
+}
+
+/**
+ * GET /v1/training-datasets/licensed — datasets and voices the caller holds an active license for
+ * (bought on the marketplace), so they can be used in training like Builder templates.
+ */
+router.get(
+  '/licensed',
+  wrap(async (req, res) => {
+    const lic = await activeLicenses(req.user._id, [...LICENSED_DATASET, ...LICENSED_VOICE]);
+    const ids = [...lic.keys()];
+    const [products, episodes, imported] = await Promise.all([
+      Product.find({ _id: { $in: ids } }).select('name slug category coverUrl contentMeta creatorName').lean(),
+      ContentEpisode.find({ product: { $in: ids } }).select('product size kind').lean(),
+      TrainingDataset.find({ owner: req.user._id, licensedProduct: { $in: ids } }).select('_id licensedProduct').lean(),
+    ]);
+    const files = new Map();
+    for (const e of episodes) {
+      const k = String(e.product);
+      const f = files.get(k) || { count: 0, bytes: 0, kinds: new Set() };
+      f.count += 1;
+      f.bytes += e.size || 0;
+      f.kinds.add(e.kind);
+      files.set(k, f);
+    }
+    const importedBy = new Map(imported.map((d) => [String(d.licensedProduct), String(d._id)]));
+    const datasets = [];
+    const voices = [];
+    for (const p of products) {
+      const l = lic.get(String(p._id));
+      const base = {
+        productId: String(p._id),
+        slug: p.slug,
+        name: p.name,
+        category: p.category,
+        coverUrl: p.coverUrl || '',
+        sellerName: p.creatorName || '',
+        term: l.term,
+        expiresAt: l.expiresAt,
+      };
+      if (LICENSED_DATASET.has(p.category)) {
+        const f = files.get(String(p._id)) || { count: 0, bytes: 0, kinds: new Set() };
+        datasets.push({ ...base, fileCount: f.count, totalBytes: f.bytes, importedDatasetId: importedBy.get(String(p._id)) || null });
+      } else {
+        const m = p.contentMeta || {};
+        voices.push({
+          ...base,
+          voiceSource: m.voiceSource || (p.category === 'voice-preset' ? 'preset' : 'clone'),
+          voiceModes: m.voiceModes || [],
+          sampleUrl: m.voiceSampleUrl || '',
+          ready: p.category === 'voice-preset' ? true : m.cloneStatus === 'ready',
+        });
+      }
+    }
+    const byExpiry = (a, b) => new Date(b.expiresAt) - new Date(a.expiresAt);
+    res.json({ datasets: datasets.sort(byExpiry), voices: voices.sort(byExpiry) });
+  })
+);
+
+/**
+ * POST /v1/training-datasets/licensed/:productId/import — copy a licensed dataset's files into the
+ * caller's private training storage once, so the normal training flow can use it. Idempotent.
+ */
+router.post(
+  '/licensed/:productId/import',
+  wrap(async (req, res) => {
+    const pid = String(req.params.productId || '');
+    if (!mongoose.isValidObjectId(pid)) throw catalog.httpError(404, 'DATASET_NOT_FOUND');
+    const product = await Product.findById(pid).select('name category').lean();
+    if (!product || !LICENSED_DATASET.has(product.category)) throw catalog.httpError(404, 'DATASET_NOT_FOUND');
+    const license = await findActiveLicense({ buyerId: req.user._id, productId: pid });
+    if (!license) throw catalog.httpError(402, 'LICENSE_REQUIRED');
+    const existing = await TrainingDataset.findOne({ owner: req.user._id, licensedProduct: pid });
+    if (existing) return res.json({ dataset: publicDataset(existing), imported: false });
+    requireMinio();
+    const episodes = await ContentEpisode.find({ product: pid }).sort({ index: 1 }).lean();
+    const usable = episodes.filter((e) => e.objectName || e.sourceUrl);
+    if (!usable.length) throw catalog.httpError(409, 'LICENSED_EMPTY');
+    const lim = catalog.limits();
+    if (usable.length > lim.maxFiles) throw catalog.httpError(413, 'LICENSED_TOO_LARGE');
+    const count = await TrainingDataset.countDocuments({ owner: req.user._id });
+    if (count >= lim.maxDatasets) throw catalog.httpError(409, 'DATASET_LIMIT');
+    const allAudio = usable.every((e) => e.kind === 'audio');
+    const doc = new TrainingDataset({
+      owner: req.user._id,
+      name: String(product.name || 'Dataset').slice(0, 80),
+      source: allAudio ? 'audio' : 'raw',
+      description: 'Từ dataset đã mua license trên AI Markets.',
+      licensedProduct: pid,
+    });
+    let total = 0;
+    for (const e of usable) {
+      let buf;
+      if (e.objectName) {
+        const chunks = [];
+        for await (const c of await minio.getContentObjectStream(e.objectName)) {
+          chunks.push(c);
+          total += c.length;
+          if (total > lim.rawFileMaxBytes) throw catalog.httpError(413, 'LICENSED_TOO_LARGE');
+        }
+        buf = Buffer.concat(chunks);
+      } else {
+        const up = await fetchSafeHttp(e.sourceUrl, { timeoutMs: 60000, maxBytes: lim.rawFileMaxBytes, headers: { 'User-Agent': 'AI-Markets-Training/1.0' } });
+        buf = up.buffer;
+        total += buf.length;
+        if (total > lim.rawFileMaxBytes) throw catalog.httpError(413, 'LICENSED_TOO_LARGE');
+      }
+      const filename = episodeFilename(e);
+      const sub = doc.files.create({ objectName: 'pending', filename, contentType: e.contentType || 'application/octet-stream', size: buf.length, status: 'ready' });
+      sub.objectName = minio.trainingObjectName(req.user._id, 'datasets', String(doc._id), `${sub._id}-${filename.replace(/\s+/g, '_')}`);
+      await minio.putTrainingObject(sub.objectName, buf, sub.contentType);
+      doc.files.push(sub);
+    }
+    await doc.save();
+    res.status(201).json({ dataset: publicDataset(doc), imported: true });
   })
 );
 
@@ -271,6 +420,7 @@ router.delete(
   })
 );
 
+router._test = { activeLicenses };
 module.exports = router;
 module.exports.MESSAGES = MESSAGES;
 module.exports.publicDataset = publicDataset;
