@@ -15,6 +15,7 @@ const { TEMPLATE_CATEGORY_KIND } = require('../data/categories');
 const files = require('../utils/builder/files');
 const { readZip, isZip } = require('../utils/builder/zip');
 const { previewResponse } = require('../utils/builder/preview');
+const expoSnack = require('../utils/builder/expo-snack');
 const tpl = require('../utils/builder/templates');
 const gh = require('../utils/builder/github');
 const { runBuild, createLog } = require('../utils/builder/template-build');
@@ -147,6 +148,37 @@ router.get(/^\/([a-f0-9]{24})\/demo-qr\.svg$/, async (req, res, next) => {
     }
     const svg = await QRCode.toString(simulatorUrl(id), { type: 'svg', margin: 1, width: 220 });
     res.set({ 'Content-Type': 'image/svg+xml; charset=utf-8', 'Cache-Control': 'public, max-age=3600' }).send(svg);
+  } catch (err) {
+    next(err);
+  }
+});
+
+async function templateSnack(id) {
+  const product = await Product.findById(id).select('name category moderationStatus suspendedUntil published').lean();
+  const template = product ? await BuilderTemplate.findOne({ product: id }).select('demoEnabled kind files').lean() : null;
+  if (!product || !tpl.isTemplateCategory(product.category) || !tpl.demoVisible(product, template)) return null;
+  if (template.kind !== 'app') return { enabled: false, available: false, url: '', error: 'SNACK_NOT_APP' };
+  return expoSnack.ensureSnack(`tpl:${id}`, { name: product.name, files: template.files });
+}
+
+/** GET /v1/builder/templates/:id/expo — Expo Go deep link (Snack) for an app template. */
+router.get(/^\/([a-f0-9]{24})\/expo$/, async (req, res, next) => {
+  try {
+    const out = await templateSnack(req.params[0]);
+    if (!out) return res.status(404).json({ error: { code: 'TEMPLATE_NOT_FOUND', message: 'Demo not found' } });
+    res.set('Cache-Control', 'no-store').json(out);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** GET /v1/builder/templates/:id/expo-qr.svg — QR of the exp:// link above. */
+router.get(/^\/([a-f0-9]{24})\/expo-qr\.svg$/, async (req, res, next) => {
+  try {
+    const out = await templateSnack(req.params[0]);
+    if (!out?.url) return res.status(404).type('text/plain').send('Expo link unavailable');
+    const svg = await QRCode.toString(out.url, { type: 'svg', margin: 1, width: 220 });
+    res.set({ 'Content-Type': 'image/svg+xml; charset=utf-8', 'Cache-Control': 'public, max-age=300' }).send(svg);
   } catch (err) {
     next(err);
   }
