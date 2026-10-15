@@ -17,6 +17,8 @@ const agentSubscriptionSchema = new mongoose.Schema(
     paidUntil: { type: Date, required: true, index: true },
     autoRenew: { type: Boolean, default: true },
     lastChargedAt: { type: Date, default: null },
+    /** Set when the latest charge was refunded (failed launch / support). Blocks auto-renew until the buyer pays again. */
+    lastRefundedAt: { type: Date, default: null },
     lastFeeVnd: { type: Number, default: 0 },
     lastAmount: { type: Number, default: 0 },
     currency: { type: String, default: 'USD' },

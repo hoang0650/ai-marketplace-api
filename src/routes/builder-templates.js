@@ -1,6 +1,8 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const multer = require('multer');
+const QRCode = require('qrcode');
+const config = require('../config/env');
 const Product = require('../models/Product');
 const BuilderProject = require('../models/BuilderProject');
 const BuilderTemplate = require('../models/BuilderTemplate');
@@ -67,6 +69,10 @@ function demoUrl(productId) {
   return `${apiBase()}/v1/builder/templates/${productId}/demo/`;
 }
 
+function simulatorUrl(productId) {
+  return `${String(config.frontendUrl).replace(/\/+$/, '')}/template-demo/${productId}`;
+}
+
 function isOwner(user, product) {
   return !!user && (user.role === 'admin' || String(product.creator) === String(user._id));
 }
@@ -96,6 +102,7 @@ function templateMeta(product, template, { access = false, paths = false, git = 
     fileCount: list.length,
     demoEnabled: template ? template.demoEnabled !== false : true,
     demoUrl: tpl.demoVisible(product, template) ? demoUrl(product._id) : '',
+    simulatorUrl: tpl.demoVisible(product, template) ? simulatorUrl(product._id) : '',
     useCount: template?.useCount || 0,
     updatedAt: template?.updatedAt || null,
     access,
@@ -124,6 +131,22 @@ router.get(/^\/([a-f0-9]{24})\/demo(?:\/(.*))?$/, async (req, res, next) => {
     }
     const out = previewResponse({ name: product.name, kind: template.kind, files: template.files }, rest);
     res.status(out.status).set(out.headers).send(out.body);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** GET /v1/builder/templates/:id/demo-qr.svg — QR to the web phone simulator for this template. */
+router.get(/^\/([a-f0-9]{24})\/demo-qr\.svg$/, async (req, res, next) => {
+  try {
+    const id = req.params[0];
+    const product = await Product.findById(id).select('name category moderationStatus suspendedUntil published').lean();
+    const template = product ? await BuilderTemplate.findOne({ product: id }).select('demoEnabled kind').lean() : null;
+    if (!product || !tpl.isTemplateCategory(product.category) || !tpl.demoVisible(product, template)) {
+      return res.status(404).type('text/plain').send('Demo not found');
+    }
+    const svg = await QRCode.toString(simulatorUrl(id), { type: 'svg', margin: 1, width: 220 });
+    res.set({ 'Content-Type': 'image/svg+xml; charset=utf-8', 'Cache-Control': 'public, max-age=3600' }).send(svg);
   } catch (err) {
     next(err);
   }

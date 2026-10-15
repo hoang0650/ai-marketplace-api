@@ -16,6 +16,7 @@ const COPY = {
   'chat.newMessage': ['Tin nhắn mới', '{sender}: {preview}'],
   'order.new': ['Đơn hàng mới', '{buyer} đã mua {product} ({ownership})'],
   'order.paid': ['Thanh toán thành công', '{product} đã thanh toán bằng ví AI Markets.'],
+  'order.refunded': ['Đã hoàn tiền đơn hàng', '{amount} {currency} cho {product} đã được hoàn vào ví AI Markets.'],
   'order.paidLicense': ['Thanh toán thành công', '{product} · license {licenseKey}. Email xác nhận đã gửi.'],
   'dispute.opened': ['Khiếu nại đơn hàng', '{actor} đã khiếu nại {product}. Khoản thu của seller bị tạm giữ cho đến khi giải quyết.'],
   'dispute.closedSeller': ['Khiếu nại đã đóng', 'Khiếu nại về {product} đã được giải quyết có lợi cho seller. Khoản thanh toán đã có thể rút.'],
@@ -75,6 +76,7 @@ const EMAIL_COPY_EN = {
   'dispute.refundBuyer': ['Refund completed', '{amount} {currency} for {product} has been refunded to your AI Markets wallet.'],
   'dispute.refundSeller': ['Dispute: buyer refunded', 'The payable of {amount} {currency} for {product} was reversed (commission/tax adjusted on the ledger).'],
   'agent.rentRefunded': ['Agent rental refunded', '{brand}: {price} has been refunded to your wallet.'],
+  'order.refunded': ['Order refunded', '{amount} {currency} for {product} has been refunded to your AI Markets wallet.'],
 };
 const EMAIL_KEYS = new Set(Object.keys(EMAIL_COPY_EN));
 

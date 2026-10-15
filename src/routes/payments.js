@@ -40,6 +40,15 @@ router.post('/refunds', authenticate, requireRoles('admin'), async (req, res, ne
       actorId: req.user._id,
       eventId: req.body?.eventId || null,
     });
+    if (!result.duplicate) {
+      const { notifyUser } = require('../utils/notify');
+      await notifyUser(
+        order.buyer,
+        'order.refunded',
+        { product: order.productName, amount: result.reversed?.grossAmount ?? '', currency: order.currency || 'USD' },
+        '/wallet',
+      ).catch((err) => console.error('[notify] order refund', err.message));
+    }
     res.status(201).json(result);
   } catch (err) {
     next(err);
