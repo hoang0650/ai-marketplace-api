@@ -26,7 +26,11 @@ services:
     security_opt: ["no-new-privileges:true"]
     mem_limit: 256m
     networks: [gw-egress, gw-docker]
-    depends_on: [docker-proxy]
+    depends_on:
+      docker-proxy:
+        condition: service_started
+      sandbox-net:
+        condition: service_completed_successfully
 
   # Only the gateway can reach this; it exposes containers + exec, nothing else.
   docker-proxy:
@@ -51,6 +55,17 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks: [gw-docker]
+
+  # One-shot: compose only creates networks that some service uses, so this
+  # attaches to aim-sbx-net (forcing its creation) and exits immediately.
+  # The gateway depends on it, so `up -d gateway` creates the sandbox network.
+  sandbox-net:
+    image: aimarkets/sandbox-base:latest
+    command: ["true"]
+    restart: "no"
+    user: "1000"
+    cap_drop: [ALL]
+    networks: [aim-sbx-net]
 
   # Build-only service so `docker compose build` produces the sandbox image.
   sandbox-image:
