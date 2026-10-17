@@ -9,6 +9,9 @@ const router = express.Router();
 const MAX_B64 = 11_000_000;
 
 const { gpuConfig, gpuFetch, promoInfo } = require('../utils/aimx-gpu');
+const { failMessage, transient } = require('../utils/studio-errors');
+
+const RETRY_MAX_BYTES = 200_000; // retry small jobs (text-only TTS) once on transient worker errors
 
 const gpu = () => (gpuConfig().enabled ? gpuConfig() : null);
 
@@ -60,9 +63,10 @@ async function submit(req, res, next, kind, payload, meta) {
         meta: { channel: 'studio', kind, remoteId: remote.id },
       });
     }
+    const small = JSON.stringify(payload).length <= RETRY_MAX_BYTES;
     const job = await StudioJob.create({
       user: userId, kind, remoteId: remote.id, status: remote.status || 'queued', free: d.free, charged: d.charge,
-      walletTx: tx?._id || null, ...meta,
+      walletTx: tx?._id || null, retryPayload: small ? payload : null, ...meta,
     });
     res.status(202).json({ id: String(job._id), status: job.status, free: d.free, charged: d.charge, remainingFree: d.remainingFree, position: remote.position });
   } catch (e) {
@@ -168,13 +172,23 @@ router.get('/jobs/:id', authenticate, async (req, res, next) => {
         if (j.expires_at) job.expiresAt = new Date(j.expires_at * 1000);
         job.$locals.position = j.position;
       }
+      if (job.status === 'failed' && job.retries < 1 && job.retryPayload && transient(job.error)) {
+        // One automatic resubmit when the worker hiccups; the user keeps polling the same job.
+        const path = { fast: '/v1/video/fast', talking: '/v1/video/talking', tts: '/v1/tts' }[job.kind];
+        const rr = await gpuFetch(path, { method: 'POST', body: JSON.stringify(job.retryPayload), timeout: 60000 }).catch(() => null);
+        if (rr && rr.ok) {
+          const again = await rr.json();
+          job.retries += 1; job.remoteId = again.id; job.status = again.status || 'queued'; job.$locals.position = again.position;
+        }
+      }
+      if (job.status !== 'queued' && job.status !== 'running') job.retryPayload = null;
       if (job.isModified()) await job.save();
       if (job.status === 'failed') await refundIfNeeded(job);
     }
     const ok = job.status === 'succeeded' && (!job.expiresAt || job.expiresAt > new Date());
     res.json({
       id: String(job._id), kind: job.kind, status: job.status, position: job.$locals.position ?? null,
-      timings: job.timings, error: job.status === 'failed' ? 'Tạo video thất bại' + (job.refunded ? ' (đã hoàn phí)' : '') : '',
+      timings: job.timings, error: job.status === 'failed' ? failMessage(job.kind, job.error, job.refunded) : '',
       charged: job.charged, free: job.free, refunded: job.refunded, expiresAt: job.expiresAt,
       videoUrl: ok && job.kind !== 'tts' ? `/v1/studio/jobs/${job._id}/video` : null,
       audioUrl: ok && job.kind === 'tts' ? `/v1/studio/jobs/${job._id}/audio` : null,
@@ -200,3 +214,5 @@ router.get('/jobs/:id/audio', authenticate, (req, res, next) => stream(req, res,
 router.get('/jobs/:id/image', authenticate, (req, res, next) => stream(req, res, next, 'jpg'));
 
 module.exports = router;
+
+
