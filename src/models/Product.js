@@ -83,6 +83,9 @@ const contentMetaSchema = new mongoose.Schema(
     creditUnit: { type: String, enum: ['character', 'word', ''], default: '' },
     charactersPerCredit: { type: Number, default: 1000, min: 1 },
     episodeCount: { type: Number, default: 0, min: 0 },
+    /** Series player: overall synopsis and genre chips. */
+    synopsis: { type: String, default: '', maxlength: 4000 },
+    genres: { type: [String], default: [] },
     licenseTerm: { type: String, enum: ['day', 'month', 'year', ''], default: '' },
     licensePrices: {
       day: { type: Number, default: 0, min: 0 },
