@@ -41,6 +41,9 @@ const schema = new mongoose.Schema(
     lastReportAt: { type: Date, default: null },
     finishedAt: { type: Date, default: null },
     providerResourceId: { type: String, default: '' },
+    /** Shared AI Markets RTX 5090: ran during the free launch promo (no wallet charge). */
+    freePromo: { type: Boolean, default: false },
+    startedAt: { type: Date, default: null },
     /** Billed GPU workspace the job runs on (per-minute wallet billing). */
     rental: { type: mongoose.Schema.Types.ObjectId, ref: 'GpuRental', default: null, index: true },
   },

@@ -14,6 +14,9 @@ const bundle = require('../utils/training/bundle');
 const { notifyUser } = require('../utils/notify');
 const { publicProvider, scrubVendor } = require('../utils/white-label');
 const { sendError: sendGpuError } = require('./gpu');
+const aimx = require('../utils/aimx-gpu');
+const WalletTx = require('../models/WalletTx');
+const { getAvailableBalance } = require('../utils/wallet');
 
 const router = express.Router();
 
@@ -45,6 +48,11 @@ const MESSAGES = {
   JOB_FINISHED: 'Job đã kết thúc.',
   ARTIFACT_NOT_READY: 'Model chưa sẵn sàng để tải.',
   ARTIFACT_INVALID: 'File model không hợp lệ.',
+  SHARED_GPU_BUSY: 'Bạn đang có một job train trên GPU dùng chung. Vui lòng đợi job đó xong.',
+  SHARED_GPU_DAILY: 'Bạn đã dùng hết số lần train miễn phí hôm nay trên GPU dùng chung.',
+  SHARED_GPU_QUEUE_FULL: 'Hàng đợi GPU đang đầy, vui lòng thử lại sau.',
+  SHARED_GPU_FUNDS: 'Số dư ví không đủ cho thời lượng train tối đa trên GPU dùng chung.',
+  SHARED_GPU_UNAVAILABLE: 'GPU dùng chung đang bảo trì, vui lòng thử lại sau.',
 };
 
 function sendError(res, next, err) {
@@ -106,6 +114,8 @@ function publicJob(doc, rental) {
     rentalId: rental ? String(rental._id) : null,
     workspaceStatus: rental?.status || null,
     autoStop: doc.autoStop !== false,
+    shared: doc.provider === 'aimx',
+    freePromo: Boolean(doc.freePromo),
     artifact: doc.artifactObject ? { size: doc.artifactSize || 0 } : null,
     finishedAt: doc.finishedAt,
     createdAt: doc.createdAt,
@@ -190,6 +200,7 @@ function applyReport(doc, body = {}) {
 
   const status = String(body.status || '');
   if (status === 'running' && ['queued', 'paused'].includes(doc.status)) doc.status = 'running';
+  if (status === 'running' && !doc.startedAt) doc.startedAt = new Date();
   if (status === 'succeeded' || status === 'failed') {
     doc.status = status;
     doc.finishedAt = new Date();
@@ -199,7 +210,41 @@ function applyReport(doc, body = {}) {
   return false;
 }
 
+/** The shared GPU reports through the job token; this only catches jobs the GPU dropped (crash, timeout, restart). */
+async function syncShared(doc) {
+  if (FINISHED.includes(doc.status) || !doc.providerResourceId) return;
+  const r = await aimx.gpuFetch(`/v1/jobs/${doc.providerResourceId}`).catch(() => null);
+  if (!r) return;
+  const remote = r.status === 404 ? { status: 'failed', error: 'lost' } : r.ok ? await r.json() : null;
+  if (!remote) return;
+  if (remote.status === 'queued' && remote.position) doc.stage = 'queued';
+  if (remote.status === 'failed' || (remote.status === 'succeeded' && doc.status !== 'succeeded' && Date.now() - (doc.lastReportAt || 0) > 120e3)) {
+    doc.status = 'failed';
+    doc.finishedAt = new Date();
+    doc.logs = `${doc.logs || ''}\nGPU job ended: ${remote.error || 'no final report'}`.slice(-LOG_MAX);
+    await doc.save();
+    await finishJob(doc);
+  } else if (doc.isModified()) {
+    await doc.save();
+  }
+}
+
+/** Shared 5090 outside the promo: per-minute wallet debit once the job ends. */
+async function chargeShared(doc) {
+  if (doc.provider !== 'aimx' || doc.freePromo || doc.cost > 0) return;
+  const seconds = ((doc.finishedAt || new Date()) - (doc.startedAt || doc.createdAt)) / 1000;
+  const amount = aimx.trainingCharge(seconds, aimx.trainingLimits().pricePerHour);
+  if (!(amount > 0)) return;
+  await WalletTx.create({
+    user: doc.buyer, type: 'debit', amount, status: 'completed',
+    note: `Train trên RTX 5090 (${doc.jobId})`, meta: { channel: 'training', jobId: doc.jobId, seconds: Math.round(seconds) },
+  });
+  doc.cost = amount;
+  await doc.save();
+}
+
 async function finishJob(doc) {
+  await chargeShared(doc).catch(() => undefined);
   const rental = doc.rental ? await GpuRental.findById(doc.rental) : null;
   if (rental && doc.autoStop !== false && rental.status === 'running') {
     try {
@@ -254,6 +299,89 @@ router.post(
 
 // ---------- buyer API ----------
 
+/** GET /v1/training-jobs/gpu-options — shared AI Markets 5090 (+ promo) and rentable offers (best effort). */
+router.get(
+  '/gpu-options',
+  authenticate,
+  wrap(async (req, res) => {
+    const shared = aimx.gpuConfig().enabled ? aimx.sharedOffer() : null;
+    let offers = [];
+    let offersError = '';
+    try {
+      offers = await svc.publicOffers();
+    } catch (err) {
+      offersError = err.code || 'PROVIDER_ERROR';
+    }
+    const cfg = gpuRentalConfig();
+    res.json({
+      shared,
+      offers,
+      offersError,
+      promo: aimx.promoInfo(),
+      limits: { minPrepayHours: cfg.minPrepayHours, ...aimx.trainingLimits() },
+    });
+  })
+);
+
+async function createSharedJob(req, res, body) {
+  const source = String(body.source || '');
+  const task = String(body.task || '');
+  if (!catalog.isSource(source)) throw catalog.httpError(400, 'TRAINING_SOURCE_INVALID');
+  if (!minio.isMinioEnabled()) throw catalog.httpError(503, 'MINIO_NOT_CONFIGURED');
+  const lim = aimx.trainingLimits();
+  const promo = aimx.promoActive();
+  const active = await TrainingJob.countDocuments({ buyer: req.user._id, provider: 'aimx', status: { $in: ['queued', 'running'] } });
+  if (active >= lim.perUserActive) throw catalog.httpError(429, 'SHARED_GPU_BUSY');
+  const since = new Date(Date.now() - 24 * 3600e3);
+  const today = await TrainingJob.countDocuments({ buyer: req.user._id, provider: 'aimx', createdAt: { $gte: since } });
+  if (promo && today >= lim.perUserDaily) throw catalog.httpError(429, 'SHARED_GPU_DAILY');
+  if (!promo) {
+    const need = Math.round((lim.pricePerHour * lim.maxMinutes) / 60 * 100) / 100;
+    const { available } = await getAvailableBalance(req.user._id);
+    if (available + 1e-9 < need) throw catalog.httpError(402, 'SHARED_GPU_FUNDS');
+  }
+
+  const dataset = await loadDataset(req.user, body.datasetId);
+  const plan = catalog.planJob({ source, task, dataset, hfDataset: body.hfDataset, modelId: body.modelId });
+  const config = catalog.sanitizeConfig(task, body.config);
+  const labels = [...new Set(plan.files.map((f) => f.label).filter(Boolean))].sort();
+  const { token, hash } = bundle.newJobToken();
+  const jobId = `tj_${crypto.randomBytes(8).toString('hex')}`;
+  const built = await bundle.buildJobBundle({
+    userId: req.user._id, jobId, source, task, files: plan.files, modelId: plan.modelId, hfDataset: plan.hfDataset, config, labels,
+  });
+  const doc = await TrainingJob.create({
+    jobId, buyer: req.user._id, source, task, modelId: plan.modelId,
+    datasetId: dataset ? String(dataset._id) : '', dataset: dataset ? dataset._id : null,
+    datasetName: dataset ? dataset.name : plan.hfDataset, hfDataset: plan.hfDataset,
+    provider: 'aimx', gpuType: 'RTX 5090', status: 'queued', stage: 'queued', config, autoStop: true,
+    reportTokenHash: hash, freePromo: promo,
+    logs: `Đã xếp hàng trên GPU RTX 5090 dùng chung (tối đa ${lim.maxMinutes} phút/job).`,
+  });
+  let remote;
+  try {
+    const r = await aimx.gpuFetch('/v1/train', {
+      method: 'POST',
+      timeout: 30000,
+      body: JSON.stringify({
+        bootstrap_url: built.bootstrapUrl, manifest_url: built.manifestUrl, job_token: token, api_job_id: jobId,
+        report_url: `${bundle.apiBase()}/v1/training-jobs/${jobId}/report`, max_minutes: lim.maxMinutes,
+      }),
+    });
+    if (r.status === 429) throw catalog.httpError(429, 'SHARED_GPU_QUEUE_FULL');
+    if (!r.ok) throw catalog.httpError(503, 'SHARED_GPU_UNAVAILABLE');
+    remote = await r.json();
+  } catch (err) {
+    await doc.deleteOne().catch(() => undefined);
+    await minio.removeTrainingObjects(built.objects).catch(() => undefined);
+    if (err.code && MESSAGES[err.code]) throw err;
+    throw catalog.httpError(503, 'SHARED_GPU_UNAVAILABLE');
+  }
+  doc.providerResourceId = remote.id;
+  await doc.save();
+  return res.status(201).json(publicJob(doc, null));
+}
+
 router.get(
   '/',
   authenticate,
@@ -262,6 +390,7 @@ router.get(
     const ids = rows.map((r) => r.rental).filter(Boolean);
     const rentals = ids.length ? await GpuRental.find({ _id: { $in: ids } }).lean() : [];
     const byId = new Map(rentals.map((r) => [String(r._id), r]));
+    await Promise.all(rows.filter((d) => d.provider === 'aimx' && !FINISHED.includes(d.status)).map((d) => syncShared(d).catch(() => undefined)));
     res.json(rows.map((doc) => publicJob(doc, doc.rental ? byId.get(String(doc.rental)) : null)));
   })
 );
@@ -277,7 +406,11 @@ router.post(
   authenticate,
   wrap(async (req, res) => {
     const body = req.body || {};
-    const offerId = String(body.offerId || body.gpuType || '').trim() || (await defaultOfferId());
+    const picked = String(body.offerId || body.gpuType || '').trim();
+    if (picked === aimx.SHARED_OFFER_ID || (!picked && aimx.gpuConfig().enabled && (body.source || body.task))) {
+      return createSharedJob(req, res, body);
+    }
+    const offerId = picked || (await defaultOfferId());
     const jobId = `tj_${crypto.randomBytes(8).toString('hex')}`;
 
     if (!body.source && !body.task) {
@@ -389,6 +522,7 @@ router.get(
       rental = await svc.refreshRental(rental);
       await syncJob(doc, rental);
     }
+    if (doc.provider === 'aimx') await syncShared(doc);
     return res.json(publicJob(doc, rental));
   })
 );
@@ -415,12 +549,16 @@ router.delete(
     if (!doc) return res.status(404).json({ message: 'Not found' });
     let rental = doc.rental ? await GpuRental.findById(doc.rental) : null;
     if (rental) rental = await svc.terminateRental(rental);
+    if (doc.provider === 'aimx' && doc.providerResourceId && !FINISHED.includes(doc.status)) {
+      await aimx.gpuFetch(`/v1/jobs/${doc.providerResourceId}/cancel`, { method: 'POST' }).catch(() => undefined);
+    }
     if (!['succeeded', 'failed'].includes(doc.status)) {
       doc.status = 'cancelled';
       doc.finishedAt = doc.finishedAt || new Date();
     }
     if (rental) doc.cost = Math.round((rental.billedTotal || 0) * 100) / 100;
     await doc.save();
+    if (doc.provider === 'aimx' && doc.status === 'cancelled') await chargeShared(doc).catch(() => undefined);
     return res.json(publicJob(doc, rental));
   })
 );
