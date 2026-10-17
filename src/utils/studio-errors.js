@@ -1,5 +1,5 @@
 /** Turn a raw GPU worker error into a short, user-facing Vietnamese message (no URLs or stack text). */
-const LABEL = { tts: 'Tạo giọng nói thất bại', fast: 'Tạo video thất bại', talking: 'Tạo video avatar thất bại' };
+const LABEL = { tts: 'Tạo giọng nói thất bại', fast: 'Tạo video thất bại', talking: 'Tạo video avatar thất bại', film: 'Tạo phim AI thất bại' };
 
 function transient(raw) {
   return /\b(50[0234])\b|Internal Server Error|Connection (refused|reset)|ECONNRE|timed? ?out|CUDA out of memory|lost/i.test(String(raw || ''));

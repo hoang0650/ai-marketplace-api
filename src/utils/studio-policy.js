@@ -6,6 +6,8 @@ function studioPolicy(env = process.env) {
     fast: { freePerDay: num(env.STUDIO_FREE_FAST_PER_DAY, 5), price: num(env.STUDIO_PRICE_FAST_USD, 0.05) },
     talking: { freePerDay: num(env.STUDIO_FREE_TALKING_PER_DAY, 3), price: num(env.STUDIO_PRICE_TALKING_USD, 0.1) },
     tts: { freePerDay: num(env.STUDIO_FREE_TTS_PER_DAY, 30), price: num(env.STUDIO_PRICE_TTS_USD, 0.01) },
+    // A film is several heavy GPU jobs (one per scene), so it has its own, smaller promo cap.
+    film: { freePerDay: num(env.STUDIO_FREE_FILM_PER_DAY, 1), price: num(env.STUDIO_PRICE_FILM_USD, 0.3), promoCap: num(env.STUDIO_PROMO_FILM_PER_DAY, 3) },
     promoPerDay: num(env.STUDIO_PROMO_PER_DAY, 20),
   };
 }
@@ -24,7 +26,7 @@ function decide({ kind, usedToday, available, policy = studioPolicy(), promo = f
   if (!p) return { ok: false, status: 400, code: 'BAD_KIND' };
   if (promo) {
     // Launch promo: never charge; a larger daily cap still prevents abuse.
-    const cap = Math.max(p.freePerDay, policy.promoPerDay || 0);
+    const cap = p.promoCap != null ? p.promoCap : Math.max(p.freePerDay, policy.promoPerDay || 0);
     if (usedToday >= cap) return { ok: false, status: 429, code: 'FREE_QUOTA_EXHAUSTED' };
     return { ok: true, free: true, charge: 0, remainingFree: cap - usedToday - 1, promo: true };
   }

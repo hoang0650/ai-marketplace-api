@@ -49,7 +49,7 @@ async function submit(req, res, next, kind, payload, meta) {
     const d = decide({ kind, usedToday, available, promo: promoInfo().active });
     if (!d.ok) return fail(res, d.status, d.code, { price: d.price });
 
-    const path = { fast: '/v1/video/fast', talking: '/v1/video/talking', tts: '/v1/tts' }[kind];
+    const path = { fast: '/v1/video/fast', talking: '/v1/video/talking', tts: '/v1/tts', film: '/v1/film' }[kind];
     const r = await gpuFetch(path, { method: 'POST', body: JSON.stringify(payload), timeout: 60000 });
     if (r.status === 429) return fail(res, 429, 'QUEUE_FULL');
     if (!r.ok) return fail(res, 502, 'STUDIO_UNAVAILABLE');
@@ -59,7 +59,7 @@ async function submit(req, res, next, kind, payload, meta) {
     if (d.charge > 0) {
       tx = await WalletTx.create({
         user: userId, type: 'debit', amount: d.charge, status: 'completed',
-        note: `AI Studio ${{ fast: 'video nhanh', talking: 'avatar nói', tts: 'giọng nói' }[kind]} (${remote.id.slice(0, 8)})`,
+        note: `AI Studio ${{ fast: 'video nhanh', talking: 'avatar nói', tts: 'giọng nói', film: 'phim AI' }[kind]} (${remote.id.slice(0, 8)})`,
         meta: { channel: 'studio', kind, remoteId: remote.id },
       });
     }
@@ -79,13 +79,14 @@ router.get('/quota', authenticate, async (req, res, next) => {
   try {
     const p = studioPolicy();
     const promo = promoInfo();
-    const cap = (k) => (promo.active ? Math.max(p[k].freePerDay, p.promoPerDay) : p[k].freePerDay);
-    const [fast, talking, tts, bal] = await Promise.all([usage(req.user._id, 'fast'), usage(req.user._id, 'talking'), usage(req.user._id, 'tts'), getAvailableBalance(req.user._id)]);
+    const cap = (k) => (promo.active ? (p[k].promoCap != null ? p[k].promoCap : Math.max(p[k].freePerDay, p.promoPerDay)) : p[k].freePerDay);
+    const [fast, talking, tts, film, bal] = await Promise.all([usage(req.user._id, 'fast'), usage(req.user._id, 'talking'), usage(req.user._id, 'tts'), usage(req.user._id, 'film'), getAvailableBalance(req.user._id)]);
     res.json({
       enabled: Boolean(gpu()),
       fast: { used: fast, free: cap('fast'), price: promo.active ? 0 : p.fast.price },
       talking: { used: talking, free: cap('talking'), price: promo.active ? 0 : p.talking.price },
       tts: { used: tts, free: cap('tts'), price: promo.active ? 0 : p.tts.price },
+      film: { used: film, free: cap('film'), price: promo.active ? 0 : p.film.price },
       available: bal.available,
       promo: promoInfo(),
     });
@@ -109,6 +110,21 @@ router.post('/video/talking', authenticate, (req, res, next) => {
   const voice = typeof b.voiceBase64 === 'string' && b.voiceBase64.length < 6_000_000 ? b.voiceBase64 : undefined;
   if (img.error || !text || (!img.image_base64 && !img.image_url)) return fail(res, 400, 'BAD_INPUT');
   return submit(req, res, next, 'talking', { text, lang, ...img, voice_base64: voice }, { prompt: text, lang });
+});
+
+const clean = (v, n) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f]+/g, ' ').trim().slice(0, n) : '');
+
+/** AI Film: a scene list rendered by ComfyUI on the 5090 (Flux schnell -> Wan2.2 -> RIFE + VieNeu voice-over). */
+router.post('/film', authenticate, (req, res, next) => {
+  const b = req.body || {};
+  const scenes = (Array.isArray(b.scenes) ? b.scenes : []).slice(0, 6)
+    .map((s, i) => ({ prompt: clean(s?.prompt, 600), narration: clean(s?.narration, 400), seed: Number.isInteger(s?.seed) ? s.seed : 100 + i }))
+    .filter((s) => s.prompt.length >= 3);
+  const lang = ['vi', 'en', 'zh'].includes(b.lang) ? b.lang : 'vi';
+  const voice = clean(b.voice, 80) || undefined;
+  const title = clean(b.title, 120);
+  if (!scenes.length) return fail(res, 400, 'BAD_INPUT');
+  return submit(req, res, next, 'film', { title, lang, voice, scenes }, { prompt: (title || scenes[0].prompt).slice(0, 1000), lang });
 });
 
 router.get('/voices', authenticate, async (req, res, next) => {
@@ -171,10 +187,11 @@ router.get('/jobs/:id', authenticate, async (req, res, next) => {
         job.status = j.status; job.timings = j.timings || null; job.error = j.error || '';
         if (j.expires_at) job.expiresAt = new Date(j.expires_at * 1000);
         job.$locals.position = j.position;
+        job.$locals.progress = j.progress || null;
       }
       if (job.status === 'failed' && job.retries < 1 && job.retryPayload && transient(job.error)) {
         // One automatic resubmit when the worker hiccups; the user keeps polling the same job.
-        const path = { fast: '/v1/video/fast', talking: '/v1/video/talking', tts: '/v1/tts' }[job.kind];
+        const path = { fast: '/v1/video/fast', talking: '/v1/video/talking', tts: '/v1/tts', film: '/v1/film' }[job.kind];
         const rr = await gpuFetch(path, { method: 'POST', body: JSON.stringify(job.retryPayload), timeout: 60000 }).catch(() => null);
         if (rr && rr.ok) {
           const again = await rr.json();
@@ -188,11 +205,11 @@ router.get('/jobs/:id', authenticate, async (req, res, next) => {
     const ok = job.status === 'succeeded' && (!job.expiresAt || job.expiresAt > new Date());
     res.json({
       id: String(job._id), kind: job.kind, status: job.status, position: job.$locals.position ?? null,
-      timings: job.timings, error: job.status === 'failed' ? failMessage(job.kind, job.error, job.refunded) : '',
+      progress: job.$locals.progress ?? null, timings: job.timings, error: job.status === 'failed' ? failMessage(job.kind, job.error, job.refunded) : '',
       charged: job.charged, free: job.free, refunded: job.refunded, expiresAt: job.expiresAt,
       videoUrl: ok && job.kind !== 'tts' ? `/v1/studio/jobs/${job._id}/video` : null,
       audioUrl: ok && job.kind === 'tts' ? `/v1/studio/jobs/${job._id}/audio` : null,
-      imageUrl: ok && job.kind === 'fast' ? `/v1/studio/jobs/${job._id}/image` : null,
+      imageUrl: ok && (job.kind === 'fast' || job.kind === 'film') ? `/v1/studio/jobs/${job._id}/image` : null,
     });
   } catch (e) { next(e); }
 });
