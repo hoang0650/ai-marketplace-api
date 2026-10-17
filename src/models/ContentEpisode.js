@@ -35,6 +35,10 @@ const contentEpisodeSchema = new mongoose.Schema(
       default: [],
     },
     published: { type: Boolean, default: true, index: true },
+    /** Free episodes play for any signed-in viewer; the rest need a license. Downloads always need a license. */
+    free: { type: Boolean, default: false },
+    synopsis: { type: String, default: '', maxlength: 2000 },
+    posterUrl: { type: String, default: '', maxlength: 800 },
   },
   { timestamps: true, collection: 'content_episodes' }
 );
