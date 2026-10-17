@@ -42,6 +42,8 @@ async function submit(req, res, next, kind, payload, meta) {
   try {
     if (!gpu()) return fail(res, 503, 'STUDIO_UNAVAILABLE');
     const userId = req.user._id;
+    const mine = await StudioJob.find({ user: userId, status: { $in: ['queued', 'running'] } }).limit(5);
+    for (const j of mine) await refreshJob(j).catch(() => {});
     const active = await StudioJob.countDocuments({ user: userId, status: { $in: ['queued', 'running'] }, createdAt: { $gte: new Date(Date.now() - 15 * 60e3) } });
     if (active > 0) return fail(res, 429, 'JOB_ACTIVE');
     const usedToday = await usage(userId, kind);
@@ -168,6 +170,57 @@ async function refundIfNeeded(job) {
   }
 }
 
+
+const STALE_MS = Number(process.env.STUDIO_STALE_MIN || 30) * 60e3;
+
+/** Pull the GPU worker state into a queued/running job (also used by the background poller and before the one-active-job check). */
+async function refreshJob(job) {
+  if (job.status !== 'queued' && job.status !== 'running') return job;
+    const r = await gpuFetch(`/v1/jobs/${job.remoteId}`).catch(() => null);
+    if (r && r.status === 404) { job.status = 'failed'; job.error = 'lost'; }
+    else if (r && r.ok) {
+      const j = await r.json();
+      job.status = j.status; job.timings = j.timings || null; job.error = j.error || '';
+      if (j.expires_at) job.expiresAt = new Date(j.expires_at * 1000);
+      job.$locals.position = j.position;
+      job.$locals.progress = j.progress || null;
+    }
+    if (job.status === 'failed' && job.retries < 1 && job.retryPayload && transient(job.error)) {
+      // One automatic resubmit when the worker hiccups; the user keeps polling the same job.
+      const path = { fast: '/v1/video/fast', talking: '/v1/video/talking', tts: '/v1/tts', film: '/v1/film' }[job.kind];
+      const rr = await gpuFetch(path, { method: 'POST', body: JSON.stringify(job.retryPayload), timeout: 60000 }).catch(() => null);
+      if (rr && rr.ok) {
+        const again = await rr.json();
+        job.retries += 1; job.remoteId = again.id; job.status = again.status || 'queued'; job.$locals.position = again.position;
+      }
+    }
+    if (job.status !== 'queued' && job.status !== 'running') job.retryPayload = null;
+    if (job.isModified()) await job.save();
+    if (job.status === 'failed') await refundIfNeeded(job);
+  if ((job.status === 'queued' || job.status === 'running') && Date.now() - new Date(job.createdAt).getTime() > STALE_MS) {
+    job.status = 'failed'; job.error = 'timeout'; job.retryPayload = null;
+    await job.save();
+    await refundIfNeeded(job);
+  }
+  return job;
+}
+
+let pollTimer = null;
+/** Finishes jobs whose browser/app tab closed, so they never block the user with JOB_ACTIVE. STUDIO_POLLER=off disables. */
+function startStudioPoller({ tickMs = 15000 } = {}) {
+  if (pollTimer || process.env.STUDIO_POLLER === 'off') return;
+  const tick = async () => {
+    try {
+      const mongoose = require('mongoose');
+      if (mongoose.connection.readyState !== 1 || !gpu()) return;
+      const rows = await StudioJob.find({ status: { $in: ['queued', 'running'] }, updatedAt: { $lt: new Date(Date.now() - 10000) } }).sort({ updatedAt: 1 }).limit(25);
+      for (const j of rows) await refreshJob(j).catch((e) => console.error('[studio] refresh', String(j._id), e.message));
+    } catch (e) { console.error('[studio] poller', e.message); }
+  };
+  pollTimer = setInterval(tick, tickMs);
+  pollTimer.unref?.();
+}
+
 router.get('/jobs', authenticate, async (req, res, next) => {
   try {
     const rows = await StudioJob.find({ user: req.user._id }).sort({ createdAt: -1 }).limit(20).lean();
@@ -179,29 +232,7 @@ router.get('/jobs/:id', authenticate, async (req, res, next) => {
   try {
     const job = await ownJob(req, res);
     if (!job) return;
-    if (job.status === 'queued' || job.status === 'running') {
-      const r = await gpuFetch(`/v1/jobs/${job.remoteId}`).catch(() => null);
-      if (r && r.status === 404) { job.status = 'failed'; job.error = 'lost'; }
-      else if (r && r.ok) {
-        const j = await r.json();
-        job.status = j.status; job.timings = j.timings || null; job.error = j.error || '';
-        if (j.expires_at) job.expiresAt = new Date(j.expires_at * 1000);
-        job.$locals.position = j.position;
-        job.$locals.progress = j.progress || null;
-      }
-      if (job.status === 'failed' && job.retries < 1 && job.retryPayload && transient(job.error)) {
-        // One automatic resubmit when the worker hiccups; the user keeps polling the same job.
-        const path = { fast: '/v1/video/fast', talking: '/v1/video/talking', tts: '/v1/tts', film: '/v1/film' }[job.kind];
-        const rr = await gpuFetch(path, { method: 'POST', body: JSON.stringify(job.retryPayload), timeout: 60000 }).catch(() => null);
-        if (rr && rr.ok) {
-          const again = await rr.json();
-          job.retries += 1; job.remoteId = again.id; job.status = again.status || 'queued'; job.$locals.position = again.position;
-        }
-      }
-      if (job.status !== 'queued' && job.status !== 'running') job.retryPayload = null;
-      if (job.isModified()) await job.save();
-      if (job.status === 'failed') await refundIfNeeded(job);
-    }
+    await refreshJob(job);
     const ok = job.status === 'succeeded' && (!job.expiresAt || job.expiresAt > new Date());
     res.json({
       id: String(job._id), kind: job.kind, status: job.status, position: job.$locals.position ?? null,
@@ -231,5 +262,7 @@ router.get('/jobs/:id/audio', authenticate, (req, res, next) => stream(req, res,
 router.get('/jobs/:id/image', authenticate, (req, res, next) => stream(req, res, next, 'jpg'));
 
 module.exports = router;
+module.exports.startStudioPoller = startStudioPoller;
+module.exports.refreshJob = refreshJob;
 
 
