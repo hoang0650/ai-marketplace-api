@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 
-/** GPU studio job (fast video / talking avatar) proxied to the self-hosted GPU service. */
+/** GPU studio job (fast video / talking avatar / TTS) proxied to the self-hosted GPU service. */
 const studioJobSchema = new mongoose.Schema(
   {
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
@@ -16,6 +16,9 @@ const studioJobSchema = new mongoose.Schema(
     timings: { type: mongoose.Schema.Types.Mixed, default: null },
     error: { type: String, default: '' },
     expiresAt: { type: Date, default: null },
+    // Small request bodies (text-only TTS) kept until the job settles, for one automatic retry.
+    retryPayload: { type: mongoose.Schema.Types.Mixed, default: null },
+    retries: { type: Number, default: 0 },
   },
   { timestamps: true },
 );
