@@ -1,4 +1,5 @@
 const { gpuConfig, gpuFetch } = require('./aimx-gpu');
+const { voiceLang, voiceFx } = require('./voice-params');
 
 const VIENEU_MODEL = 'pnnbao-ump/VieNeu-TTS-v3-Turbo';
 const CHATTERBOX_MODEL = 'ResembleAI/chatterbox-multilingual';
@@ -9,12 +10,12 @@ function enabled() {
 
 function langOf(input = {}) {
   const l = String(input.language || input.lang || 'vi').toLowerCase().slice(0, 2);
-  return ['vi', 'en', 'zh'].includes(l) ? l : 'vi';
+  return voiceLang(l);
 }
 
 /** Synthesize on the AI Markets 5090 (VieNeu for vi/en, Chatterbox for zh); waits up to `waitMs`. */
-async function synth({ text, lang = 'vi', voice, sampleBuffer, waitMs = 90000 }) {
-  const body = { text: String(text || '').slice(0, 2000), lang };
+async function synth({ text, lang = 'vi', voice, sampleBuffer, speed, pitch, waitMs = 90000 }) {
+  const body = { text: String(text || '').slice(0, 2000), lang, ...voiceFx({ speed, pitch }) };
   if (voice) body.voice = voice;
   if (sampleBuffer) body.voice_base64 = Buffer.from(sampleBuffer).toString('base64');
   const r = await gpuFetch('/v1/tts', { method: 'POST', body: JSON.stringify(body), timeout: 60000 });

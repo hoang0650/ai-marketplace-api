@@ -18,6 +18,7 @@ function providerPath(path) {
   const submit = { '/v1/video/fast': 'fast', '/v1/video/talking': 'talking', '/v1/tts': 'tts', '/v1/film': 'film', '/v1/train': 'train' }[p];
   if (submit) return `/providers/aimx/jobs/${submit}`;
   if (p === '/v1/voices') return '/providers/aimx/voices';
+  if (p === '/v1/voice-options') return '/providers/aimx/voice-options';
   if (p === '/health') return '/providers/aimx/health';
   let m = p.match(/^\/v1\/jobs\/([a-f0-9]{32})(\/cancel)?$/);
   if (m) return `/providers/aimx/jobs/${m[1]}${m[2] || ''}`;

@@ -382,7 +382,7 @@ async function runGpuVoice(req, res, product, inferInput) {
   const started = Date.now();
   let audio;
   try {
-    audio = await aimxTts.synth({ text, lang, voice, sampleBuffer });
+    audio = await aimxTts.synth({ text, lang, voice, sampleBuffer, speed: inferInput?.speed, pitch: inferInput?.pitch });
   } catch (e) {
     return res.status(e.status || 502).json({ message: scrubVendor(e.message) });
   }
