@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 const studioJobSchema = new mongoose.Schema(
   {
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-    kind: { type: String, enum: ['fast', 'talking', 'tts'], required: true },
+    kind: { type: String, enum: ['fast', 'talking', 'tts', 'film'], required: true },
     remoteId: { type: String, required: true },
     status: { type: String, enum: ['queued', 'running', 'succeeded', 'failed'], default: 'queued' },
     free: { type: Boolean, default: true },

@@ -30,6 +30,7 @@ const {
   licenseCoversProduct,
 } = require('../utils/license-keys');
 const LicenseKey = require('../models/LicenseKey');
+const aimxTts = require('../utils/aimx-tts');
 
 const router = express.Router();
 
@@ -146,6 +147,10 @@ router.post('/run', authenticate, async (req, res, next) => {
         });
       }
       inferInput = voiceInferInput(product, input);
+    }
+
+    if (isVoiceProduct(product) && !isVoiceSttRequest(input) && aimxTts.enabled() && !providerOverride && !modelOverride) {
+      return await runGpuVoice(req, res, product, inferInput);
     }
 
     const resolved = resolveProviderForProduct(product);
@@ -348,6 +353,57 @@ router.post('/run', authenticate, async (req, res, next) => {
     next(err);
   }
 });
+
+/** Voice listings speak through the AI Markets 5090: VieNeu-TTS (vi/en), Chatterbox (zh). */
+async function runGpuVoice(req, res, product, inferInput) {
+  const text = String(inferInput?.prompt || inferInput?.text || '').trim();
+  if (!text) return res.status(400).json({ message: 'text is required' });
+  const lang = aimxTts.langOf(inferInput);
+  const meta = product.contentMeta || {};
+  let voice;
+  let sampleBuffer;
+  if (isVoicePresetCategory(product.category) || meta.voiceSource === 'preset') {
+    voice = String(meta.presetVoiceId || meta.presetVoiceName || '').trim() || undefined;
+  } else {
+    sampleBuffer = (await fetchMp3Buffer(voiceSampleUrl(product))).buffer;
+  }
+  const usage = { input_tokens: 0, output_tokens: 0, total_tokens: 0, unit: 'characters', quantity: Math.max(1, text.length) };
+  let cost = computeUsageCost(product, usage, inferInput, 0);
+  if (cost > 0) {
+    const now = new Date();
+    const licenses = await LicenseKey.find({ buyer: req.user._id, product: product._id, status: 'active' }).sort({ expiresAt: -1 }).limit(5).lean();
+    if (licenses.find((l) => licenseCoversProduct(l, product._id) && effectiveLicenseStatus(l, now) === 'active')) cost = 0;
+  }
+  const selfUse = String(req.user._id) === String(product.creator);
+  if (cost > 0 && !selfUse) {
+    const { available } = await getAvailableBalance(req.user._id);
+    if (available < cost) return res.status(402).json({ message: `Insufficient available wallet balance (need ${cost.toFixed(4)}).`, cost, available });
+  }
+  const started = Date.now();
+  let audio;
+  try {
+    audio = await aimxTts.synth({ text, lang, voice, sampleBuffer });
+  } catch (e) {
+    return res.status(e.status || 502).json({ message: scrubVendor(e.message) });
+  }
+  let charged = 0; let sellerNet = 0; let platformFee = 0;
+  if (cost > 0 && !selfUse) {
+    const billed = await chargeUsage({ buyerId: req.user._id, sellerId: product.creator, product, cost, note: `Playground: ${product.name}` });
+    ({ charged, sellerNet, platformFee } = billed);
+  }
+  const event = await UsageEvent.create({
+    deployment: null, product: product._id, buyer: req.user._id, seller: product.creator, inputTokens: 0, outputTokens: 0,
+    cost: charged, platformFee, sellerNet, provider: 'aimx_gpu', unit: 'characters', quantity: usage.quantity, rawUsage: usage,
+    source: 'playground', usageType: 'VOICE_TTS',
+  });
+  putVoiceAudio(event._id, audio.buffer, audio.contentType);
+  return res.json({
+    ok: true, id: event._id.toString(), status: 'COMPLETED', provider: 'AI Markets GPU', model: audio.model, endpointId: '',
+    delayTime: 0, executionTime: Date.now() - started,
+    output: { kind: 'audio', format: 'wav', text, audio_url: voiceAudioPublicUrl(req, event._id), timings: audio.timings, cost: charged },
+    usage, cost: charged, providerCost: 0, platformFee, sellerNet, currency: 'USD',
+  });
+}
 
 router.get('/audio/:file', (req, res) => {
   const id = String(req.params.file || '').replace(/\.mp3$/i, '');
