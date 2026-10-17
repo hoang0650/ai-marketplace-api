@@ -67,6 +67,7 @@ if (process.env.GPU_RENTAL_WORKER !== 'off') startBillingWorker();
 if (process.env.GAME_BILLING_WORKER !== 'off') startGameBillingWorker();
 if (process.env.AGENT_SUBSCRIPTION_WORKER !== 'off') startAgentSubscriptionWorker();
 if (process.env.VOTE_CYCLE_WORKER !== 'off') startVoteCycleWorker();
+require('./routes/studio').startStudioPoller();
 server.listen(config.port, () => {
   console.log(`[ai-marketplace-api] env=${config.nodeEnv} listening on http://localhost:${config.port}`);
   console.log(`[ai-marketplace-api] api v1 http://localhost:${config.port}/v1`);
