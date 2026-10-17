@@ -10,6 +10,7 @@ const MAX_B64 = 11_000_000;
 
 const { gpuConfig, gpuFetch, promoInfo } = require('../utils/aimx-gpu');
 const { failMessage, transient } = require('../utils/studio-errors');
+const { voiceLang, voiceFx } = require('../utils/voice-params');
 
 const RETRY_MAX_BYTES = 200_000; // retry small jobs (text-only TTS) once on transient worker errors
 
@@ -107,11 +108,11 @@ router.post('/video/fast', authenticate, (req, res, next) => {
 router.post('/video/talking', authenticate, (req, res, next) => {
   const b = req.body || {};
   const text = typeof b.text === 'string' ? b.text.trim().slice(0, 600) : '';
-  const lang = ['vi', 'en', 'zh'].includes(b.lang) ? b.lang : 'vi';
+  const lang = voiceLang(b.lang);
   const img = pickImage(b);
   const voice = typeof b.voiceBase64 === 'string' && b.voiceBase64.length < 6_000_000 ? b.voiceBase64 : undefined;
   if (img.error || !text || (!img.image_base64 && !img.image_url)) return fail(res, 400, 'BAD_INPUT');
-  return submit(req, res, next, 'talking', { text, lang, ...img, voice_base64: voice }, { prompt: text, lang });
+  return submit(req, res, next, 'talking', { text, lang, ...img, voice_base64: voice, ...voiceFx(b) }, { prompt: text, lang });
 });
 
 const clean = (v, n) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f]+/g, ' ').trim().slice(0, n) : '');
@@ -122,11 +123,25 @@ router.post('/film', authenticate, (req, res, next) => {
   const scenes = (Array.isArray(b.scenes) ? b.scenes : []).slice(0, 6)
     .map((s, i) => ({ prompt: clean(s?.prompt, 600), narration: clean(s?.narration, 400), seed: Number.isInteger(s?.seed) ? s.seed : 100 + i }))
     .filter((s) => s.prompt.length >= 3);
-  const lang = ['vi', 'en', 'zh'].includes(b.lang) ? b.lang : 'vi';
+  const lang = voiceLang(b.lang);
   const voice = clean(b.voice, 80) || undefined;
   const title = clean(b.title, 120);
   if (!scenes.length) return fail(res, 400, 'BAD_INPUT');
-  return submit(req, res, next, 'film', { title, lang, voice, scenes }, { prompt: (title || scenes[0].prompt).slice(0, 1000), lang });
+  return submit(req, res, next, 'film', { title, lang, voice, scenes, ...voiceFx(b) }, { prompt: (title || scenes[0].prompt).slice(0, 1000), lang });
+});
+
+/** Speed / pitch / language options (public, cached by the AI service). */
+router.get('/voice-options', async (req, res, next) => {
+  try {
+    if (!gpu()) return fail(res, 503, 'STUDIO_UNAVAILABLE');
+    const r = await gpuFetch('/v1/voice-options', { timeout: 10000 });
+    if (!r.ok) return fail(res, 502, 'STUDIO_UNAVAILABLE');
+    res.set('cache-control', 'public, max-age=300');
+    res.json(await r.json());
+  } catch (e) {
+    if (e.code === 'STUDIO_UNAVAILABLE' || e.name === 'TimeoutError' || e.cause) return fail(res, 503, 'STUDIO_UNAVAILABLE');
+    next(e);
+  }
 });
 
 router.get('/voices', authenticate, async (req, res, next) => {
@@ -144,11 +159,11 @@ router.get('/voices', authenticate, async (req, res, next) => {
 router.post('/tts', authenticate, (req, res, next) => {
   const b = req.body || {};
   const text = typeof b.text === 'string' ? b.text.trim().slice(0, 2000) : '';
-  const lang = ['vi', 'en', 'zh'].includes(b.lang) ? b.lang : 'vi';
+  const lang = voiceLang(b.lang);
   const voice = typeof b.voice === 'string' ? b.voice.slice(0, 80) : undefined;
   const sample = typeof b.voiceBase64 === 'string' && b.voiceBase64.length < 6_000_000 ? b.voiceBase64 : undefined;
   if (!text) return fail(res, 400, 'BAD_INPUT');
-  return submit(req, res, next, 'tts', { text, lang, voice, voice_base64: sample }, { prompt: text.slice(0, 1000), lang });
+  return submit(req, res, next, 'tts', { text, lang, voice, voice_base64: sample, ...voiceFx(b) }, { prompt: text.slice(0, 1000), lang });
 });
 
 async function ownJob(req, res) {
