@@ -17,6 +17,7 @@ const {
   uploadContentBuffer,
   getContentObjectStream,
 } = require('../config/minio');
+const minioCfg = require('../config/minio');
 const { playableSourceUrl } = require('../data/content-hub-products');
 const { fetchSafeHttp } = require('../utils/safe-http-url');
 
@@ -309,9 +310,29 @@ async function handlePlay(req, res, next) {
     if (!page) return res.status(404).json({ message: 'No media' });
 
     if (page.objectName) {
-      const stream = await getContentObjectStream(page.objectName);
       res.setHeader('Content-Type', page.contentType || episode.contentType || row.mime || 'application/octet-stream');
       res.setHeader('Accept-Ranges', 'bytes');
+      // Byte ranges so players can seek (resume position, ±5s) without re-downloading.
+      const range = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range || '').trim());
+      if (range) {
+        const cfg = await minioCfg.ensurePlaygroundBucket();
+        const client = minioCfg.getMinioClient();
+        const stat = await client.statObject(cfg.bucket, page.objectName);
+        const total = Number(stat.size) || 0;
+        let start = range[1] === '' ? Math.max(0, total - Number(range[2] || 0)) : Number(range[1]);
+        let end = range[1] !== '' && range[2] !== '' ? Math.min(Number(range[2]), total - 1) : total - 1;
+        if (!total || start > end || start >= total) {
+          res.setHeader('Content-Range', `bytes */${total}`);
+          return res.status(416).end();
+        }
+        const part = await client.getPartialObject(cfg.bucket, page.objectName, start, end - start + 1);
+        res.status(206);
+        res.setHeader('Content-Range', `bytes ${start}-${end}/${total}`);
+        res.setHeader('Content-Length', String(end - start + 1));
+        part.on('error', (err) => next(err));
+        return part.pipe(res);
+      }
+      const stream = await getContentObjectStream(page.objectName);
       stream.on('error', (err) => next(err));
       return stream.pipe(res);
     }
