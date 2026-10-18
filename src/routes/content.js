@@ -427,7 +427,8 @@ router.get('/products/:slug/series', optionalAuth, async (req, res, next) => {
       genres: (meta.genres && meta.genres.length ? meta.genres : product.tags || []).slice(0, 12),
       episodeCount: rows.length,
       ...counts,
-      progress: progress ? { episodeId: String(progress.episode), positionSec: progress.positionSec || 0, updatedAt: progress.updatedAt } : null,
+      progress: progress ? { episodeId: String(progress.episode), positionSec: progress.positionSec || 0, fraction: progress.fraction || 0, page: progress.page || 0, updatedAt: progress.updatedAt } : null,
+      bookmarks: progress ? (progress.bookmarks || []).map(publicBookmark) : [],
       episodes: rows.map(publicEpisode),
     });
   } catch (err) {
@@ -459,11 +460,72 @@ router.put('/products/:slug/progress', authenticate, async (req, res, next) => {
     const episode = await ContentEpisode.findOne({ _id: String(req.body?.episodeId || ''), product: product._id }).select('_id').lean().catch(() => null);
     if (!episode) return res.status(400).json({ message: 'episodeId invalid' });
     const positionSec = Math.max(0, Math.min(86400, Number(req.body?.positionSec) || 0));
+    const fraction = Math.max(0, Math.min(1, Number(req.body?.fraction) || 0));
+    const page = Math.max(0, Math.min(10000, Math.floor(Number(req.body?.page) || 0)));
     await WatchProgress.updateOne(
       { user: req.user._id, product: product._id },
-      { $set: { episode: episode._id, positionSec } },
+      { $set: { episode: episode._id, positionSec, fraction, page } },
       { upsert: true },
     );
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+function publicBookmark(b) {
+  return { id: String(b._id), episodeId: String(b.episode), fraction: b.fraction || 0, page: b.page || 0, kind: b.kind || 'bookmark', quote: b.quote || '', note: b.note || '', color: b.color || 'yellow', createdAt: b.createdAt };
+}
+
+async function readerTarget(req, res) {
+  const product = await Product.findOne({ slug: String(req.params.slug || '').toLowerCase() }).select('_id category').lean();
+  if (!product || !isWatchContentCategory(product.category)) { res.status(404).json({ message: 'Not found' }); return null; }
+  return product;
+}
+
+/** Reader bookmarks / highlights (max 200 per user and book). */
+router.get('/products/:slug/bookmarks', authenticate, async (req, res, next) => {
+  try {
+    const product = await readerTarget(req, res);
+    if (!product) return;
+    const row = await WatchProgress.findOne({ user: req.user._id, product: product._id }).select('bookmarks').lean();
+    res.json({ bookmarks: (row?.bookmarks || []).map(publicBookmark) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/products/:slug/bookmarks', authenticate, async (req, res, next) => {
+  try {
+    const product = await readerTarget(req, res);
+    if (!product) return;
+    const episode = await ContentEpisode.findOne({ _id: String(req.body?.episodeId || ''), product: product._id }).select('_id').lean().catch(() => null);
+    if (!episode) return res.status(400).json({ message: 'episodeId invalid' });
+    const b = {
+      episode: episode._id,
+      fraction: Math.max(0, Math.min(1, Number(req.body?.fraction) || 0)),
+      page: Math.max(0, Math.min(10000, Math.floor(Number(req.body?.page) || 0))),
+      kind: req.body?.kind === 'highlight' ? 'highlight' : 'bookmark',
+      quote: String(req.body?.quote || '').slice(0, 600),
+      note: String(req.body?.note || '').slice(0, 1000),
+      color: ['yellow', 'green', 'blue', 'pink'].includes(req.body?.color) ? req.body.color : 'yellow',
+    };
+    let row = await WatchProgress.findOne({ user: req.user._id, product: product._id });
+    if (!row) row = new WatchProgress({ user: req.user._id, product: product._id, episode: episode._id });
+    if ((row.bookmarks || []).length >= 200) return res.status(400).json({ message: 'Too many bookmarks' });
+    row.bookmarks.push(b);
+    await row.save();
+    res.status(201).json({ bookmark: publicBookmark(row.bookmarks[row.bookmarks.length - 1]) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/products/:slug/bookmarks/:id', authenticate, async (req, res, next) => {
+  try {
+    const product = await readerTarget(req, res);
+    if (!product) return;
+    await WatchProgress.updateOne({ user: req.user._id, product: product._id }, { $pull: { bookmarks: { _id: String(req.params.id) } } }).catch(() => null);
     res.json({ ok: true });
   } catch (err) {
     next(err);
