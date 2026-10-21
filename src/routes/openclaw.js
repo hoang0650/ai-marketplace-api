@@ -16,7 +16,7 @@ const {
   computeOpenClawSellCost,
   isPhhotelModelId,
 } = require('../utils/openclaw-pricing');
-const { issueMarketTicket, aimarketsGatewayToken } = require('../utils/openclaw-ticket');
+const { issueMarketTicket, tenantGatewayToken } = require('../utils/openclaw-ticket');
 const { serviceSecretOk } = require('../utils/service-secret');
 const { issueIsolatedSshSession } = require('../services/ssh-sandbox');
 const byokRoutes = require('./openclaw-byok');
@@ -42,31 +42,6 @@ function aimarketsPublicBase(userId) {
     .replace(/\/$/, '');
 }
 
-/**
- * Shared OpenClaw gateway token — same algorithm as hotelapp / PHGroup-AI /
- * openclaw `deriveStableGatewayTokenFromEnv`. Aimarkets uses ONE gateway for
- * all buyers, so never HMAC(userId) (that cannot match gateway.auth.token).
- * 1) OPENCLAW_GATEWAY_TOKEN
- * 2) SHA256(`phhotel-openclaw-gateway:${seed}`)[:48]
- */
-function resolveGatewayToken(_userId) {
-  const explicit = String(process.env.OPENCLAW_GATEWAY_TOKEN || '').trim();
-  if (explicit) return explicit;
-
-  const seed = String(
-    process.env.OPENCLAW_GATEWAY_TOKEN_SEED ||
-      process.env.NEST_SERVICE_AUTH_SECRET ||
-      process.env.PYTHON_AI_SHARED_SECRET ||
-      '',
-  ).trim();
-  if (!seed) return '';
-  return crypto
-    .createHash('sha256')
-    .update(`phhotel-openclaw-gateway:${seed}`, 'utf8')
-    .digest('hex')
-    .slice(0, 48);
-}
-
 /** Adds the signed buyer ticket to the Control UI fragment (never the query string). */
 function withMarketTicket(url, userId) {
   const ticket = issueMarketTicket(userId);
@@ -77,13 +52,15 @@ function withMarketTicket(url, userId) {
   return `${base}#${params.toString()}`;
 }
 
-/** Swaps the shared gateway token in a launch URL fragment for the AI Markets one. */
-function withAimarketsGatewayToken(url) {
-  const token = aimarketsGatewayToken();
+/** Puts this buyer's own gateway token in the Control UI fragment. */
+function withAimarketsGatewayToken(url, userId) {
+  const token = tenantGatewayToken(userId);
   if (!token || !url) return url;
   const [base, hash = ''] = String(url).split('#');
   const params = new URLSearchParams(hash);
-  for (const key of ['token', 'gatewayToken', 'password']) params.set(key, token);
+  params.set('token', token);
+  params.set('gatewayToken', token);
+  params.delete('password');
   return `${base}#${params.toString()}`;
 }
 
@@ -102,12 +79,12 @@ function buildHashUrl({ uiBaseUrl, gatewayUrl, token, password, session, userId 
     gatewayUrl: gw,
     token,
     gatewayToken: token,
-    password: password || token,
     autoConnect: 'true',
     autoApprove: 'true',
     session: session || 'main',
     audience: 'aimarkets',
   });
+  if (password && password !== token) hash.set('password', password);
   if (userId) hash.set('userId', String(userId));
   return `${base}/#${hash.toString()}`;
 }
@@ -197,7 +174,7 @@ router.post('/launch', authenticate, async (req, res, next) => {
         if (upstream.ok && data?.success && data?.url) {
           return res.json({
             success: true,
-            url: withMarketTicket(withAimarketsGatewayToken(data.url), userId),
+            url: withMarketTicket(withAimarketsGatewayToken(data.url, userId), userId),
             audience: 'aimarkets',
             userId,
             message: data.message,
@@ -210,22 +187,19 @@ router.post('/launch', authenticate, async (req, res, next) => {
 
     const uiBase = aimarketsPublicBase(userId);
     const gatewayUrl = uiBase.replace(/^https:/i, 'wss:').replace(/^http:/i, 'ws:');
-    const marketToken = aimarketsGatewayToken();
-    const token = marketToken || resolveGatewayToken(userId);
+    const token = tenantGatewayToken(userId);
     if (!token) {
       return res.status(503).json({
         success: false,
         message:
-          'OpenClaw gateway token missing. Set AIMARKETS_SERVICE_SECRET and OPENCLAW_MARKET_TICKET_SECRET (same values) on aimarketplace-api AND the OpenClaw gateway.',
+          'OpenClaw gateway token missing. Set PYTHON_AI_SHARED_SECRET or NEST_SERVICE_AUTH_SECRET on the API and the OpenClaw gateway.',
       });
     }
-    const password = marketToken || String(process.env.OPENCLAW_GATEWAY_PASSWORD || token).trim() || token;
     const url = withMarketTicket(
       buildHashUrl({
         uiBaseUrl: uiBase,
         gatewayUrl,
         token,
-        password,
         session: `market-${userId}`,
         userId,
       }),

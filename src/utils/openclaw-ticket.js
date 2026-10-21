@@ -56,9 +56,26 @@ function verifyMarketTicket(ticket) {
 }
 
 /**
- * Gateway token for AI Markets Control UI connections. The gateway accepts it
- * on AI Markets hosts only (openclaw src/gateway/aimarkets-ticket.ts), so the
- * token PHHotel uses is never handed to buyers. Empty unless both secrets are set.
+ * Per-buyer / per-hotel Control UI token. Same HMAC as PHGroup-AI
+ * `_generate_tenant_secret` and openclaw `tenantGatewayToken`.
+ */
+function tenantGatewayToken(tenantId) {
+  const id = String(tenantId || '').trim().toLowerCase();
+  if (!/^[a-f0-9]{24}$/.test(id)) return '';
+  const secret = String(
+    process.env.PYTHON_AI_SHARED_SECRET ||
+      process.env.NEST_SERVICE_AUTH_SECRET ||
+      process.env.OPENCLAW_GATEWAY_TOKEN_SEED ||
+      'phhotel_openclaw_secret',
+  ).trim();
+  if (!secret) return '';
+  return crypto.createHmac('sha256', secret).update(id).digest('base64url');
+}
+
+/**
+ * Older shared AI Markets token. Kept so a gateway that has not picked up
+ * per-tenant tokens yet can still be recognized. New launch URLs use
+ * `tenantGatewayToken` instead.
  */
 function aimarketsGatewayToken() {
   const serviceSecret = String(process.env.AIMARKETS_SERVICE_SECRET || '').trim();
@@ -71,4 +88,10 @@ function aimarketsGatewayToken() {
     .slice(0, 48);
 }
 
-module.exports = { issueMarketTicket, verifyMarketTicket, ticketSecret, aimarketsGatewayToken };
+module.exports = {
+  issueMarketTicket,
+  verifyMarketTicket,
+  ticketSecret,
+  aimarketsGatewayToken,
+  tenantGatewayToken,
+};
