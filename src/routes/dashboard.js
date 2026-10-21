@@ -47,6 +47,10 @@ router.get('/summary', authenticate, requireRoles('seller', 'admin'), async (req
       sellerType,
       sellerTypeDeclared: !!sp?.sellerTypeDeclaredAt,
       sellerTaxRate: sellerTaxRateFor(sellerType, 'AI_API'),
+      sellerTaxRates: {
+        DIGITAL: sellerTaxRateFor(sellerType, 'AI_API'),
+        PHYSICAL: sellerTaxRateFor(sellerType, 'PHYSICAL_GOODS'),
+      },
       refunds,
       netPayable,
       orders,

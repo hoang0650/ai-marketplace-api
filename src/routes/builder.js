@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const config = require('../config/env');
 const express = require('express');
 const mongoose = require('mongoose');
 const BuilderProject = require('../models/BuilderProject');
@@ -10,8 +11,14 @@ const { getByokProvider, publicProviderList } = require('../utils/byok-providers
 const { apiBase } = require('../utils/training/bundle');
 const files = require('../utils/builder/files');
 const { buildMessages } = require('../utils/builder/prompts');
+
+const LOCAL_PROVIDER = 'local';
+const LOCAL_TEXT_MAX = 2_000_000;
 const llm = require('../utils/builder/llm');
 const { previewResponse } = require('../utils/builder/preview');
+const QRCode = require('qrcode');
+const expoSnack = require('../utils/builder/expo-snack');
+const bus = require('../realtime/user-bus');
 
 /**
  * AI App Builder (rork-style): buyers describe a website or mobile app, their own provider key
@@ -42,6 +49,7 @@ const MESSAGES = {
   PROVIDER_TIMEOUT: 'Provider phản hồi quá lâu, đã dừng.',
   MODEL_INVALID: 'Tên model không hợp lệ.',
   GENERATION_BUSY: 'Bạn đang có một lượt build khác chạy. Đợi xong rồi thử lại.',
+  OUTPUT_TOO_LARGE: 'Phản hồi của model quá lớn.',
   EMPTY_OUTPUT: 'Model không trả về file nào. Thử mô tả cụ thể hơn hoặc đổi model mạnh hơn.',
   FILE_PATH_INVALID: 'Đường dẫn file không hợp lệ cho loại project này.',
   FILE_TOO_LARGE: 'File quá lớn.',
@@ -220,6 +228,32 @@ async function fillTemplateCreators(docs) {
 
 // ---------- public preview (capability link, sandboxed) ----------
 
+/**
+ * GET /v1/builder/preview-expo/:id/:token[.svg] — Expo Go link (JSON) or its QR (SVG) for an
+ * app project; same capability token as the web preview.
+ */
+router.get(/^\/preview-expo\/([a-f0-9]{24})\/([A-Za-z0-9_-]{16,64})(\.svg)?$/, async (req, res, next) => {
+  try {
+    const [id, token, svg] = [req.params[0], req.params[1], req.params[2]];
+    const doc = await BuilderProject.findById(id).select('name kind files previewToken').lean();
+    const a = Buffer.from(String(doc?.previewToken || ''));
+    const b = Buffer.from(token);
+    if (!doc || a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+      return res.status(404).type('text/plain').send('Preview not found');
+    }
+    const out = doc.kind === 'app'
+      ? await expoSnack.ensureSnack(`prj:${id}`, { name: doc.name, files: doc.files })
+      : { enabled: false, available: false, url: '', error: 'SNACK_NOT_APP' };
+    if (out.url) out.landingUrl = `${String(config.frontendUrl).replace(/\/+$/, '')}/expo/p/${id}/${token}`;
+    if (!svg) return res.set('Cache-Control', 'no-store').json(out);
+    if (!out.url) return res.status(404).type('text/plain').send('Expo link unavailable');
+    const body = await QRCode.toString(out.landingUrl || out.url, { type: 'svg', margin: 1, width: 220 });
+    res.set({ 'Content-Type': 'image/svg+xml; charset=utf-8', 'Cache-Control': 'private, max-age=60' }).send(body);
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get(/^\/preview\/([a-f0-9]{24})\/([A-Za-z0-9_-]{16,64})(?:\/(.*))?$/, async (req, res, next) => {
   try {
     const [id, token, rest] = [req.params[0], req.params[1], req.params[2]];
@@ -319,9 +353,11 @@ router.patch(
     const body = req.body || {};
     if (body.name !== undefined) doc.name = cleanName(body.name);
     if (body.provider !== undefined) {
-      const spec = body.provider ? getByokProvider(body.provider) : null;
-      if (body.provider && !spec) throw httpError(400, 'PROVIDER_INVALID');
-      doc.provider = spec?.id || '';
+      // 'local' = an OpenAI-compatible endpoint on the user's own machine, called from the browser.
+      const isLocal = String(body.provider).trim().toLowerCase() === LOCAL_PROVIDER;
+      const spec = body.provider && !isLocal ? getByokProvider(body.provider) : null;
+      if (body.provider && !isLocal && !spec) throw httpError(400, 'PROVIDER_INVALID');
+      doc.provider = isLocal ? LOCAL_PROVIDER : spec?.id || '';
     }
     if (body.model !== undefined) doc.model = cleanModel(body.model);
     await doc.save();
@@ -451,6 +487,7 @@ router.post('/projects/:id/generate', async (req, res, next) => {
     return res.status(err.status && err.status >= 400 ? err.status : 502).json(errorBody(err));
   };
 
+  let genStarted = '';
   if (running.has(userId)) return fail(httpError(409, 'GENERATION_BUSY'));
   running.add(userId);
   const controller = new AbortController();
@@ -471,6 +508,8 @@ router.post('/projects/:id/generate', async (req, res, next) => {
     if (!model) throw httpError(400, 'MODEL_INVALID');
 
     const messages = buildMessages({ kind: doc.kind, files: doc.files, history: doc.messages, prompt, previewError });
+    bus.publish(req.user._id, 'project.generating', { id: String(doc._id), state: 'start', prompt: prompt.slice(0, 200) }, { fromDevice: req.get('x-device-id') });
+    genStarted = String(doc._id);
 
     if (wantsStream) {
       res.status(200).set({
@@ -536,8 +575,54 @@ router.post('/projects/:id/generate', async (req, res, next) => {
     clearTimeout(timer);
     if (heartbeat) clearInterval(heartbeat);
     running.delete(userId);
+    if (genStarted) bus.publish(req.user._id, 'project.generating', { id: genStarted, state: 'end' });
   }
 });
+
+// ---------- local provider (browser -> http://localhost OpenAI-compatible endpoint) ----------
+// The server cannot reach the user's localhost, so the browser calls the model itself.
+// These two routes only build the prompt and apply the reply; no key or local URL is ever sent here.
+
+function readLocalPrompt(body) {
+  const prompt = String(body.prompt || '').trim();
+  const previewError = String(body.previewError || '').trim().slice(0, 2000);
+  if (!prompt && !previewError) throw httpError(400, 'PROMPT_REQUIRED');
+  if (prompt.length > PROMPT_MAX) throw httpError(400, 'PROMPT_TOO_LONG');
+  return { prompt, previewError };
+}
+
+/** POST /v1/builder/projects/:id/local-prompt — body { prompt, previewError? } → { messages } */
+router.post(
+  '/projects/:id/local-prompt',
+  wrap(async (req, res) => {
+    const doc = await findOwned(req);
+    const { prompt, previewError } = readLocalPrompt(req.body || {});
+    const messages = buildMessages({ kind: doc.kind, files: doc.files, history: doc.messages, prompt, previewError });
+    res.json({ messages });
+  })
+);
+
+/** POST /v1/builder/projects/:id/local-apply — body { prompt, previewError?, text, model, finishReason? } */
+router.post(
+  '/projects/:id/local-apply',
+  wrap(async (req, res) => {
+    const body = req.body || {};
+    const { prompt, previewError } = readLocalPrompt(body);
+    const text = String(body.text || '');
+    if (!text.trim()) throw httpError(502, 'EMPTY_OUTPUT');
+    if (text.length > LOCAL_TEXT_MAX) throw httpError(413, 'OUTPUT_TOO_LARGE');
+    const model = cleanModel(body.model) || 'local';
+    const doc = await findOwned(req);
+    const outcome = applyGeneration(doc, { prompt, previewError, text, provider: LOCAL_PROVIDER, model });
+    await doc.save();
+    res.json({
+      project: publicProject(doc, true),
+      touched: outcome.touched,
+      rejected: outcome.rejected,
+      truncated: outcome.truncated || body.finishReason === 'length',
+    });
+  })
+);
 
 module.exports = router;
 module.exports.applyGeneration = applyGeneration;

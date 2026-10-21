@@ -31,7 +31,7 @@ describe('seller tax by type and product kind', () => {
     assert.equal(s.taxPolicy.rate, 0.07);
     assert.equal(s.taxPolicy.withheldByPlatform, true);
     assert.equal(s.taxPolicy.productKind, 'DIGITAL');
-    assert.match(s.taxPolicy.legalBasis, /117\/2025/);
+    assert.match(s.taxPolicy.legalBasis, /252\/2026/);
   });
   test('individual, physical goods: 1% + 0.5% = 1.5%', () => {
     assert.equal(taxCategoryFromProduct({ productKind: 'physical' }), 'PHYSICAL_GOODS');

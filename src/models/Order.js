@@ -78,6 +78,8 @@ const orderSchema = new mongoose.Schema(
     /** Set when the order pays one phase of a quoted hire project. */
     hireProject: { type: mongoose.Schema.Types.ObjectId, ref: 'HireProject', default: null, index: true },
     hireMilestone: { type: Number, default: null },
+    /** Client Idempotency-Key of the checkout click (unique per buyer): a retried request never charges twice. */
+    idempotencyKey: { type: String, default: undefined, trim: true, maxlength: 120 },
     disputeStatus: {
       type: String,
       enum: ['none', 'open', 'seller_win', 'buyer_win'],
@@ -121,6 +123,10 @@ orderSchema.index({ buyer: 1, createdAt: -1 });
 orderSchema.index({ seller: 1, createdAt: -1 });
 orderSchema.index({ seller: 1, status: 1, disputeStatus: 1 });
 orderSchema.index({ product: 1, status: 1 });
+orderSchema.index(
+  { buyer: 1, idempotencyKey: 1 },
+  { unique: true, partialFilterExpression: { idempotencyKey: { $type: 'string' } } },
+);
 
 orderSchema.virtual('id').get(function idVirtual() {
   return this._id.toString();

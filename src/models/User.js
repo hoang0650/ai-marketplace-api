@@ -88,6 +88,8 @@ const preferencesSchema = new mongoose.Schema(
   {
     personalizeContent: { type: Boolean, default: false },
     personalizeAds: { type: Boolean, default: false },
+    /** Email a notice on each new sign-in (non-critical; user can unsubscribe). */
+    emailLoginAlerts: { type: Boolean, default: true },
   },
   { _id: false },
 );
@@ -150,6 +152,9 @@ const userSchema = new mongoose.Schema(
     preferences: { type: preferencesSchema, default: () => ({}) },
     profileUpdatedAt: { type: Date, default: null },
     passwordChangedAt: { type: Date, default: null },
+    /** sha256 of the single-use forgot-password token; never the token itself. */
+    passwordResetTokenHash: { type: String, default: '', select: false },
+    passwordResetExpires: { type: Date, default: null, select: false },
     /** Bumped to revoke every refresh token ("sign out everywhere", password change). */
     tokenVersion: { type: Number, default: 0 },
   },

@@ -6,6 +6,7 @@ const JobApplication = require('../models/JobApplication');
 const Conversation = require('../models/Conversation');
 const ChatMessage = require('../models/ChatMessage');
 const { notifyUser } = require('../utils/notify');
+const { resolveAttachments, mapEmbedded } = require('./attachments');
 const { authenticate } = require('../middleware/auth');
 const { containsBlockedLink, isAllowedChatImageUrl } = require('../utils/chat-security');
 const { ensureTalentUser } = require('../utils/ensure-talent-user');
@@ -29,6 +30,7 @@ function mapMessage(doc) {
     kind: o.kind || 'text',
     body: o.body || '',
     imageUrl: o.imageUrl || '',
+    attachments: mapEmbedded(o.attachments),
     createdAt: o.createdAt ? new Date(o.createdAt).toISOString() : new Date().toISOString(),
   };
 }
@@ -81,7 +83,7 @@ function assertMember(convo, userId) {
   return { buyerId, sellerId, isBuyer: buyerId === me };
 }
 
-async function parsePayload(body) {
+async function parsePayload(body, ctx = null) {
   const text = String(body?.body || '').trim().slice(0, MAX_BODY);
   const imageUrl = String(body?.imageUrl || '').trim();
   if (containsBlockedLink(text)) {
@@ -96,12 +98,14 @@ async function parsePayload(body) {
     err.code = 'IMAGE_HOST_NOT_ALLOWED';
     throw err;
   }
-  if (!text && !imageUrl) {
-    const err = new Error('Message text or image is required');
+  const attachments = ctx ? await resolveAttachments(body?.attachmentIds, ctx) : [];
+  if (!text && !imageUrl && !attachments.length) {
+    const err = new Error('Message text, image or file is required');
     err.status = 400;
     throw err;
   }
-  return { text, imageUrl, kind: imageUrl ? 'image' : 'text' };
+  const kind = imageUrl || (attachments.length && attachments.every((a) => a.kind === 'image')) ? 'image' : attachments.length ? 'file' : 'text';
+  return { text, imageUrl, kind, attachments };
 }
 
 async function assertRate(userId) {
@@ -115,15 +119,17 @@ async function assertRate(userId) {
   }
 }
 
-async function appendMessage(convo, senderId, { text, imageUrl, kind }) {
+async function appendMessage(convo, senderId, { text, imageUrl, kind, attachments = [] }) {
   const msg = await ChatMessage.create({
     conversation: convo._id,
     sender: senderId,
     kind,
     body: text,
     imageUrl,
+    attachments,
   });
-  const preview = kind === 'image' ? (text ? `[image] ${text}` : '[image]') : text;
+  const tag = kind === 'image' ? '[image]' : kind === 'file' ? `[file] ${attachments[0]?.name || ''}`.trim() : '';
+  const preview = tag ? (text ? `${tag} ${text}` : tag) : text;
   const buyerId = String(convo.buyer?._id || convo.buyer);
   const sellerId = String(convo.seller?._id || convo.seller);
   const isBuyer = buyerId === String(senderId);
@@ -372,7 +378,7 @@ router.post('/conversations/:id/messages', authenticate, async (req, res, next) 
     if (!convo) return res.status(404).json({ message: 'Conversation not found' });
     assertMember(convo, req.user._id);
     await assertRate(req.user._id);
-    const payload = await parsePayload(req.body);
+    const payload = await parsePayload(req.body, { scope: 'chat', scopeId: convo._id, owner: req.user._id });
     const msg = await appendMessage(convo, req.user._id, payload);
     res.status(201).json(mapMessage(msg));
   } catch (err) {

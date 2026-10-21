@@ -16,6 +16,16 @@ const COPY = {
   'chat.newMessage': ['Tin nhắn mới', '{sender}: {preview}'],
   'order.new': ['Đơn hàng mới', '{buyer} đã mua {product} ({ownership})'],
   'order.paid': ['Thanh toán thành công', '{product} đã thanh toán bằng ví AI Markets.'],
+  'hire.packageStarted': ['New service order', '{buyer} started {product} ({amount} {currency}, {count} phases). Each phase is paid when the buyer approves it.'],
+  'hire.submitted': ['Delivery ready for review', '{seller} delivered phase {phase} of {product}. Review and approve or request a revision.'],
+  'hire.revision': ['Revision requested', 'The buyer asked for changes to phase {phase} of {product}.'],
+  'hire.approved': ['Phase approved', 'Phase {phase} of {product} was approved: {amount} {currency} credited, held 48 hours.'],
+  'hire.charged': ['Phase paid', 'Phase {phase} of {product} was approved: {amount} {currency} charged to your wallet.'],
+  'hire.terminated': ['Project terminated', '{buyer} terminated {product}. {reason}'],
+  'hire.terminatedBuyer': ['Project terminated', 'You terminated {product}. Unapproved phases were cancelled and not charged.'],
+  'hire.complaint': ['Project complaint', '{buyer} filed a complaint about {product}. The related held payout stays frozen until it is resolved.'],
+  'hire.completed': ['Project completed', 'All phases of {product} were approved.'],
+  'order.refunded': ['Đã hoàn tiền đơn hàng', '{amount} {currency} cho {product} đã được hoàn vào ví AI Markets.'],
   'order.paidLicense': ['Thanh toán thành công', '{product} · license {licenseKey}. Email xác nhận đã gửi.'],
   'dispute.opened': ['Khiếu nại đơn hàng', '{actor} đã khiếu nại {product}. Khoản thu của seller bị tạm giữ cho đến khi giải quyết.'],
   'dispute.closedSeller': ['Khiếu nại đã đóng', 'Khiếu nại về {product} đã được giải quyết có lợi cho seller. Khoản thanh toán đã có thể rút.'],
@@ -26,10 +36,13 @@ const COPY = {
   'complaint.workAdmin': ['Khiếu nại Work', '{kind} · {job}'],
   'complaint.new': ['Khiếu nại mới', '{text}'],
   'complaint.newAdmin': ['Khiếu nại mới', '{kind}'],
+  'complaint.message': ['{caseRef}: tin nhắn mới trong khiếu nại', 'Có tin nhắn hoặc tệp mới trong hồ sơ khiếu nại.'],
   'complaint.sellerReplied': ['{caseRef}: seller đã phản hồi', 'Seller đã gửi phản hồi. Sàn đang xem xét bằng chứng.'],
   'complaint.sellerRepliedAdmin': ['{caseRef}: seller đã phản hồi', 'Đã nhận phản hồi của seller. Hồ sơ chuyển sang xem xét bằng chứng.'],
   'complaint.appeal': ['{caseRef}: kháng nghị', '{name} yêu cầu xem xét lại nội bộ.'],
   'complaint.askSeller': ['{caseRef}: yêu cầu seller phản hồi', 'Sàn yêu cầu bạn phản hồi khiếu nại này.'],
+  'complaint.received': ['{caseRef}: đã tiếp nhận khiếu nại', 'Sàn đã tiếp nhận khiếu nại của bạn và sẽ phản hồi theo quy trình xử lý. Theo dõi trạng thái tại trang khiếu nại.'],
+  'complaint.closed': ['{caseRef}: đã đóng hồ sơ', 'Hồ sơ khiếu nại đã được đóng.'],
   'complaint.decision': ['{caseRef}: quyết định', 'Quyết định: {decision}. {detail}'],
   'gpu.lowBalance': ['Số dư sắp hết', 'GPU "{name}" còn khoảng {minutes} phút theo số dư hiện tại. Nạp thêm để tránh bị dừng.'],
   'gpu.stoppedNoFunds': ['GPU đã tạm dừng', 'GPU "{name}" đã dừng do hết số dư. Dữ liệu được giữ {hours} giờ; nạp tiền để tiếp tục.'],
@@ -38,6 +51,8 @@ const COPY = {
   'stream.stoppedNoFunds': ['Phiên stream đã dừng', 'Phiên stream "{name}" đã dừng do hết số dư. Nạp tiền để chơi tiếp.'],
   'agent.renewSoon': ['Agent sắp tự động gia hạn', 'Gói {brand} sẽ tự động gia hạn {price} vào {date}. Hãy giữ đủ số dư ví, hoặc tắt tự động gia hạn trong trang agent nếu không muốn tiếp tục.'],
   'agent.expiringSoon': ['Agent sắp hết hạn', 'Gói {brand} hết hạn vào {date}. Gia hạn để không bị gián đoạn.'],
+  'agent.rented': ['Đã thuê agent', 'Đã trừ {price} từ ví để thuê {brand} {days} ngày, hiệu lực đến {date}. Mở trang agent để khởi chạy và kết nối.'],
+  'agent.rentRefunded': ['Đã hoàn phí thuê agent', '{brand} chưa khởi tạo được nên {price} đã được hoàn lại vào ví.'],
   'agent.renewed': ['Đã tự động gia hạn agent', 'Gói {brand} đã gia hạn {price} từ số dư ví, hiệu lực đến {date}.'],
   'agent.renewFailed': ['Chưa gia hạn được agent', 'Số dư ví không đủ để gia hạn {brand} ({price}). Nạp tiền trước {date} để tránh bị tạm dừng; hệ thống sẽ tự thử lại.'],
   'agent.expired': ['Agent đã tạm dừng', 'Gói {brand} đã hết hạn. Dữ liệu được giữ đến {purgeDate}; gia hạn trước ngày này để tiếp tục sử dụng.'],
@@ -54,9 +69,60 @@ const COPY = {
   'hire.submitted': ['Có demo cần nghiệm thu', '{seller} gửi demo giai đoạn {phase} của {product}.'],
   'hire.revision': ['Khách yêu cầu chỉnh sửa', 'Giai đoạn {phase} của {product} cần chỉnh sửa.'],
   'hire.approved': ['Giai đoạn đã nghiệm thu', 'Giai đoạn {phase} của {product} đã nghiệm thu: {amount} {currency} được ghi có, tạm giữ 48 giờ.'],
+  'hire.packageStarted': ['Đơn dịch vụ mới', '{buyer} đã bắt đầu gói {product} ({amount} {currency}, {count} giai đoạn). Thanh toán theo từng giai đoạn khi khách nghiệm thu.'],
+  'hire.charged': ['Đã thanh toán giai đoạn', 'Giai đoạn {phase} của {product} đã nghiệm thu: ví bị trừ {amount} {currency}.'],
+  'hire.terminatedBuyer': ['Đã chấm dứt dự án', 'Bạn đã chấm dứt {product}. Các giai đoạn chưa nghiệm thu đã huỷ, không bị trừ tiền.'],
   'hire.completed': ['Dự án hoàn tất', 'Tất cả giai đoạn của {product} đã được nghiệm thu.'],
+  'device.linked': ['Thiết bị mới đã kết nối', '{device} vừa tiếp tục phiên "{target}" trên tài khoản của bạn. Nếu không phải bạn, hãy thu hồi trong Thiết bị đã kết nối.'],
   'hire.terminated': ['Dự án bị chấm dứt', '{buyer} đã chấm dứt {product}. {reason}'],
+  'hire.message': ['Tin nhắn dự án mới', '{from}: tin nhắn mới trong dự án {product}.'],
+  'hire.complaint': ['Khiếu nại dự án', '{buyer} đã gửi khiếu nại về dự án {product}. Khoản tạm giữ liên quan được giữ đến khi có kết quả.'],
 };
+
+/** English copy for keys mirrored to email (vi users get COPY, others get this). */
+const EMAIL_COPY_EN = {
+  'complaint.received': ['{caseRef}: complaint received', 'We received your complaint and will handle it per our resolution process. Track its status on the complaints page.'],
+  'complaint.new': ['New complaint about your product', '{text}'],
+  'complaint.message': ['{caseRef}: new message on complaint', 'There is a new message or file on the complaint case.'],
+  'complaint.sellerReplied': ['{caseRef}: seller responded', 'The seller responded. We are reviewing the evidence.'],
+  'complaint.askSeller': ['{caseRef}: response requested', 'AI Markets asks you to respond to this complaint.'],
+  'complaint.decision': ['{caseRef}: decision', 'Decision: {decision}. {detail}'],
+  'complaint.closed': ['{caseRef}: case closed', 'The complaint case has been closed.'],
+  'dispute.closedSeller': ['Dispute closed', 'The dispute about {product} was resolved in the seller\'s favour. The payout can now be withdrawn.'],
+  'dispute.closedBuyer': ['Dispute closed', 'The dispute about {product} was resolved in the seller\'s favour.'],
+  'dispute.refundBuyer': ['Refund completed', '{amount} {currency} for {product} has been refunded to your AI Markets wallet.'],
+  'dispute.refundSeller': ['Dispute: buyer refunded', 'The payable of {amount} {currency} for {product} was reversed (commission/tax adjusted on the ledger).'],
+  'agent.rentRefunded': ['Agent rental refunded', '{brand}: {price} has been refunded to your wallet.'],
+  'device.linked': ['New device connected', '{device} just continued "{target}" on your account. If this wasn\'t you, revoke it under Connected devices.'],
+  'order.refunded': ['Order refunded', '{amount} {currency} for {product} has been refunded to your AI Markets wallet.'],
+};
+const EMAIL_KEYS = new Set(Object.keys(EMAIL_COPY_EN));
+
+/** Mirror selected notifications to email. Fire-and-forget; never throws. */
+function emailNotification(userIds, key, params, href) {
+  if (!EMAIL_KEYS.has(key)) return;
+  if (!require('./mailer').isEmailReady()) return;
+  setImmediate(async () => {
+    try {
+      const { sendTransactional } = require('../email/send');
+      const User = require('../models/User');
+      const users = await User.find({ _id: { $in: userIds } }).select('email name profile.notifyLang preferences').lean();
+      for (const u of users) {
+        const vi = (u.profile?.notifyLang || 'vi') === 'vi';
+        const doc = vi ? buildNotification(key, params) : buildCopy(EMAIL_COPY_EN[key], params);
+        sendTransactional(u, 'notification', { title: doc.title, body: doc.body, href });
+      }
+    } catch (err) {
+      console.error(`[mail] notification ${key}: ${err?.message || err}`);
+    }
+  });
+}
+
+function buildCopy(copy, params = {}) {
+  const p = cleanParams(params);
+  const body = fill(copy[1], p).trim();
+  return { title: fill(copy[0], p).slice(0, 200), body: (p.note ? `${body} ${p.note}` : body).slice(0, 400) };
+}
 
 function fill(template, params) {
   return template.replace(/\{(\w+)\}/g, (_, k) => (params[k] == null ? '' : String(params[k])));
@@ -86,7 +152,9 @@ function buildNotification(key, params = {}) {
 
 async function notifyUser(user, key, params, href) {
   if (!user) return null;
-  return Notification.create({ user, href, ...buildNotification(key, params) });
+  const doc = await Notification.create({ user, href, ...buildNotification(key, params) });
+  emailNotification([user], key, params, href);
+  return doc;
 }
 
 async function notifyMany(userIds, key, params, href) {
@@ -94,6 +162,7 @@ async function notifyMany(userIds, key, params, href) {
   if (!ids.length) return;
   const doc = buildNotification(key, params);
   await Notification.insertMany(ids.map((user) => ({ user, href, ...doc })));
+  emailNotification(ids, key, params, href);
 }
 
 const LEGACY_FIXED = {
@@ -136,4 +205,4 @@ function inferLegacy(title, body) {
   return null;
 }
 
-module.exports = { buildNotification, notifyUser, notifyMany, inferLegacy, NOTIFY_COPY: COPY };
+module.exports = { EMAIL_KEYS, EMAIL_COPY_EN, buildNotification, notifyUser, notifyMany, inferLegacy, NOTIFY_COPY: COPY };

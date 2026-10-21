@@ -198,6 +198,9 @@ function publicEpisode(doc) {
     size: o.size || 0,
     previewUrl: o.previewUrl || '',
     published: o.published !== false,
+    free: o.free === true,
+    synopsis: o.synopsis || '',
+    posterUrl: o.posterUrl || '',
     pageCount,
   };
 }

@@ -26,6 +26,7 @@ const wishlistRoutes = require('./routes/wishlist');
 const cartRoutes = require('./routes/cart');
 const orderRoutes = require('./routes/orders');
 const walletRoutes = require('./routes/wallet');
+const { userRouter: bankTopupUserRoutes, adminRouter: bankTopupAdminRoutes } = require('./routes/bank-topup');
 const usageRoutes = require('./routes/usage');
 const dashboardRoutes = require('./routes/dashboard');
 const notificationRoutes = require('./routes/notifications');
@@ -33,11 +34,13 @@ const affiliateRoutes = require('./routes/affiliate');
 const billingRoutes = require('./routes/billing');
 const adminRoutes = require('./routes/admin');
 const openclawRoutes = require('./routes/openclaw');
+const sshGatewayRoutes = require('./routes/ssh-gateway');
 const hermesRoutes = require('./routes/hermes');
 const nanoclawRoutes = require('./routes/nanoclaw');
 const spacebotRoutes = require('./routes/spacebot');
 const openwebuiRoutes = require('./routes/openwebui');
 const paperclipRoutes = require('./routes/paperclip');
+const agentConnectRoutes = require('./routes/agent-connect');
 const deploymentRoutes = require('./routes/deployments');
 const runpodRoutes = require('./routes/runpod');
 const mediaRoutes = require('./routes/media');
@@ -75,6 +78,7 @@ const kycRoutes = require('./routes/kyc');
 const contentRoutes = require('./routes/content');
 const paypalRoutes = require('./routes/paypal');
 const gpayRoutes = require('./routes/gpay');
+const communityAgentRoutes = require('./routes/community-agents');
 const iapRoutes = require('./routes/iap');
 const gpuRoutes = require('./routes/gpu');
 
@@ -127,6 +131,7 @@ function createApp() {
       skip: (req) => req.path === '/health' || req.path === '/health/ready',
     })
   );
+  app.use('/v1/studio', express.json({ limit: '12mb' }), require('./routes/studio'));
   app.use(express.json({ limit: '1mb' }));
   app.use(cookieParser());
   // Strip Mongo operators ($, .) from user payloads to prevent operator injection.
@@ -180,6 +185,8 @@ function createApp() {
   app.use('/v1/auth/login', authLimiter);
   app.use('/v1/auth/register', authLimiter);
   app.use('/v1/auth/password', authLimiter);
+  app.use('/v1/auth/forgot-password', authLimiter);
+  app.use('/v1/auth/reset-password', authLimiter);
   app.use('/v1/auth/google/start', authLimiter);
   app.use('/v1/auth/google/login', authLimiter);
   app.use('/v1/auth/refresh-token', refreshLimiter);
@@ -214,9 +221,12 @@ function createApp() {
   app.use('/v1/cart', cartRoutes);
   app.use('/v1/orders', orderRoutes);
   app.use('/v1/wallet', walletRoutes);
+  app.use('/v1/wallet/bank-transfer', bankTopupUserRoutes);
+  app.use('/v1/admin/bank-deposits', bankTopupAdminRoutes);
   app.use('/v1/usage', usageRoutes);
   app.use('/v1/dashboard', dashboardRoutes);
   app.use('/v1/notifications', notificationRoutes);
+  app.use('/v1/handoff', require('./routes/handoff'));
   app.use('/v1/affiliate', affiliateRoutes);
   app.use('/v1/billing', billingRoutes);
   app.use('/v1/admin/agent-purges', agentPurgesAdminRoutes);
@@ -224,13 +234,16 @@ function createApp() {
   app.use('/v1/admin', adminFinanceRoutes);
   app.use('/v1/payments', paymentRoutes);
   app.use('/v1/openclaw', openclawRoutes);
+  app.use('/v1/ssh-gateway', sshGatewayRoutes);
   app.use('/v1/hermes', hermesRoutes);
   app.use('/v1/nanoclaw', nanoclawRoutes);
   app.use('/v1/spacebot', spacebotRoutes);
   app.use('/v1/openwebui', openwebuiRoutes);
   app.use('/v1/paperclip', paperclipRoutes);
+  app.use('/v1/agent-connect', agentConnectRoutes);
   app.use('/v1/deployments', deploymentRoutes);
   app.use('/v1/playground', playgroundRoutes);
+  app.use('/v1/community-agents', communityAgentRoutes());
   app.use('/v1/agents', agentsRoutes);
   app.use('/v1/agents', hiredAgentRoutes);
   app.use('/v1/servers', serverRoutes);
@@ -255,6 +268,7 @@ function createApp() {
   app.use('/v1/work', workDiscontinued, workRoutes);
   app.use('/v1/hire', hireDiscontinued, hireRoutes);
   app.use('/v1/uploads', uploadRoutes);
+  app.use('/v1/attachments', require('./routes/attachments'));
   app.use('/v1/sellers', sellerRoutes);
   app.use('/v1/legal', legalRoutes);
   app.use('/v1/licenses', licenseRoutes);

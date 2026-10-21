@@ -18,7 +18,9 @@ const {
 } = require('../utils/openclaw-pricing');
 const { issueMarketTicket, aimarketsGatewayToken } = require('../utils/openclaw-ticket');
 const { serviceSecretOk } = require('../utils/service-secret');
+const { issueIsolatedSshSession } = require('../services/ssh-sandbox');
 const byokRoutes = require('./openclaw-byok');
+const { approveOwnPairing, PairingError } = require('../services/openclaw-pairing');
 
 const router = express.Router();
 router.use('/byok', byokRoutes);
@@ -125,37 +127,26 @@ function slugUser(user) {
   return `oc-${base || 'user'}-${idShort}`;
 }
 
-function resolveSshTarget(user, body = {}) {
+/**
+ * SSH target is derived from the signed-in buyer only. Client-supplied host,
+ * port or username are ignored so a buyer can never point the generated
+ * credentials (or the command shown on the setup page) at another user's
+ * agent or a shared/root account.
+ */
+function resolveSshTarget(user, _body = {}) {
   const hostTemplate =
     process.env.OPENCLAW_SSH_HOST_TEMPLATE ||
     process.env.OPENCLAW_SSH_HOST ||
     '{userId}.openclaw.aimarkets.vn';
   const userId = String(user?._id || 'anon');
-  const allowCustom = process.env.OPENCLAW_SSH_ALLOW_CUSTOM_HOST === '1';
-  const rawHost = String(body.host || body.serverHost || '')
-    .trim()
-    .toLowerCase()
-    .replace(/^https?:\/\//, '')
-    .replace(/\/$/, '');
-  // Never accept leftover PHHotel sandbox hosts from old UI placeholders.
-  const isPhhotelHost = /(^|\.)phhotel\.vn$/i.test(rawHost);
-  const isAimarketsHost = /(^|\.)openclaw\.aimarkets\.vn$/i.test(rawHost) || /(^|\.)aimarkets\.vn$/i.test(rawHost);
-  const hostFromBody =
-    rawHost && !isPhhotelHost && (allowCustom || isAimarketsHost) ? rawHost : '';
-  const host =
-    hostFromBody ||
-    (hostTemplate
-      ? hostTemplate
-          .replace(/\{userId\}/g, userId)
-          .replace(/\{username\}/g, slugUser(user))
-          .replace(/\{email\}/g, String(user?.email || '').split('@')[0])
-      : '');
-  const port = Number(body.port || process.env.OPENCLAW_SSH_PORT || 22);
-  const username =
-    String(body.username || process.env.OPENCLAW_SSH_USER || '').trim() || slugUser(user);
+  const host = hostTemplate
+    .replace(/\{userId\}/g, userId)
+    .replace(/\{username\}/g, slugUser(user))
+    .replace(/\{email\}/g, String(user?.email || '').split('@')[0]);
+  const port = Number(process.env.OPENCLAW_SSH_PORT || 22);
+  const username = slugUser(user);
   return { host, port: Number.isFinite(port) && port > 0 ? port : 22, username };
 }
-
 function buildSshCommand({ username, host, port, password }) {
   const portPart = port && Number(port) !== 22 ? ` -p ${port}` : '';
   const base = `ssh${portPart} ${username}@${host}`;
@@ -262,31 +253,23 @@ router.post('/launch', authenticate, async (req, res, next) => {
   }
 });
 
+/**
+ * Approve one of the buyer's OWN pending device pairings (see services/openclaw-pairing).
+ * Previously this proxied to AI_URL (default https://ai.aimarkets.vn), which has no
+ * backend on the AI Markets stack, so every call failed with a 500 "Approve failed".
+ */
 router.post('/device-pairings/approve', authenticate, async (req, res, next) => {
   try {
-    const userId = String(req.user?._id || req.user?.id || '').trim();
-    const aiUrl = aiBaseUrl();
-    if (!aiUrl) {
-      return res.status(503).json({ success: false, message: 'AI_URL is not configured.' });
-    }
-    const qs = new URLSearchParams({ audience: 'aimarkets', user_id: userId });
-    const body = {
-      ...(req.body || {}),
-      role: req.body?.role || 'operator',
-      scopes: req.body?.scopes || ['operator.read', 'operator.write', 'operator.admin', 'operator.pairing'],
-      user_id: userId,
-    };
-    const upstream = await fetch(`${aiUrl}/admin/openclaw/device-pairings/approve?${qs}`, {
-      method: 'POST',
-      headers: { ...aiAdminHeaders(req), 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+    await assertActiveSubscription(req.user, 'openclaw');
+    const result = await approveOwnPairing({
+      userId: String(req.user?._id || req.user?.id || ''),
+      requestId: req.body?.requestId || req.body?.request_id,
     });
-    const data = await upstream.json().catch(() => ({}));
-    return res.status(upstream.status === 404 ? 200 : upstream.status).json({
-      success: Boolean(data?.success),
-      message: data?.message,
-    });
+    return res.json({ success: true, message: 'Device approved.', ...result });
   } catch (err) {
+    if (err instanceof PairingError) {
+      return res.status(err.status).json({ success: false, code: err.code, message: err.message });
+    }
     next(err);
   }
 });
@@ -296,56 +279,40 @@ router.post('/device-pairings/approve', authenticate, async (req, res, next) => 
  */
 router.post('/ssh/generate', authenticate, async (req, res, next) => {
   try {
-    await assertActiveSubscription(req.user, 'openclaw');
-    const agentId = String(req.body?.agentId || 'openclaw');
-    const { host, port, username } = resolveSshTarget(req.user, req.body || {});
-
-    if (!host) {
-      return res.status(503).json({
+    // Nothing provisions a Linux/container user for these credentials yet, and the
+    // OpenClaw gateway is one shared container. Handing out a password for the host
+    // sshd would be a dead login at best and a shared/host account at worst, so fail
+    // closed until each buyer has an isolated sandbox with a provisioner behind it.
+    if (process.env.OPENCLAW_SSH_PER_USER_ISOLATION !== '1') {
+      return res.status(403).json({
         success: false,
-        message:
-          'SSH host not configured. Set OPENCLAW_SSH_HOST (or OPENCLAW_SSH_HOST_TEMPLATE) or pass host in the request body.',
+        code: 'ssh_not_isolated',
+        message: 'SSH is disabled for OpenClaw until each buyer runs an isolated sandbox.',
       });
     }
-
-    await SshSession.updateMany(
-      { user: req.user._id, agentId, revokedAt: null, expiresAt: { $gt: new Date() } },
-      { $set: { revokedAt: new Date() } }
-    );
-
-    const password = randomPassword();
-    const expiresAt = new Date(Date.now() + SSH_TTL_MS);
-    const { command, withPasswordHint } = buildSshCommand({ username, host, port, password });
-
-    const session = await SshSession.create({
-      user: req.user._id,
-      agentId,
-      host,
-      port,
-      username,
-      password,
-      command,
-      expiresAt,
-    });
-
+    await assertActiveSubscription(req.user, 'openclaw');
+    // Credentials are verified by the SSH sandbox gateway (infra/ssh-gateway) on a
+    // non-22 port, which drops the login into this buyer's own sandbox container.
+    // Only a scrypt hash is stored; the password is shown once in this response.
+    const issued = await issueIsolatedSshSession({ SshSession, user: req.user, agentId: 'openclaw' });
     return res.status(201).json({
       success: true,
-      id: session._id.toString(),
-      agentId,
-      host,
-      port,
-      username,
-      password,
-      command,
-      commandWithPassword: withPasswordHint,
-      expiresAt: expiresAt.toISOString(),
+      id: issued.session._id.toString(),
+      agentId: 'openclaw',
+      authMethod: 'password',
+      host: issued.host,
+      port: issued.port,
+      username: issued.username,
+      password: issued.password,
+      command: issued.command,
+      commandWithPassword: `sshpass -p '${issued.password}' ${issued.command}`,
+      expiresAt: issued.expiresAt.toISOString(),
       expiresInMinutes: 60,
-      note: 'Valid for 60 minutes. Existing connections stay open after expiry.',
+      note: 'Valid for 60 minutes. The password is shown only once. Your sandbox and open connections close on expiry or revoke.',
       howTo: [
         'On your desktop (Windows / macOS / Linux), open a terminal.',
-        `Run: ${command}`,
-        `When prompted for password, paste: ${password}`,
-        'Or use sshpass (Linux/macOS): ' + withPasswordHint,
+        `Run: ${issued.command}`,
+        'When prompted for password, paste the password shown above.',
       ],
     });
   } catch (err) {
@@ -378,9 +345,11 @@ router.get('/ssh/active', authenticate, async (req, res, next) => {
         host: session.host,
         port: session.port,
         username: session.username,
-        password: session.password,
+        // Isolated sessions store only a hash; the password was shown once at generation.
+        ...(session.password
+          ? { password: session.password, commandWithPassword: buildSshCommand(session).withPasswordHint }
+          : { passwordShownOnce: true }),
         command: session.command,
-        commandWithPassword: buildSshCommand(session).withPasswordHint,
         expiresAt: new Date(session.expiresAt).toISOString(),
         expiresInMinutes: Math.max(0, Math.round((new Date(session.expiresAt) - Date.now()) / 60000)),
         note: 'Valid for 60 minutes. Existing connections stay open after expiry.',

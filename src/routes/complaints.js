@@ -21,6 +21,8 @@ const {
 } = require('../utils/complaint-helpers');
 const { appealWindowOpen } = require('../utils/complaint-sla');
 
+const DECISION_LABEL_VI = { upheld: 'chấp nhận khiếu nại', rejected: 'không chấp nhận khiếu nại', mediated: 'hòa giải' };
+
 const router = express.Router();
 const KINDS = Complaint.KINDS || [
   'buyer_seller',
@@ -234,6 +236,7 @@ router.post('/', authenticate, async (req, res, next) => {
         `/sell/complaints/${complaint._id}`,
       );
     }
+    await notifyUsers([complaint.complainant], 'complaint.received', { caseRef: complaint.caseRef }, `/complaints/${complaint._id}`);
     await notifyAdmins('complaint.newAdmin', { kind }, `/admin/complaints/${complaint._id}`);
     await auditComplaint(req, 'complaint.create', complaint);
     return res.status(201).json(mapComplaint(complaint));
@@ -251,6 +254,38 @@ router.get('/:id', authenticate, async (req, res, next) => {
       return res.status(403).json({ message: 'Forbidden' });
     }
     res.json(mapComplaint(complaint));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** POST /v1/complaints/:id/messages { body?, attachmentIds? } — case thread for complainant, seller and admin. */
+router.post('/:id/messages', authenticate, async (req, res, next) => {
+  try {
+    if (!isId(req.params.id)) return res.status(404).json({ message: 'Complaint not found' });
+    const complaint = await Complaint.findById(req.params.id);
+    if (!complaint) return res.status(404).json({ message: 'Complaint not found' });
+    if (!canAccessComplaint(req.user, complaint)) return res.status(403).json({ message: 'Forbidden' });
+    if (complaint.status === 'closed') return res.status(409).json({ code: 'COMPLAINT_CLOSED', message: 'Case is closed' });
+    const me = String(req.user._id);
+    const role = String(complaint.complainant) === me ? 'complainant' : complaint.seller && String(complaint.seller) === me ? 'seller' : 'admin';
+    const body = String(req.body?.body || '').trim().slice(0, 4000);
+    const { resolveAttachments } = require('./attachments');
+    let attachments = [];
+    try {
+      attachments = await resolveAttachments(req.body?.attachmentIds, { scope: 'complaint', scopeId: complaint._id, owner: req.user._id });
+    } catch (e) {
+      return res.status(e.status || 400).json({ code: e.code || 'ATTACHMENTS_INVALID', message: e.message });
+    }
+    if (!body && !attachments.length) return res.status(400).json({ code: 'MESSAGE_EMPTY', message: 'Message or attachment required' });
+    complaint.messages.push({ author: req.user._id, role, body, attachments, at: new Date() });
+    pushEvent(complaint, req, 'message', (body || `[${attachments.length} tệp]`).slice(0, 200));
+    await complaint.save();
+    const href = `/complaints/${complaint._id}`;
+    const others = [complaint.complainant, complaint.seller].filter((u) => u && String(u) !== me);
+    if (others.length) await notifyUsers(others, 'complaint.message', { caseRef: complaint.caseRef }, href);
+    if (role !== 'admin') await notifyAdmins('complaint.message', { caseRef: complaint.caseRef }, `/admin/complaints/${complaint._id}`);
+    res.status(201).json(mapComplaint(complaint));
   } catch (err) {
     next(err);
   }
@@ -416,7 +451,7 @@ router.patch('/:id', authenticate, requireRoles('admin'), async (req, res, next)
       await notifyUsers(
         [complaint.complainant, complaint.seller].filter(Boolean),
         'complaint.decision',
-        { caseRef: complaint.caseRef, decision, detail: decisionNote || '' },
+        { caseRef: complaint.caseRef, decision: DECISION_LABEL_VI[decision] || decision, detail: decisionNote || '' },
         `/complaints/${complaint._id}`,
       );
     } else if (action === 'close') {
@@ -427,6 +462,12 @@ router.patch('/:id', authenticate, requireRoles('admin'), async (req, res, next)
       complaint.closedAt = new Date();
       pushEvent(complaint, req, 'closed', note);
       await complaint.save();
+      await notifyUsers(
+        [complaint.complainant, complaint.seller].filter(Boolean),
+        'complaint.closed',
+        { caseRef: complaint.caseRef },
+        `/complaints/${complaint._id}`,
+      );
     } else {
       return res.status(400).json({ message: 'action must be advance, skip_seller, decide, or close' });
     }

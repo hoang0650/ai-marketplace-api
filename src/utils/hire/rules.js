@@ -53,6 +53,48 @@ function normalizeMilestones(raw, { total, now = new Date() } = {}) {
   return out;
 }
 
+/**
+ * Đề án / Quy chế (thuê talent theo giai đoạn): a fixed package is split into phases (title, value,
+ * deadline). Seller may define `product.servicePlan` [{title, percent, days}]; otherwise a default
+ * 30/40/30 plan. Nothing is charged here — each phase is charged only when the buyer approves it.
+ */
+const DEFAULT_PLAN = [
+  { title: 'Khởi động & thiết kế', percent: 30, days: 7 },
+  { title: 'Bản demo hoàn chỉnh', percent: 40, days: 14 },
+  { title: 'Hoàn thiện & bàn giao', percent: 30, days: 21 },
+];
+
+function packagePlan(product) {
+  const raw = Array.isArray(product?.servicePlan) ? product.servicePlan : [];
+  const plan = raw
+    .map((m) => ({ title: String(m?.title || '').trim().slice(0, 200), percent: Number(m?.percent) || 0, days: Math.round(Number(m?.days) || 0) }))
+    .filter((m) => m.percent > 0 && m.days > 0)
+    .slice(0, MAX_MILESTONES);
+  const sum = plan.reduce((a, m) => a + m.percent, 0);
+  return plan.length && Math.abs(sum - 100) < 0.01 ? plan : DEFAULT_PLAN;
+}
+
+function packageMilestones(product, { now = new Date() } = {}) {
+  const total = roundMoney(product?.pricing?.price);
+  if (!(total > 0)) throw httpError(400, 'SERVICE_PRICE_REQUIRED');
+  // Tiny packages are not worth splitting: one phase.
+  const plan = total < 3 ? [{ title: 'Bàn giao trọn gói', percent: 100, days: packagePlan(product).slice(-1)[0].days }] : packagePlan(product);
+  let left = total;
+  let prevDays = 0;
+  return plan.map((m, i) => {
+    const amount = i === plan.length - 1 ? roundMoney(left) : roundMoney((total * m.percent) / 100);
+    left = roundMoney(left - amount);
+    const days = Math.max(m.days, prevDays + 1);
+    prevDays = days;
+    return {
+      title: m.title || `Giai đoạn ${i + 1}`,
+      amount,
+      dueAt: new Date(now.getTime() + days * 86400000),
+      status: i === 0 ? 'in_progress' : 'pending',
+    };
+  });
+}
+
 function roleIn(project, userId) {
   const id = String(userId || '');
   if (!id) return null;
@@ -89,6 +131,8 @@ function assertAction(project, actor, action) {
     approve: actor === 'buyer' && s === 'active' && currentMilestone(project)?.status === 'submitted',
     revision: actor === 'buyer' && s === 'active' && currentMilestone(project)?.status === 'submitted',
     terminate: actor === 'buyer' && s === 'active',
+    message: (actor === 'buyer' || actor === 'seller') && s !== 'declined',
+    complain: actor === 'buyer' && ['active', 'completed', 'terminated'].includes(s),
   }[action];
   if (!allowed) throw httpError(409, 'HIRE_ACTION_NOT_ALLOWED', { status: s, action });
 }
@@ -128,6 +172,9 @@ function paidTotal(project) {
 
 module.exports = {
   MAX_MILESTONES,
+  DEFAULT_PLAN,
+  packagePlan,
+  packageMilestones,
   BUILDER_DEMO_KIND,
   httpError,
   roundMoney,

@@ -19,7 +19,7 @@ const conversationSchema = new mongoose.Schema(
     jobSlug: { type: String, default: '' },
     talentSlug: { type: String, default: '' },
     lastMessage: { type: String, default: '' },
-    lastKind: { type: String, enum: ['text', 'image'], default: 'text' },
+    lastKind: { type: String, enum: ['text', 'image', 'file'], default: 'text' },
     lastMessageAt: { type: Date, default: Date.now, index: true },
     buyerUnread: { type: Number, default: 0, min: 0 },
     sellerUnread: { type: Number, default: 0, min: 0 },

@@ -1,0 +1,88 @@
+#!/bin/sh
+# AI Markets sandbox helper: manage YOUR OpenClaw device pairings.
+# Uses AIMARKETS_CMD_TOKEN, injected by the SSH gateway for this session only.
+# The token is scoped to your account + OpenClaw + device pairing, and expires
+# with your SSH session. It cannot touch other users or the gateway itself.
+set -eu
+
+API="${AIMARKETS_API_URL:-https://api.aimarkets.vn}"
+AGENT="${AIMARKETS_AGENT:-openclaw}"
+TOKEN="${AIMARKETS_CMD_TOKEN:-}"
+
+usage() {
+  cat <<USAGE
+Usage:
+  openclaw devices list                 List your pending device pairing requests
+  openclaw devices approve <requestId>  Approve one of YOUR pending requests
+  openclaw devices approve              Approve your single pending request (if exactly one)
+USAGE
+}
+
+need_token() {
+  if [ -z "$TOKEN" ]; then
+    echo "openclaw: no AI Markets session token in this shell. Reconnect via SSH (ssh -p 2422 ...) and try again." >&2
+    exit 1
+  fi
+}
+
+call() { # method path [json]
+  need_token
+  if [ -n "${3:-}" ]; then
+    curl -sS -m 20 -X "$1" "$API/v1/agent-connect/$AGENT$2" \
+      -H "Authorization: AgentCommand $TOKEN" -H 'Content-Type: application/json' -d "$3" -w '\n%{http_code}'
+  else
+    curl -sS -m 20 -X "$1" "$API/v1/agent-connect/$AGENT$2" \
+      -H "Authorization: AgentCommand $TOKEN" -w '\n%{http_code}'
+  fi
+}
+
+split() { # sets BODY and CODE from call output
+  CODE=$(printf '%s' "$1" | tail -n1)
+  BODY=$(printf '%s' "$1" | sed '$d')
+}
+
+fail() {
+  msg=$(printf '%s' "$BODY" | jq -r '.message // empty' 2>/dev/null || true)
+  echo "openclaw: request failed (HTTP $CODE)${msg:+: $msg}" >&2
+  exit 1
+}
+
+devices_list() {
+  split "$(call GET /pairing/pending)"
+  [ "$CODE" = 200 ] || fail
+  n=$(printf '%s' "$BODY" | jq '.pending | length')
+  if [ "$n" = 0 ]; then
+    echo "No pending device requests. Open the Control UI from aimarkets.vn, then run this again."
+    return 0
+  fi
+  printf '%s' "$BODY" | jq -r '.pending[] | "\(.requestId)\t\(if .approvable then "pending" else "needs admin (\(.reason))" end)\t\(.scopes | join(","))"' |
+    { printf 'REQUEST ID\tSTATUS\tSCOPES\n'; cat; }
+}
+
+devices_approve() {
+  rid="${1:-}"
+  if [ -z "$rid" ]; then
+    split "$(call GET /pairing/pending)"
+    [ "$CODE" = 200 ] || fail
+    ids=$(printf '%s' "$BODY" | jq -r '.pending[] | select(.approvable) | .requestId')
+    count=$(printf '%s\n' "$ids" | grep -c . || true)
+    if [ "$count" != 1 ]; then
+      echo "openclaw: found $count approvable requests; pass the request id: openclaw devices approve <requestId>" >&2
+      [ "$count" = 0 ] || printf '%s\n' "$ids" >&2
+      exit 1
+    fi
+    rid="$ids"
+  fi
+  case "$rid" in
+    *[!A-Za-z0-9_-]*|'') echo "openclaw: invalid request id" >&2; exit 2 ;;
+  esac
+  split "$(call POST /pairing/approve "{\"requestId\":\"$rid\"}")"
+  [ "$CODE" = 200 ] || fail
+  echo "Approved $rid. Go back to the Control UI tab and click Reconnect / reload."
+}
+
+case "${1:-} ${2:-}" in
+  "devices list"|"devices ls"|"devices pending") devices_list ;;
+  "devices approve") shift 2; devices_approve "${1:-}" ;;
+  *) usage; [ -z "${1:-}" ] || [ "${1:-}" = "help" ] || [ "${1:-}" = "--help" ] || exit 2 ;;
+esac

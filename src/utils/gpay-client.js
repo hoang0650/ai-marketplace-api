@@ -28,9 +28,19 @@ function gpayEnabled() {
   return Boolean(config.gpayMerchantCode && config.gpayPassword);
 }
 
-function gpayPortalEnabled() {
-  if (!config.gpayVaEnabled) return false;
+/** GPAY_ENABLED feature flag (default OFF). Gates creating new GPay payments only. */
+function gpayFeatureEnabled() {
+  return config.gpayVaEnabled === true;
+}
+
+/** Gateway credentials present, regardless of the feature flag (used to reconcile in-flight bills). */
+function gpayPortalConfigured() {
   return Boolean(config.gpayPortalMerchantCode && config.gpayPortalPassword && gpayPrivateKey());
+}
+
+function gpayPortalEnabled() {
+  if (!gpayFeatureEnabled()) return false;
+  return gpayPortalConfigured();
 }
 
 function portalBase() {
@@ -39,7 +49,7 @@ function portalBase() {
 
 /** VA only needs merchant code + password (+ signature key for live). */
 function gpayVaEnabled() {
-  if (!config.gpayVaEnabled) return false;
+  if (!gpayFeatureEnabled()) return false;
   return Boolean(config.gpayMerchantCode && config.gpayPassword && gpayPrivateKey());
 }
 
@@ -419,6 +429,8 @@ module.exports = {
   PORTAL_SANDBOX_BASE,
   PORTAL_LIVE_BASE,
   gpayEnabled,
+  gpayFeatureEnabled,
+  gpayPortalConfigured,
   gpayVaEnabled,
   gpayPortalEnabled,
   gpaySandbox,

@@ -8,7 +8,13 @@
 // Fully shut down (user decision 12/10/2026): every Work and Hire endpoint answers 410,
 // including existing jobs, contracts and hire projects. Data is kept untouched in MongoDB.
 const WORK_BLOCKED = [['*', /^\/.*/]];
-const HIRE_BLOCKED = [['*', /^\/.*/]];
+// 15/10/2026: professional-service packages are paid per phase (Đề án / Quy chế: thuê talent theo
+// giai đoạn). Only the legacy quote/negotiation entry points stay closed; package projects
+// (POST /packages) and their phase actions are open again.
+const HIRE_BLOCKED = [
+  ['POST', /^\/projects\/?$/],
+  ['POST', /^\/projects\/[^/]+\/(quote|counter|decline|accept)\/?$/],
+];
 
 function matches(rules, req) {
   const method = String(req.method || '').toUpperCase();

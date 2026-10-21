@@ -1,5 +1,6 @@
 const express = require('express');
 const Product = require('../models/Product');
+const { PROFESSIONAL_SERVICE_CATEGORIES } = require('../data/categories');
 const Order = require('../models/Order');
 const WalletTx = require('../models/WalletTx');
 const { notifyUser } = require('../utils/notify');
@@ -8,7 +9,7 @@ const LegalDocument = require('../models/LegalDocument');
 const { authenticate } = require('../middleware/auth');
 const { deleteCachePattern } = require('../utils/cache');
 const { clampQty } = require('../utils/sales');
-const { getBalance, requireAvailableFunds } = require('../utils/wallet');
+const { getAvailableBalance, requireAvailableFunds } = require('../utils/wallet');
 const { HOLD_MS } = require('../utils/payout-hold');
 const { recordOrderLedger } = require('../finance/ledger-service');
 const { settleSaleFromDb } = require('../finance/settlement-service');
@@ -28,16 +29,71 @@ const { resolveAttribution, recordAffiliateCommission } = require('../finance/af
 
 const router = express.Router();
 
-router.post('/checkout', authenticate, async (req, res, next) => {
+/** In-flight checkouts per buyer+product: a double click waits for the first instead of paying twice. */
+const inflight = new Set();
+
+function cleanKey(raw) {
+  const key = String(raw || '').trim();
+  return /^[A-Za-z0-9._:-]{8,120}$/.test(key) ? key : '';
+}
+
+/** Side effects after the wallet debit must never turn a paid order into an HTTP error. */
+async function afterPayment(label, fn) {
   try {
+    return await fn();
+  } catch (err) {
+    console.error(`[checkout] ${label} failed:`, err?.message || err);
+    return null;
+  }
+}
+
+function paidSummary(order, extra = {}) {
+  return {
+    checkoutId: `chk_${order._id}`,
+    provider: 'wallet',
+    paymentProvider: 'internal_ledger',
+    status: 'paid',
+    orderId: String(order._id),
+    productName: order.productName,
+    quantity: order.quantity,
+    amount: order.amount,
+    currency: order.currency,
+    ...extra,
+  };
+}
+
+router.post('/checkout', authenticate, async (req, res, next) => {
+  const productIdRaw = String(req.body?.productId || '');
+  const lockKey = `${req.user._id}:${productIdRaw}`;
+  let locked = false;
+  try {
+    const idempotencyKey = cleanKey(req.get('Idempotency-Key') || req.body?.idempotencyKey);
+    if (idempotencyKey) {
+      const prior = await Order.findOne({ buyer: req.user._id, idempotencyKey }).lean();
+      if (prior) {
+        const wallet = await getAvailableBalance(req.user._id);
+        return res.json(paidSummary(prior, { duplicate: true, balance: wallet.balance, available: wallet.available }));
+      }
+    }
+    if (inflight.has(lockKey)) {
+      return res.status(409).json({ code: 'CHECKOUT_IN_PROGRESS', message: 'This purchase is already being processed — please wait a moment.' });
+    }
+    inflight.add(lockKey);
+    locked = true;
     const productId = req.body?.productId;
     const quantity = clampQty(req.body?.quantity);
     if (!productId) return res.status(400).json({ message: 'productId required' });
 
     const product = await Product.findById(productId);
     if (!product) return res.status(404).json({ message: 'Product not found' });
-    // Professional services (hire-* categories) are fixed packages and check out from the
-    // wallet like every other product — the quote/milestone flow is discontinued.
+    // Professional services are paid per phase (Đề án / Quy chế): never one-shot checkout.
+    if (PROFESSIONAL_SERVICE_CATEGORIES.includes(String(product.category))) {
+      return res.status(409).json({
+        code: 'SERVICE_USE_MILESTONES',
+        message: 'Dịch vụ chuyên môn được thanh toán theo từng giai đoạn sau khi bạn duyệt. Hãy bắt đầu dự án từ trang sản phẩm.',
+        next: { method: 'POST', path: '/v1/hire/packages', productId: String(product._id) },
+      });
+    }
 
     const ownershipType = product.ownershipType || 'THIRD_PARTY_SELLER';
     const licensePick = isLicenseCategory(product.category)
@@ -188,6 +244,7 @@ router.post('/checkout', authenticate, async (req, res, next) => {
       .lean();
 
     const order = await Order.create({
+      ...(idempotencyKey ? { idempotencyKey } : {}),
       product: product._id,
       productName: product.name,
       buyer: req.user._id,
@@ -294,29 +351,26 @@ router.post('/checkout', authenticate, async (req, res, next) => {
           holdUntil: order.payoutHoldUntil || new Date(now.getTime() + HOLD_MS),
         }).catch((err) => console.error('[affiliate]', err.message));
       }
-      await recordOrderLedger({
+      await afterPayment('ledger', () => recordOrderLedger({
         order,
         settlement,
         ownershipType,
         currency,
-      }).catch((err) => console.error('[ledger]', err.message));
-      await recordTaxPostings({ order, settlement }).catch((err) => console.error('[tax]', err.message));
-      await issueOrderInvoices(order, settlement).catch((err) => console.error('[invoice]', err.message));
+      }));
+      await afterPayment('tax', () => recordTaxPostings({ order, settlement }));
+      await afterPayment('invoice', () => issueOrderInvoices(order, settlement));
     }
 
-    await Product.updateOne({ _id: product._id }, { $inc: { salesCount: quantity } });
+    await afterPayment('salesCount', () => Product.updateOne({ _id: product._id }, { $inc: { salesCount: quantity } }));
     deleteCachePattern('products:*').catch(() => {});
     deleteCachePattern('creators:*').catch(() => {});
     deleteCachePattern('home:*').catch(() => {});
 
-    await notifyUser(
-      product.creator,
-      'order.new',
-      { buyer: req.user.name, product: product.name, ownership: ownershipType },
-      '/dashboard/orders',
+    await afterPayment('notify seller', () =>
+      notifyUser(product.creator, 'order.new', { buyer: req.user.name, product: product.name, ownership: ownershipType }, '/dashboard/orders'),
     );
 
-    await writeAuditLog({
+    await afterPayment('audit', () => writeAuditLog({
       actorId: req.user._id,
       actorRole: req.user.role,
       action: 'ORDER_PAID',
@@ -335,7 +389,7 @@ router.post('/checkout', authenticate, async (req, res, next) => {
       },
       ip: req.ip,
       userAgent: req.get('user-agent') || '',
-    });
+    }));
 
     let license = null;
     if (licensePick) {
@@ -362,12 +416,14 @@ router.post('/checkout', authenticate, async (req, res, next) => {
       console.error('[mail] checkout email failed:', err.message);
     }
 
-    await notifyUser(
-      req.user._id,
-      license?.licenseKey ? 'order.paidLicense' : 'order.paid',
-      { product: product.name, licenseKey: license?.licenseKey },
-      license?.licenseKey ? '/dashboard/licenses' : '/dashboard/orders',
-    ).catch(() => {});
+    await afterPayment('notify buyer', () =>
+      notifyUser(
+        req.user._id,
+        license?.licenseKey ? 'order.paidLicense' : 'order.paid',
+        { product: product.name, licenseKey: license?.licenseKey, amount: `${amount} ${currency}` },
+        license?.licenseKey ? '/dashboard/licenses' : '/dashboard/orders',
+      ),
+    );
 
     // Every sale gets an invoice record; default: buyer does not want a VAT invoice.
     let invoiceRec = null;
@@ -377,7 +433,7 @@ router.post('/checkout', authenticate, async (req, res, next) => {
       console.error('[invoice]', e.message);
     }
 
-    const balance = await getBalance(req.user._id);
+    const wallet = (await afterPayment('balance', () => getAvailableBalance(req.user._id))) || {};
     res.status(201).json({
       invoice: invoiceRec ? require('../utils/invoice').mapInvoice(invoiceRec) : null,
       checkoutId: `chk_${order._id.toString()}`,
@@ -396,7 +452,11 @@ router.post('/checkout', authenticate, async (req, res, next) => {
       taxAmount: settlement.taxAmount,
       platformFee: settlement.platformRevenueAmount,
       sellerNet: settlement.sellerNetAmount,
-      balance,
+      productName: product.name,
+      category: product.category,
+      /** Ledger total and the spendable part (total minus 48h holds); the UI shows `available`. */
+      balance: wallet.balance,
+      available: wallet.available,
       orderId: order._id.toString(),
       license,
       emailSent: !!mail?.ok,
@@ -404,7 +464,12 @@ router.post('/checkout', authenticate, async (req, res, next) => {
       emailReason: mail?.ok ? undefined : mail?.reason || mail?.error,
     });
   } catch (err) {
+    if (err?.code === 11000 && err?.keyPattern?.idempotencyKey) {
+      return res.status(409).json({ code: 'CHECKOUT_IN_PROGRESS', message: 'This purchase is already being processed — please wait a moment.' });
+    }
     next(err);
+  } finally {
+    if (locked) inflight.delete(lockKey);
   }
 });
 

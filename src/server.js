@@ -10,6 +10,7 @@ const { ensureComputeTestProducts } = require('./utils/ensure-compute-products')
 const { ensureLegalDocuments } = require('./utils/ensure-legal-documents');
 const { ensureCommissionRules } = require('./utils/ensure-commission-rules');
 const { ensureTaxRules } = require('./utils/ensure-tax-rules');
+const { ensureProductKinds } = require('./utils/ensure-product-kinds');
 const { syncSalesCountsFromOrders } = require('./utils/sales');
 const { attachTerminalGateway } = require('./terminal/gateway');
 const { attachGameStreamProxy } = require('./terminal/stream-proxy');
@@ -20,6 +21,7 @@ const {
   startAgentSubscriptionWorker,
   stopAgentSubscriptionWorker,
 } = require('./finance/agent-subscription-worker');
+const { startVoteCycleWorker, stopVoteCycleWorker } = require('./community/vote-cycle-worker');
 
 connectDb()
   .then(() => ensureLegalDocuments())
@@ -45,6 +47,7 @@ connectDb()
   .then(() => ensureRunpodMarketplaceProducts())
   .then(() => ensureAiProviderProducts())
   .then(() => ensureComputeTestProducts())
+  .then(() => ensureProductKinds().catch((err) => console.error('[catalog] productKind backfill failed:', err.message)))
   .then(() => syncSalesCountsFromOrders())
   .then((stats) => {
     if (stats) {
@@ -63,6 +66,8 @@ attachGpuWorkspaceProxy(server);
 if (process.env.GPU_RENTAL_WORKER !== 'off') startBillingWorker();
 if (process.env.GAME_BILLING_WORKER !== 'off') startGameBillingWorker();
 if (process.env.AGENT_SUBSCRIPTION_WORKER !== 'off') startAgentSubscriptionWorker();
+if (process.env.VOTE_CYCLE_WORKER !== 'off') startVoteCycleWorker();
+require('./routes/studio').startStudioPoller();
 server.listen(config.port, () => {
   console.log(`[ai-marketplace-api] env=${config.nodeEnv} listening on http://localhost:${config.port}`);
   console.log(`[ai-marketplace-api] api v1 http://localhost:${config.port}/v1`);
@@ -90,6 +95,7 @@ async function shutdown(signal) {
   stopBillingWorker();
   stopGameBillingWorker();
   stopAgentSubscriptionWorker();
+  stopVoteCycleWorker();
 
   server.close(async () => {
     try {

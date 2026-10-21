@@ -1,6 +1,8 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const multer = require('multer');
+const QRCode = require('qrcode');
+const config = require('../config/env');
 const Product = require('../models/Product');
 const BuilderProject = require('../models/BuilderProject');
 const BuilderTemplate = require('../models/BuilderTemplate');
@@ -13,6 +15,7 @@ const { TEMPLATE_CATEGORY_KIND } = require('../data/categories');
 const files = require('../utils/builder/files');
 const { readZip, isZip } = require('../utils/builder/zip');
 const { previewResponse } = require('../utils/builder/preview');
+const expoSnack = require('../utils/builder/expo-snack');
 const tpl = require('../utils/builder/templates');
 const gh = require('../utils/builder/github');
 const { runBuild, createLog } = require('../utils/builder/template-build');
@@ -67,6 +70,15 @@ function demoUrl(productId) {
   return `${apiBase()}/v1/builder/templates/${productId}/demo/`;
 }
 
+function simulatorUrl(productId) {
+  return `${String(config.frontendUrl).replace(/\/+$/, '')}/template-demo/${productId}`;
+}
+
+/** https landing on the web app that hands off to Expo Go (iOS Camera handles https best). */
+function expoLandingUrl(productId) {
+  return `${String(config.frontendUrl).replace(/\/+$/, '')}/expo/${productId}`;
+}
+
 function isOwner(user, product) {
   return !!user && (user.role === 'admin' || String(product.creator) === String(user._id));
 }
@@ -96,6 +108,7 @@ function templateMeta(product, template, { access = false, paths = false, git = 
     fileCount: list.length,
     demoEnabled: template ? template.demoEnabled !== false : true,
     demoUrl: tpl.demoVisible(product, template) ? demoUrl(product._id) : '',
+    simulatorUrl: tpl.demoVisible(product, template) ? simulatorUrl(product._id) : '',
     useCount: template?.useCount || 0,
     updatedAt: template?.updatedAt || null,
     access,
@@ -124,6 +137,54 @@ router.get(/^\/([a-f0-9]{24})\/demo(?:\/(.*))?$/, async (req, res, next) => {
     }
     const out = previewResponse({ name: product.name, kind: template.kind, files: template.files }, rest);
     res.status(out.status).set(out.headers).send(out.body);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** GET /v1/builder/templates/:id/demo-qr.svg — QR to the web phone simulator for this template. */
+router.get(/^\/([a-f0-9]{24})\/demo-qr\.svg$/, async (req, res, next) => {
+  try {
+    const id = req.params[0];
+    const product = await Product.findById(id).select('name category moderationStatus suspendedUntil published').lean();
+    const template = product ? await BuilderTemplate.findOne({ product: id }).select('demoEnabled kind files.path').lean() : null;
+    if (!product || !tpl.isTemplateCategory(product.category) || !tpl.demoVisible(product, template)) {
+      return res.status(404).type('text/plain').send('Demo not found');
+    }
+    const svg = await QRCode.toString(simulatorUrl(id), { type: 'svg', margin: 1, width: 220 });
+    res.set({ 'Content-Type': 'image/svg+xml; charset=utf-8', 'Cache-Control': 'public, max-age=3600' }).send(svg);
+  } catch (err) {
+    next(err);
+  }
+});
+
+async function templateSnack(id) {
+  const product = await Product.findById(id).select('name category moderationStatus suspendedUntil published').lean();
+  const template = product ? await BuilderTemplate.findOne({ product: id }).select('demoEnabled kind files').lean() : null;
+  if (!product || !tpl.isTemplateCategory(product.category) || !tpl.demoVisible(product, template)) return null;
+  if (template.kind !== 'app') return { enabled: false, available: false, url: '', error: 'SNACK_NOT_APP' };
+  const out = await expoSnack.ensureSnack(`tpl:${id}`, { name: product.name, files: template.files });
+  return { ...out, landingUrl: out.url ? expoLandingUrl(id) : '' };
+}
+
+/** GET /v1/builder/templates/:id/expo — Expo Go deep link (Snack) for an app template. */
+router.get(/^\/([a-f0-9]{24})\/expo$/, async (req, res, next) => {
+  try {
+    const out = await templateSnack(req.params[0]);
+    if (!out) return res.status(404).json({ error: { code: 'TEMPLATE_NOT_FOUND', message: 'Demo not found' } });
+    res.set('Cache-Control', 'no-store').json(out);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** GET /v1/builder/templates/:id/expo-qr.svg — QR of the https landing that opens the exp:// link above. */
+router.get(/^\/([a-f0-9]{24})\/expo-qr\.svg$/, async (req, res, next) => {
+  try {
+    const out = await templateSnack(req.params[0]);
+    if (!out?.url) return res.status(404).type('text/plain').send('Expo link unavailable');
+    const svg = await QRCode.toString(out.landingUrl || out.url, { type: 'svg', margin: 1, width: 220 });
+    res.set({ 'Content-Type': 'image/svg+xml; charset=utf-8', 'Cache-Control': 'public, max-age=300' }).send(svg);
   } catch (err) {
     next(err);
   }

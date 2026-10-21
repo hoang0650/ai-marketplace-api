@@ -10,6 +10,7 @@ const {
   registerExternalNode,
   registerHostedNode,
   publicNode,
+  sellerNodeConfig,
   ensureHostedNodeReady,
   isComputeCategory,
   parseMobileStream,
@@ -22,6 +23,39 @@ const router = express.Router();
 
 router.use(authenticate, requireRoles('seller', 'admin'));
 
+/**
+ * The seller's own products for the "register compute node" picker, including
+ * drafts, each flagged with whether it can carry a node and why not.
+ */
+router.get('/products', async (req, res, next) => {
+  try {
+    const rows = await Product.find({ creator: req.user._id })
+      .select('slug name category published moderationStatus suspendedUntil')
+      .sort({ updatedAt: -1 })
+      .limit(500)
+      .lean();
+    res.json(
+      rows.map((p) => {
+        const compute = isComputeCategory(p.category);
+        const published = p.published !== false;
+        const reason = !compute ? 'NOT_COMPUTE_CATEGORY' : !published ? 'NOT_PUBLISHED' : '';
+        return {
+          id: String(p._id),
+          slug: p.slug,
+          name: p.name,
+          category: p.category,
+          published,
+          moderationStatus: p.moderationStatus || 'active',
+          eligible: !reason,
+          reason,
+        };
+      }),
+    );
+  } catch (e) {
+    next(e);
+  }
+});
+
 /** List compute nodes (external + AI Markets hosted) linked to products. */
 router.get('/nodes', async (req, res, next) => {
   try {
@@ -31,7 +65,13 @@ router.get('/nodes', async (req, res, next) => {
     const productIds = [...new Set(rows.map((r) => String(r.product)).filter(Boolean))];
     const products = await Product.find({ _id: { $in: productIds } }).lean();
     const byId = Object.fromEntries(products.map((p) => [String(p._id), p]));
-    res.json(rows.map((r) => publicNode({ ...r, id: String(r._id) }, byId[String(r.product)])));
+    res.json(
+      rows.map((r) => ({
+        ...publicNode({ ...r, id: String(r._id) }, byId[String(r.product)]),
+        category: byId[String(r.product)]?.category || '',
+        config: sellerNodeConfig(r),
+      })),
+    );
   } catch (e) {
     next(e);
   }
@@ -41,7 +81,7 @@ router.get('/nodes', async (req, res, next) => {
 router.post('/nodes', async (req, res, next) => {
   try {
     const { product, node } = await registerComputeNode(req.user, req.body || {});
-    res.status(201).json(publicNode(node, product));
+    res.status(201).json({ ...publicNode(node, product), config: sellerNodeConfig(node) });
   } catch (e) {
     if (e.status === 402) return res.status(402).json({ message: e.message, ...e.body });
     next(e);
@@ -72,10 +112,18 @@ router.patch('/nodes/:id', async (req, res, next) => {
       if (body.status) node.status = body.status === 'offline' ? 'offline' : 'online';
       if (body.webhookUrl !== undefined) {
         const url = String(body.webhookUrl).slice(0, 500);
-        if (url) await assertSafeHttpUrl(url);
+        if (url) await assertSafeHttpUrl(url, { httpsOnly: true });
         node.webhookUrl = url;
       }
-      if (body.webhookSecret !== undefined) node.webhookSecret = String(body.webhookSecret).slice(0, 256);
+      // Blank = keep the stored secret (it is never sent back to the browser).
+      if (body.webhookSecret !== undefined && String(body.webhookSecret).trim()) {
+        const secret = String(body.webhookSecret).trim();
+        if (secret.length < 16) {
+          return res.status(400).json({ message: 'Webhook secret must be at least 16 characters', code: 'WEBHOOK_SECRET_TOO_SHORT' });
+        }
+        node.webhookSecret = secret.slice(0, 256);
+      }
+      if (body.clearWebhookSecret === true) node.webhookSecret = '';
       if (body.streamHost !== undefined) node.streamHost = assertSafeStreamHost(String(body.streamHost).slice(0, 200));
       if (body.streamPort !== undefined) node.streamPort = Number(body.streamPort) || 0;
       if (body.streamPath !== undefined) node.streamPath = String(body.streamPath).slice(0, 200);
@@ -108,7 +156,7 @@ router.patch('/nodes/:id', async (req, res, next) => {
     await node.save();
     await syncProductDevices(node.product);
     const product = node.product ? await Product.findById(node.product).lean() : null;
-    res.json(publicNode(node, product));
+    res.json({ ...publicNode(node, product), config: sellerNodeConfig(node) });
   } catch (e) {
     next(e);
   }

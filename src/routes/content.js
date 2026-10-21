@@ -2,7 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const Product = require('../models/Product');
 const ContentEpisode = require('../models/ContentEpisode');
-const { authenticate, requireRoles } = require('../middleware/auth');
+const { authenticate, optionalAuth, requireRoles } = require('../middleware/auth');
 const { isWatchContentCategory } = require('../utils/license-keys');
 const {
   findActiveLicense,
@@ -17,6 +17,7 @@ const {
   uploadContentBuffer,
   getContentObjectStream,
 } = require('../config/minio');
+const minioCfg = require('../config/minio');
 const { playableSourceUrl } = require('../data/content-hub-products');
 const { fetchSafeHttp } = require('../utils/safe-http-url');
 
@@ -98,12 +99,15 @@ function canManage(req, product) {
   return String(product.creator) === String(req.user._id);
 }
 
-async function assertCanPlay(req, episode) {
+async function assertCanPlay(req, episode, { allowFree = false } = {}) {
   const productId = String(episode.product);
   const sellerId = episode.seller ? String(episode.seller) : '';
   const userId = req.user?._id ? String(req.user._id) : '';
   if (req.user && (req.user.role === 'admin' || (sellerId && userId && sellerId === userId))) {
     return { ok: true, license: null, seller: true };
+  }
+  if (allowFree && episode.free === true && req.user) {
+    return { ok: true, license: null, seller: false, free: true };
   }
   const license = await findActiveLicense({
     buyerId: req.user?._id,
@@ -207,6 +211,9 @@ router.post(
         durationSec: Math.max(0, Number(req.body?.durationSec) || 0),
         sourceUrl,
         previewUrl: String(req.body?.previewUrl || '').trim(),
+        synopsis: String(req.body?.synopsis || '').slice(0, 2000),
+        free: req.body?.free === true || req.body?.free === 'true',
+        posterUrl: String(req.body?.posterUrl || '').trim().slice(0, 800),
         pages,
         published: req.body?.published !== 'false',
       });
@@ -242,7 +249,7 @@ router.post('/unlock', authenticate, async (req, res, next) => {
     if (!episode || episode.published === false) {
       return res.status(404).json({ message: 'Episode not found' });
     }
-    const gate = await assertCanPlay(req, episode);
+    const gate = await assertCanPlay(req, episode, { allowFree: true });
     const token = issuePlayToken({
       episodeId: episode._id,
       productId: episode.product,
@@ -269,6 +276,7 @@ router.post('/unlock', authenticate, async (req, res, next) => {
       expiresIn: 300,
       licenseExpiresAt: gate.license?.expiresAt || null,
       drm: 'aimc-v1',
+      free: gate.free === true,
     });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ message: err.message, code: err.code });
@@ -302,9 +310,29 @@ async function handlePlay(req, res, next) {
     if (!page) return res.status(404).json({ message: 'No media' });
 
     if (page.objectName) {
-      const stream = await getContentObjectStream(page.objectName);
       res.setHeader('Content-Type', page.contentType || episode.contentType || row.mime || 'application/octet-stream');
       res.setHeader('Accept-Ranges', 'bytes');
+      // Byte ranges so players can seek (resume position, ±5s) without re-downloading.
+      const range = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range || '').trim());
+      if (range) {
+        const cfg = await minioCfg.ensurePlaygroundBucket();
+        const client = minioCfg.getMinioClient();
+        const stat = await client.statObject(cfg.bucket, page.objectName);
+        const total = Number(stat.size) || 0;
+        let start = range[1] === '' ? Math.max(0, total - Number(range[2] || 0)) : Number(range[1]);
+        let end = range[1] !== '' && range[2] !== '' ? Math.min(Number(range[2]), total - 1) : total - 1;
+        if (!total || start > end || start >= total) {
+          res.setHeader('Content-Range', `bytes */${total}`);
+          return res.status(416).end();
+        }
+        const part = await client.getPartialObject(cfg.bucket, page.objectName, start, end - start + 1);
+        res.status(206);
+        res.setHeader('Content-Range', `bytes ${start}-${end}/${total}`);
+        res.setHeader('Content-Length', String(end - start + 1));
+        part.on('error', (err) => next(err));
+        return part.pipe(res);
+      }
+      const stream = await getContentObjectStream(page.objectName);
       stream.on('error', (err) => next(err));
       return stream.pipe(res);
     }
@@ -357,6 +385,188 @@ router.get('/episodes/:id/download', authenticate, async (req, res, next) => {
     res.send(packed);
   } catch (err) {
     if (err.status) return res.status(err.status).json({ message: err.message, code: err.code });
+    next(err);
+  }
+});
+
+// ---------- Series player: metadata, reactions, resume, seller editing ----------
+const { SeriesReaction, WatchProgress } = require('../models/SeriesEngagement');
+
+function cleanTags(v) {
+  const arr = Array.isArray(v) ? v : String(v || '').split(',');
+  return [...new Set(arr.map((t) => String(t || '').trim().slice(0, 40)).filter(Boolean))].slice(0, 12);
+}
+
+async function seriesCounts(productId, userId) {
+  const [likes, saves, mine] = await Promise.all([
+    SeriesReaction.countDocuments({ product: productId, kind: 'like' }),
+    SeriesReaction.countDocuments({ product: productId, kind: 'save' }),
+    userId ? SeriesReaction.find({ product: productId, user: userId }).select('kind').lean() : [],
+  ]);
+  const kinds = new Set(mine.map((r) => r.kind));
+  return { likes, saves, liked: kinds.has('like'), saved: kinds.has('save') };
+}
+
+router.get('/products/:slug/series', optionalAuth, async (req, res, next) => {
+  try {
+    const slug = String(req.params.slug || '').toLowerCase();
+    const product = await Product.findOne({ slug }).lean();
+    if (!product || !isWatchContentCategory(product.category)) return res.status(404).json({ message: 'Not found' });
+    const userId = req.user?._id || null;
+    const [rows, counts, progress] = await Promise.all([
+      ContentEpisode.find({ product: product._id, published: true }).sort({ index: 1, createdAt: 1 }).lean(),
+      seriesCounts(product._id, userId),
+      userId ? WatchProgress.findOne({ user: userId, product: product._id }).lean() : null,
+    ]);
+    const meta = product.contentMeta || {};
+    res.json({
+      productId: String(product._id),
+      slug: product.slug,
+      title: product.name,
+      synopsis: meta.synopsis || product.description || '',
+      genres: (meta.genres && meta.genres.length ? meta.genres : product.tags || []).slice(0, 12),
+      episodeCount: rows.length,
+      ...counts,
+      progress: progress ? { episodeId: String(progress.episode), positionSec: progress.positionSec || 0, fraction: progress.fraction || 0, page: progress.page || 0, updatedAt: progress.updatedAt } : null,
+      bookmarks: progress ? (progress.bookmarks || []).map(publicBookmark) : [],
+      episodes: rows.map(publicEpisode),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/products/:slug/reactions', authenticate, async (req, res, next) => {
+  try {
+    const kind = String(req.body?.kind || '');
+    if (!['like', 'save'].includes(kind)) return res.status(400).json({ message: 'kind must be like or save' });
+    const product = await Product.findOne({ slug: String(req.params.slug || '').toLowerCase() }).select('_id category').lean();
+    if (!product || !isWatchContentCategory(product.category)) return res.status(404).json({ message: 'Not found' });
+    const on = req.body?.on !== false && req.body?.on !== 'false';
+    const key = { user: req.user._id, product: product._id, kind };
+    if (on) await SeriesReaction.updateOne(key, { $setOnInsert: key }, { upsert: true });
+    else await SeriesReaction.deleteOne(key);
+    res.json(await seriesCounts(product._id, req.user._id));
+  } catch (err) {
+    if (err?.code === 11000) return res.status(409).json({ message: 'Try again' });
+    next(err);
+  }
+});
+
+router.put('/products/:slug/progress', authenticate, async (req, res, next) => {
+  try {
+    const product = await Product.findOne({ slug: String(req.params.slug || '').toLowerCase() }).select('_id category').lean();
+    if (!product || !isWatchContentCategory(product.category)) return res.status(404).json({ message: 'Not found' });
+    const episode = await ContentEpisode.findOne({ _id: String(req.body?.episodeId || ''), product: product._id }).select('_id').lean().catch(() => null);
+    if (!episode) return res.status(400).json({ message: 'episodeId invalid' });
+    const positionSec = Math.max(0, Math.min(86400, Number(req.body?.positionSec) || 0));
+    const fraction = Math.max(0, Math.min(1, Number(req.body?.fraction) || 0));
+    const page = Math.max(0, Math.min(10000, Math.floor(Number(req.body?.page) || 0)));
+    await WatchProgress.updateOne(
+      { user: req.user._id, product: product._id },
+      { $set: { episode: episode._id, positionSec, fraction, page } },
+      { upsert: true },
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+function publicBookmark(b) {
+  return { id: String(b._id), episodeId: String(b.episode), fraction: b.fraction || 0, page: b.page || 0, kind: b.kind || 'bookmark', quote: b.quote || '', note: b.note || '', color: b.color || 'yellow', createdAt: b.createdAt };
+}
+
+async function readerTarget(req, res) {
+  const product = await Product.findOne({ slug: String(req.params.slug || '').toLowerCase() }).select('_id category').lean();
+  if (!product || !isWatchContentCategory(product.category)) { res.status(404).json({ message: 'Not found' }); return null; }
+  return product;
+}
+
+/** Reader bookmarks / highlights (max 200 per user and book). */
+router.get('/products/:slug/bookmarks', authenticate, async (req, res, next) => {
+  try {
+    const product = await readerTarget(req, res);
+    if (!product) return;
+    const row = await WatchProgress.findOne({ user: req.user._id, product: product._id }).select('bookmarks').lean();
+    res.json({ bookmarks: (row?.bookmarks || []).map(publicBookmark) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/products/:slug/bookmarks', authenticate, async (req, res, next) => {
+  try {
+    const product = await readerTarget(req, res);
+    if (!product) return;
+    const episode = await ContentEpisode.findOne({ _id: String(req.body?.episodeId || ''), product: product._id }).select('_id').lean().catch(() => null);
+    if (!episode) return res.status(400).json({ message: 'episodeId invalid' });
+    const b = {
+      episode: episode._id,
+      fraction: Math.max(0, Math.min(1, Number(req.body?.fraction) || 0)),
+      page: Math.max(0, Math.min(10000, Math.floor(Number(req.body?.page) || 0))),
+      kind: req.body?.kind === 'highlight' ? 'highlight' : 'bookmark',
+      quote: String(req.body?.quote || '').slice(0, 600),
+      note: String(req.body?.note || '').slice(0, 1000),
+      color: ['yellow', 'green', 'blue', 'pink'].includes(req.body?.color) ? req.body.color : 'yellow',
+    };
+    let row = await WatchProgress.findOne({ user: req.user._id, product: product._id });
+    if (!row) row = new WatchProgress({ user: req.user._id, product: product._id, episode: episode._id });
+    if ((row.bookmarks || []).length >= 200) return res.status(400).json({ message: 'Too many bookmarks' });
+    row.bookmarks.push(b);
+    await row.save();
+    res.status(201).json({ bookmark: publicBookmark(row.bookmarks[row.bookmarks.length - 1]) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/products/:slug/bookmarks/:id', authenticate, async (req, res, next) => {
+  try {
+    const product = await readerTarget(req, res);
+    if (!product) return;
+    await WatchProgress.updateOne({ user: req.user._id, product: product._id }, { $pull: { bookmarks: { _id: String(req.params.id) } } }).catch(() => null);
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Seller: series synopsis + genre tags. */
+router.patch('/products/:productId/series', authenticate, requireRoles('seller', 'admin'), async (req, res, next) => {
+  try {
+    const product = await Product.findById(req.params.productId);
+    if (!product) return res.status(404).json({ message: 'Product not found' });
+    if (!isWatchContentCategory(product.category)) return res.status(400).json({ message: 'Only AI films and stories' });
+    if (!canManage(req, product)) return res.status(403).json({ message: 'Forbidden' });
+    if (req.body?.synopsis != null) product.set('contentMeta.synopsis', String(req.body.synopsis).slice(0, 4000));
+    if (req.body?.genres != null) product.set('contentMeta.genres', cleanTags(req.body.genres));
+    await product.save();
+    res.json({ ok: true, synopsis: product.contentMeta?.synopsis || '', genres: product.contentMeta?.genres || [] });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Seller: edit an episode (title, synopsis, free flag, order, poster, publish). */
+router.patch('/episodes/:id', authenticate, requireRoles('seller', 'admin'), async (req, res, next) => {
+  try {
+    const episode = await ContentEpisode.findById(req.params.id);
+    if (!episode) return res.status(404).json({ message: 'Not found' });
+    const product = await Product.findById(episode.product);
+    if (!product || !canManage(req, product)) return res.status(403).json({ message: 'Forbidden' });
+    const b = req.body || {};
+    if (b.title != null && String(b.title).trim()) episode.title = String(b.title).trim().slice(0, 200);
+    if (b.synopsis != null) episode.synopsis = String(b.synopsis).slice(0, 2000);
+    if (b.free != null) episode.free = b.free === true || b.free === 'true';
+    if (b.index != null && Number(b.index) >= 1) episode.index = Math.floor(Number(b.index));
+    if (b.posterUrl != null) episode.posterUrl = String(b.posterUrl).trim().slice(0, 800);
+    if (b.durationSec != null) episode.durationSec = Math.max(0, Number(b.durationSec) || 0);
+    if (b.published != null) episode.published = !(b.published === false || b.published === 'false');
+    await episode.save();
+    await syncEpisodeCount(episode.product);
+    res.json(publicEpisode(episode));
+  } catch (err) {
     next(err);
   }
 });

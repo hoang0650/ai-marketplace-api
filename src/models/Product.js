@@ -83,6 +83,9 @@ const contentMetaSchema = new mongoose.Schema(
     creditUnit: { type: String, enum: ['character', 'word', ''], default: '' },
     charactersPerCredit: { type: Number, default: 1000, min: 1 },
     episodeCount: { type: Number, default: 0, min: 0 },
+    /** Series player: overall synopsis and genre chips. */
+    synopsis: { type: String, default: '', maxlength: 4000 },
+    genres: { type: [String], default: [] },
     licenseTerm: { type: String, enum: ['day', 'month', 'year', ''], default: '' },
     licensePrices: {
       day: { type: Number, default: 0, min: 0 },
@@ -123,6 +126,11 @@ const productSchema = new mongoose.Schema(
     coverUrl: { type: String, default: '' },
     gallery: { type: [String], default: [] },
     pricing: { type: pricingSchema, required: true },
+    /** Professional services: optional phase plan [{title, percent, days}] (percent sums to 100). */
+    servicePlan: {
+      type: [new mongoose.Schema({ title: String, percent: Number, days: Number }, { _id: false })],
+      default: undefined,
+    },
     /** Affiliate commission 0–0.25 of the price after discount, paid by the seller. null = store default. */
     affiliateRate: { type: Number, default: null, min: 0, max: 0.25 },
     runtime: { type: runtimeSchema, default: () => ({}) },
@@ -140,6 +148,13 @@ const productSchema = new mongoose.Schema(
     publishedAt: { type: Date, default: Date.now },
     productType: { type: String, default: 'MODEL', index: true },
     taxCategory: { type: String, default: '', trim: true, uppercase: true, index: true },
+    /**
+     * Required seller declaration: DIGITAL (sản phẩm số / dịch vụ) or PHYSICAL (hàng hóa vật lý).
+     * Drives the withheld tax rate for individual sellers (NĐ 252/2026, TT 18/2026): digital 5% GTGT + 2% TNCN,
+     * goods 1% GTGT + 0.5% TNCN. Legacy rows are defaulted to DIGITAL by ensureProductKinds().
+     */
+    productKind: { type: String, enum: ['DIGITAL', 'PHYSICAL', ''], default: '', index: true },
+    productKindDefaultedAt: { type: Date, default: null },
     /** @deprecated Prefer infraProvider — kept for backward compatibility with catalog seeds. */
     provider: { type: String, default: '', trim: true, index: true },
     published: { type: Boolean, default: true, index: true },

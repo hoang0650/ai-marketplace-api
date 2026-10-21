@@ -13,9 +13,12 @@ test('work board is fully shut down: every endpoint is discontinued', () => {
   }
 });
 
-test('hire projects are fully shut down, including existing projects', () => {
-  for (const [m, path] of [['POST', '/projects'], ['GET', '/projects'], ['GET', '/projects/x'], ['POST', '/projects/x/approve'], ['POST', '/projects/x/cancel']]) {
+test('legacy hire quote flow stays closed; package phase flow is open', () => {
+  for (const [m, path] of [['POST', '/projects'], ['POST', '/projects/x/quote'], ['POST', '/projects/x/counter'], ['POST', '/projects/x/decline'], ['POST', '/projects/x/accept']]) {
     assert.equal(matches(HIRE_BLOCKED, req(m, path)), true, `${m} ${path}`);
+  }
+  for (const [m, path] of [['POST', '/packages'], ['GET', '/projects'], ['GET', '/projects/x'], ['POST', '/projects/x/submit'], ['POST', '/projects/x/approve'], ['POST', '/projects/x/revision'], ['POST', '/projects/x/terminate'], ['POST', '/projects/x/messages'], ['POST', '/projects/x/complaint']]) {
+    assert.equal(matches(HIRE_BLOCKED, req(m, path)), false, `${m} ${path}`);
   }
 });
 

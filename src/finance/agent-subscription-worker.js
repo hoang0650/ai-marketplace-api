@@ -153,7 +153,11 @@ async function processSubscription(doc, now = new Date(), cfg = workerConfig()) 
 
   const renewDue = paidUntil.getTime() <= t + cfg.renewLeadHours * HOUR_MS;
   const retryOk = !doc.lastRenewAttemptAt || new Date(doc.lastRenewAttemptAt).getTime() <= t - cfg.retryHours * HOUR_MS;
-  if (doc.autoRenew !== false && renewDue && retryOk) {
+  // Never auto-renew a plan whose latest charge was refunded (failed launch / support refund).
+  const refunded = Boolean(
+    doc.lastRefundedAt && (!doc.lastChargedAt || new Date(doc.lastRefundedAt).getTime() >= new Date(doc.lastChargedAt).getTime()),
+  );
+  if (doc.autoRenew !== false && !refunded && renewDue && retryOk) {
     const claimed = await AgentSubscription.findOneAndUpdate(
       { _id: doc._id, paidUntil: doc.paidUntil, lastRenewAttemptAt: doc.lastRenewAttemptAt ?? null },
       { $set: { lastRenewAttemptAt: now } },

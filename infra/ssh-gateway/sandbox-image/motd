@@ -1,0 +1,4 @@
+AI Markets sandbox — this is your own isolated container.
+Your files live in /workspace and persist between sessions. /tmp is wiped.
+The session closes when your temporary credentials expire or are revoked.
+Manage your OpenClaw devices: openclaw devices list | openclaw devices approve <requestId>

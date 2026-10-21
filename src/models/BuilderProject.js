@@ -69,4 +69,13 @@ const schema = new mongoose.Schema(
 
 schema.index({ owner: 1, updatedAt: -1 });
 
+// Cross-device sync: every saved change tells the owner's other devices to refetch.
+schema.post('save', (doc) => {
+  try {
+    require('../realtime/user-bus').publish(doc.owner, 'project.updated', { id: String(doc._id), version: doc.version || 0, name: doc.name || '' });
+  } catch {
+    /* best effort */
+  }
+});
+
 module.exports = mongoose.model('BuilderProject', schema);

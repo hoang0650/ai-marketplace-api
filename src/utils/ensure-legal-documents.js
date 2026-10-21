@@ -15,7 +15,7 @@ const BASE_DOCS = [
 ${PLATFORM_NAME} do ${OPERATOR} vận hành theo mô hình sàn giao dịch TMĐT, đồng thời bán trực tiếp một số dịch vụ của nền tảng (Platform Direct).
 
 - Người dùng chịu trách nhiệm bảo mật tài khoản; quản lý hồ sơ, thông báo, phiên đăng nhập trong Cài đặt.
-- Mọi đơn hàng được thanh toán bằng số dư ví AI Markets; ví được nạp qua GPay/VietQR (web), Apple In-App Purchase hoặc Google Play Billing (ứng dụng). Giá và số dư hiển thị theo VNĐ, USD hoặc CNY do người dùng chọn.
+- Mọi đơn hàng được thanh toán bằng số dư ví AI Markets; ví được nạp bằng chuyển khoản ngân hàng (mã QR VietQR) vào tài khoản thanh toán của Công ty (web), Apple In-App Purchase hoặc Google Play Billing (ứng dụng). Giá và số dư hiển thị theo VNĐ, USD hoặc CNY do người dùng chọn.
 - Dịch vụ định kỳ (thuê bao agent 199.000 đ/30 ngày) tự gia hạn mặc định, có thể tắt; dịch vụ tính theo mức dùng (API, GPU, phút chơi game) trừ vào số dư theo đơn giá công bố.
 - Nội dung do AI tạo được gắn nhãn; người dùng chịu trách nhiệm với nội dung mình yêu cầu tạo.
 - Cấm các hành vi tại Chính sách sử dụng chấp nhận được.
@@ -68,7 +68,7 @@ Mô hình và API AI, agent, gói kỹ năng, phần mềm, mẫu website/ứng 
 - Thay đổi phí được thông báo trước ít nhất 30 ngày và chỉ áp dụng cho đơn hàng mới.
 
 ## 5. Thanh toán và chi trả
-Mọi đơn hàng được thanh toán bằng số dư ví AI Markets. GPay/VietQR, Apple IAP và Google Play Billing chỉ dùng để nạp tiền vào ví. Người mua được rút số dư ví sau khi xác minh danh tính (eKYC). Tiền của người bán được giữ 48 giờ, chỉ chi trả khi không có tranh chấp và người bán đã xác minh (bao gồm eKYC). Cấm giao dịch ngoài sàn.
+Mọi đơn hàng được thanh toán bằng số dư ví AI Markets. Chuyển khoản ngân hàng (mã QR VietQR) vào tài khoản thanh toán của Công ty, Apple IAP và Google Play Billing chỉ dùng để nạp tiền vào ví. Người mua được rút số dư ví sau khi xác minh danh tính (eKYC). Tiền của người bán được giữ 48 giờ, chỉ chi trả khi không có tranh chấp và người bán đã xác minh (bao gồm eKYC). Cấm giao dịch ngoài sàn.
 
 ## 6. Khiếu nại
 Xác nhận tiếp nhận trong 24 giờ; xác minh sơ bộ trong 01 ngày làm việc; người bán phản hồi trong 02 ngày làm việc; ra quyết định trong 07 ngày làm việc kể từ khi đủ hồ sơ. Khiếu nại lại trong 07 ngày kể từ khi có quyết định, được trả lời trong 07 ngày làm việc.
@@ -138,7 +138,7 @@ ${FULL_TEXT}/mau-hop-dong-cung-cap-dich-vu-nguoi-ban`,
     content: `# Chính sách người mua
 
 - Kiểm tra nhãn **Bán bởi sàn** hoặc **Bán bởi người bán**, giá và đơn vị tính trước khi đặt hàng.
-- Mọi đơn hàng được thanh toán bằng số dư ví; nạp ví qua GPay/VietQR (web), Apple IAP hoặc Google Play Billing (ứng dụng). Giá hiển thị theo VNĐ, USD hoặc CNY; mã giảm giá của sàn hiển thị là “Giảm giá nền tảng” trong giỏ hàng và được trừ trước khi tính phí sàn.
+- Mọi đơn hàng được thanh toán bằng số dư ví; nạp ví bằng chuyển khoản ngân hàng (mã QR VietQR) vào tài khoản thanh toán của Công ty (web), Apple IAP hoặc Google Play Billing (ứng dụng). Giá hiển thị theo VNĐ, USD hoặc CNY; mã giảm giá của sàn hiển thị là “Giảm giá nền tảng” trong giỏ hàng và được trừ trước khi tính phí sàn.
 - Người mua được rút số dư ví sau khi xác minh danh tính (eKYC) bằng CCCD/hộ chiếu.
 - Dịch vụ chuyên môn (làm web, làm app, marketing, SEO, creator, tự động hóa) bán theo gói giá cố định, thanh toán như sản phẩm khác.
 - Giỏ hàng, yêu thích đồng bộ giữa web và ứng dụng khi đăng nhập.
@@ -152,11 +152,11 @@ ${FULL_TEXT}/chinh-sach-nguoi-mua`,
   {
     documentType: 'payment-policy',
     title: 'Chính sách thanh toán và đối soát',
-    summary: 'Thanh toán bằng ví; GPay, Apple/Google IAP chỉ để nạp ví; rút ví sau eKYC; đối soát.',
+    summary: 'Thanh toán bằng ví; chuyển khoản ngân hàng (VietQR), Apple/Google IAP chỉ để nạp ví; rút ví sau eKYC; đối soát.',
     content: `# Chính sách thanh toán và đối soát
 
 ## Phương thức
-Mọi đơn hàng được thanh toán bằng **số dư ví AI Markets**. GPay/VietQR (web), Apple In-App Purchase và Google Play Billing (ứng dụng) chỉ dùng để nạp tiền vào ví. Số dư hiển thị theo VNĐ, USD hoặc CNY.
+Mọi đơn hàng được thanh toán bằng **số dư ví AI Markets**. Chuyển khoản ngân hàng (mã QR VietQR) vào tài khoản thanh toán của Công ty (web), Apple In-App Purchase và Google Play Billing (ứng dụng) chỉ dùng để nạp tiền vào ví. Số dư hiển thị theo VNĐ, USD hoặc CNY.
 
 ## Ví người mua
 Dùng để thanh toán trên sàn; được **rút về tài khoản ngân hàng đứng tên mình sau khi xác minh danh tính (eKYC)**. Tiền hoàn trả về ví hoặc phương thức thanh toán ban đầu.
