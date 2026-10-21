@@ -11,6 +11,7 @@ const {
   hasActiveSubscriptionByUserId,
 } = require('../finance/agent-subscription');
 const { generateSshKeyPair } = require('../utils/ssh-keys');
+const { dashboardTokenForUser } = require('../utils/spacebot-token');
 const {
   AIMARKETS_PROVIDER_MARKUP,
   computeOpenClawSellCost,
@@ -52,28 +53,12 @@ function aimarketsApiBase(userId) {
 
 /**
  * SpaceBot's dashboard reads its bearer token from `localStorage` and has no
- * `?token=` login flow, so we hand it over in the URL hash and SpaceBot's
- * bootstrap script moves it into `localStorage` before the SPA boots.
- * The hash is not sent to the server, so the token stays out of access logs.
+ * `?token=` login flow, so we hand the buyer's own token over in the URL hash.
+ * SpaceBot moves it into `localStorage` before the SPA boots and clears the hash.
+ * The token is HMAC(seed, userId), not a secret shared by every buyer.
  */
-function resolveDashboardToken() {
-  const explicit = String(
-    process.env.SPACEBOT_DASHBOARD_SECRET || process.env.SPACEBOT_API_TOKEN || '',
-  ).trim();
-  if (explicit) return explicit;
-
-  const seed = String(
-    process.env.SPACEBOT_DASHBOARD_TOKEN_SEED ||
-      process.env.AIMARKETS_SERVICE_SECRET ||
-      process.env.NEST_SERVICE_AUTH_SECRET ||
-      '',
-  ).trim();
-  if (!seed) return '';
-  return crypto
-    .createHash('sha256')
-    .update(`phhotel-spacebot-dashboard:${seed}`, 'utf8')
-    .digest('hex')
-    .slice(0, 48);
+function resolveDashboardToken(userId) {
+  return dashboardTokenForUser(userId);
 }
 
 function buildLaunchUrl({ uiBaseUrl, userId, token }) {
@@ -112,7 +97,13 @@ function resolveSshTarget(user, body = {}) {
     process.env.SPACEBOT_SSH_HOST_TEMPLATE ||
     process.env.SPACEBOT_SSH_HOST ||
     '{userId}.spacebot.aimarkets.vn';
-  const userId = String(user?._id || 'anon');
+  const userId = String(user?._id || '').trim().toLowerCase();
+  const ownHost = hostTemplate
+    .replace(/\{userId\}/g, userId)
+    .replace(/\{username\}/g, slugUser(user))
+    .replace(/\{email\}/g, String(user?.email || '').split('@')[0])
+    .trim()
+    .toLowerCase();
   const allowCustom = process.env.SPACEBOT_SSH_ALLOW_CUSTOM_HOST === '1';
   const rawHost = String(body.host || body.serverHost || '')
     .trim()
@@ -120,17 +111,9 @@ function resolveSshTarget(user, body = {}) {
     .replace(/^https?:\/\//, '')
     .replace(/\/$/, '');
   const isPhhotelHost = /(^|\.)phhotel\.vn$/i.test(rawHost);
-  const isAimarketsHost = /(^|\.)spacebot\.aimarkets\.vn$/i.test(rawHost) || /(^|\.)aimarkets\.vn$/i.test(rawHost);
-  const hostFromBody =
-    rawHost && !isPhhotelHost && (allowCustom || isAimarketsHost) ? rawHost : '';
-  const host =
-    hostFromBody ||
-    (hostTemplate
-      ? hostTemplate
-          .replace(/\{userId\}/g, userId)
-          .replace(/\{username\}/g, slugUser(user))
-          .replace(/\{email\}/g, String(user?.email || '').split('@')[0])
-      : '');
+  // Default: only this buyer's host. A client-supplied host used to be accepted
+  // for any *.aimarkets.vn name, which could install a key on someone else's instance.
+  const host = allowCustom && rawHost && !isPhhotelHost ? rawHost : ownHost;
   const port = Number(body.port || process.env.SPACEBOT_SSH_PORT || 2222);
   const username =
     String(body.username || process.env.SPACEBOT_SSH_USER || '').trim() || 'root';
@@ -148,7 +131,9 @@ function serviceSecretOk(req) {
   const got = String(
     req.headers['x-service-secret'] || req.headers['x-aimarkets-service-secret'] || '',
   ).trim();
-  return got && got === expected;
+  const a = Buffer.from(got);
+  const b = Buffer.from(expected);
+  return a.length > 0 && a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
 function readSpacebotUserId(req) {
@@ -206,7 +191,7 @@ router.post('/launch', authenticate, async (req, res, next) => {
     }
     await assertActiveSubscription(req.user, 'spacebot');
 
-    const token = resolveDashboardToken();
+    const token = resolveDashboardToken(userId);
     const uiBase = aimarketsPublicBase(userId);
     const url = buildLaunchUrl({ uiBaseUrl: uiBase, userId, token });
     if (!url) {
@@ -260,7 +245,7 @@ router.post('/ssh/generate', authenticate, async (req, res, next) => {
 
     const comment = `aimarkets-${String(req.user._id).slice(-6)}`;
     const keyPair = generateSshKeyPair({ comment });
-    const token = resolveDashboardToken();
+    const token = resolveDashboardToken(req.user._id);
     const apiBase = aimarketsApiBase(req.user._id);
     const pushed = await pushSshAccess({ apiBase, token, publicKey: keyPair.publicKey });
 

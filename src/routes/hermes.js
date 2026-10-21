@@ -21,11 +21,19 @@ const {
   verifyHermesCredentials,
   issueHermesLoginTicket,
   consumeHermesLoginTicket,
+  revealPassword,
 } = require('../services/hermesAccounts');
+const ProviderApiKey = require('../models/ProviderApiKey');
+const AgentProviderSetting = require('../models/AgentProviderSetting');
+const { openSecret } = require('../utils/secret-box');
+const { getByokProvider } = require('../utils/byok-providers');
+const { toOpenAICompatibleConnection } = require('./runtime-byok-claim');
+const { serviceSecretOk } = require('../utils/service-secret');
 
 const router = express.Router();
 const SSH_TTL_MS = 60 * 60 * 1000;
 const USER_ID_RE = /^[a-f0-9]{24}$/i;
+const MODEL_ID_RE = /^[\w.:/@+-]{1,200}$/;
 const AIMARKETS_PUBLIC_TEMPLATE =
   process.env.HERMES_AIMARKETS_PUBLIC_URL_TEMPLATE || 'https://{userId}.hermes.aimarkets.vn';
 
@@ -150,17 +158,6 @@ function aiBaseUrl() {
   );
 }
 
-function serviceSecretOk(req) {
-  const expected = String(
-    process.env.AIMARKETS_SERVICE_SECRET ||
-      process.env.NEST_SERVICE_AUTH_SECRET ||
-      process.env.PYTHON_AI_SHARED_SECRET ||
-      '',
-  ).trim();
-  if (!expected) return false;
-  const got = String(req.headers['x-service-secret'] || '').trim();
-  return got && got === expected;
-}
 
 function readHermesUserId(req) {
   return String(
@@ -212,7 +209,7 @@ router.post('/launch', authenticate, async (req, res, next) => {
       userId,
       autoLogin: true,
       username: account.username,
-      password: account.password,
+      password: revealPassword(account.password),
       profile: account.profile,
     });
   } catch (err) {
@@ -530,6 +527,101 @@ router.post('/usage', async (req, res, next) => {
       } catch (e) {
         next(e);
       }
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * BYOK for this buyer's Hermes profile. No selection = Hermes has no platform key
+ * (platform keys are not copied into the buyer profile).
+ */
+router.get('/provider', authenticate, async (req, res, next) => {
+  try {
+    const setting = await AgentProviderSetting.findOne({ user: req.user._id, agent: 'hermes' });
+    return res.json({ success: true, selection: setting ? setting.toPublic() : null });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put('/provider', authenticate, async (req, res, next) => {
+  try {
+    const spec = getByokProvider(req.body?.provider);
+    if (!spec) {
+      return res.status(400).json({ success: false, message: 'Choose a provider.' });
+    }
+    const key = await ProviderApiKey.findOne({ user: req.user._id, provider: spec.id });
+    if (!key || key.status !== 'active') {
+      return res.status(400).json({
+        success: false,
+        code: 'KEY_REQUIRED',
+        message: `Save and verify your ${spec.label} API key first.`,
+      });
+    }
+    const model = String(req.body?.model || '').trim() || (spec.custom ? key.model : '');
+    if (!MODEL_ID_RE.test(model)) {
+      return res.status(400).json({ success: false, message: 'Enter a valid model id.' });
+    }
+    const setting = await AgentProviderSetting.findOneAndUpdate(
+      { user: req.user._id, agent: 'hermes' },
+      { $set: { provider: spec.id, model } },
+      { upsert: true, new: true, setDefaultsOnInsert: true },
+    );
+    return res.json({ success: true, selection: setting.toPublic() });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/provider', authenticate, async (req, res, next) => {
+  try {
+    await AgentProviderSetting.deleteOne({ user: req.user._id, agent: 'hermes' });
+    return res.json({ success: true, selection: null });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Hermes host only: the buyer's OpenAI-compatible connection. Never a platform key. */
+router.get('/provider/resolve', async (req, res, next) => {
+  try {
+    if (!serviceSecretOk(req)) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+    const userId = readHermesUserId(req);
+    if (!USER_ID_RE.test(userId)) {
+      return res.status(400).json({ success: false, message: 'user_id required' });
+    }
+    res.set('Cache-Control', 'no-store');
+    const setting = await AgentProviderSetting.findOne({ user: userId, agent: 'hermes' }).lean();
+    if (!setting) return res.json({ success: true, userId, connection: null });
+    const key = await ProviderApiKey.findOne({
+      user: userId,
+      provider: setting.provider,
+      status: 'active',
+    }).select('+secret');
+    if (!key) return res.json({ success: true, userId, connection: null, reason: 'key_missing' });
+    let apiKey;
+    try {
+      apiKey = openSecret(key.secret);
+    } catch {
+      console.warn(`[hermes-provider] cannot decrypt key user=${userId} provider=${setting.provider}`);
+      return res.json({ success: true, userId, connection: null, reason: 'key_unreadable' });
+    }
+    const conn = toOpenAICompatibleConnection({
+      provider: setting.provider,
+      apiKey,
+      baseUrl: key.baseUrl,
+      model: setting.model,
+    });
+    if (!conn) return res.json({ success: true, userId, connection: null, reason: 'provider_unsupported' });
+    ProviderApiKey.updateOne({ _id: key._id }, { $set: { lastUsedAt: new Date() } }).catch(() => {});
+    return res.json({
+      success: true,
+      userId,
+      connection: { provider: conn.provider, baseUrl: conn.baseUrl, apiKey, model: setting.model },
     });
   } catch (err) {
     next(err);

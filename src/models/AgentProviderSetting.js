@@ -7,7 +7,7 @@ const mongoose = require('mongoose');
 const schema = new mongoose.Schema(
   {
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    agent: { type: String, required: true, enum: ['nanoclaw'] },
+    agent: { type: String, required: true, enum: ['nanoclaw', 'hermes'] },
     provider: { type: String, required: true, trim: true, lowercase: true, maxlength: 40 },
     model: { type: String, required: true, trim: true, maxlength: 200 },
   },

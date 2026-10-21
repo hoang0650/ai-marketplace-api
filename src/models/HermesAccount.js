@@ -15,7 +15,7 @@ const hermesAccountSchema = new mongoose.Schema(
       index: true,
     },
     username: { type: String, required: true, unique: true, trim: true, lowercase: true },
-    /** Plain password for Launch autofill (same pattern as SshSession). */
+    /** AES-GCM envelope (secret-box). Legacy rows may still hold the plaintext until the next login. */
     password: { type: String, required: true },
     /** Hermes profile name — must match auth session org_id / lock. */
     profile: { type: String, required: true, unique: true },

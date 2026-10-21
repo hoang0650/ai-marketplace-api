@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const HermesAccount = require('../models/HermesAccount');
 const HermesLoginTicket = require('../models/HermesLoginTicket');
+const { sealSecret, openSecret } = require('../utils/secret-box');
 
 const TICKET_TTL_MS = Math.max(15, Number(process.env.HERMES_LOGIN_TICKET_TTL_SECONDS || 120) || 120) * 1000;
 const TICKET_RE = /^[A-Za-z0-9_-]{32,128}$/;
@@ -32,6 +33,22 @@ function randomPassword(bytes = 18) {
   return crypto.randomBytes(bytes).toString('base64url');
 }
 
+function isSealedPassword(value) {
+  return String(value || '').startsWith('v1.');
+}
+
+/** Encrypt a dashboard password for storage. */
+function sealStoredPassword(plain) {
+  return sealSecret(String(plain || ''));
+}
+
+/** Decrypt a stored password. Plaintext rows from before sealing are returned as-is. */
+function revealPassword(stored) {
+  const raw = String(stored || '');
+  if (!isSealedPassword(raw)) return raw;
+  return openSecret(raw);
+}
+
 /**
  * Create or return existing Hermes dashboard account for a marketplace buyer.
  */
@@ -42,7 +59,13 @@ async function ensureHermesAccount(user) {
   }
 
   let account = await HermesAccount.findOne({ user: userId });
-  if (account) return account;
+  if (account) {
+    if (!isSealedPassword(account.password)) {
+      account.password = sealStoredPassword(account.password);
+      await account.save();
+    }
+    return account;
+  }
 
   const profile = profileForUserId(userId);
   let username = usernameForUser(user);
@@ -52,7 +75,7 @@ async function ensureHermesAccount(user) {
       account = await HermesAccount.create({
         user: userId,
         username,
-        password: randomPassword(),
+        password: sealStoredPassword(randomPassword()),
         profile,
       });
       return account;
@@ -75,13 +98,22 @@ async function verifyHermesCredentials(username, password) {
   if (!u || !p) return null;
   const account = await HermesAccount.findOne({ username: u });
   if (!account) {
-    // timing stand-in
     crypto.timingSafeEqual(Buffer.from(p), Buffer.from(p));
     return null;
   }
-  const a = Buffer.from(String(account.password));
+  let plain = '';
+  try {
+    plain = revealPassword(account.password);
+  } catch {
+    return null;
+  }
+  const a = Buffer.from(plain);
   const b = Buffer.from(p);
   if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  if (!isSealedPassword(account.password)) {
+    account.password = sealStoredPassword(plain);
+    await account.save();
+  }
   return {
     userId: String(account.user),
     username: account.username,
@@ -117,4 +149,6 @@ module.exports = {
   usernameForUser,
   ensureHermesAccount,
   verifyHermesCredentials,
+  sealStoredPassword,
+  revealPassword,
 };
