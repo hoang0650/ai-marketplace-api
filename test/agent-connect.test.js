@@ -108,6 +108,19 @@ test("approveOwnPairing approves only the buyer's own request", async () => {
   assert.deepEqual(gw2.calls.map((c) => c.method), ['device.pair.list']);
 });
 
+test('approveOwnPairing without an id approves only the newest request from this buyer', async () => {
+  const older = pending({ requestId: 'own-older-request-1' });
+  const newer = pending({ requestId: 'own-newer-request-2' });
+  const foreign = pending({ requestId: 'other-request-123', browserOrigin: `https://${OTHER}.openclaw.aimarkets.vn` });
+  const gw = fakeGateway([older, foreign, newer]);
+  const r = await approveOwnPairing({ userId: UID, fetchImpl: gw.fetchImpl, env });
+  assert.equal(r.requestId, 'own-newer-request-2');
+  assert.deepEqual(gw.calls[1].params, { requestId: 'own-newer-request-2' });
+
+  const gw2 = fakeGateway([foreign]);
+  await assert.rejects(approveOwnPairing({ userId: UID, fetchImpl: gw2.fetchImpl, env }), (e) => e.code === 'not_found');
+});
+
 test('approveOwnPairing: clear 503/502 (not a 500 crash) when gateway is missing or down', async () => {
   await assert.rejects(approveOwnPairing({ userId: UID, requestId: RID, env: {} }), (e) => e.status === 503 && e.code === 'not_configured');
   await assert.rejects(approveOwnPairing({ userId: UID, requestId: '../../x', env }), (e) => e.code === 'bad_request_id');

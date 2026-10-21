@@ -45,7 +45,13 @@ function originHost(origin) {
 
 /** Pure ownership/scope check, exported for tests. Returns null when allowed, else a PairingError. */
 function checkPendingOwnership(pending, { userId, hostSuffix, allowedScopes }) {
-  if (!pending) return new PairingError(404, 'not_found', 'No pending pairing request with that id. Open the Control UI from aimarkets.vn again and copy the new request id.');
+  if (!pending) {
+    return new PairingError(
+      404,
+      'not_found',
+      'No pending pairing request from your workspace. Open the Control UI from aimarkets.vn, then click Approve on the setup page. The gateway token is not a request id.',
+    );
+  }
   const expectedHost = `${userId}.${hostSuffix}`;
   if (originHost(pending.browserOrigin) !== expectedHost) {
     return new PairingError(403, 'not_owner', 'This pairing request was not opened from your own OpenClaw workspace.');
@@ -79,32 +85,43 @@ async function adminRpc({ url, token, fetchImpl }, method, params) {
 /**
  * @param {{ userId: string, requestId: string, fetchImpl?: typeof fetch, env?: NodeJS.ProcessEnv }} p
  */
+function ownApprovable(list, uid, cfg) {
+  return (Array.isArray(list?.pending) ? list.pending : []).filter(
+    (p) => !checkPendingOwnership(p, { userId: uid, hostSuffix: cfg.hostSuffix, allowedScopes: cfg.allowedScopes }),
+  );
+}
+
+async function loadPairingList(cfg, fetchImpl) {
+  try {
+    return await adminRpc({ ...cfg, fetchImpl }, 'device.pair.list', {});
+  } catch (err) {
+    if (err instanceof PairingError) throw err;
+    throw new PairingError(502, 'gateway_unreachable', 'OpenClaw gateway is unreachable. Try again in a minute.');
+  }
+}
+
 async function approveOwnPairing({ userId, requestId, fetchImpl = fetch, env = process.env }) {
   const uid = String(userId || '').trim().toLowerCase();
   const rid = String(requestId || '').trim();
   if (!USER_ID_RE.test(uid)) throw new PairingError(400, 'bad_user', 'Signed-in marketplace user required.');
-  if (!REQUEST_ID_RE.test(rid)) throw new PairingError(400, 'bad_request_id', 'Invalid pairing request id.');
+  if (rid && !REQUEST_ID_RE.test(rid)) throw new PairingError(400, 'bad_request_id', 'Invalid pairing request id.');
   const cfg = gatewayConfig(env);
   if (!cfg.url || !cfg.token) {
     throw new PairingError(
       503,
       'not_configured',
-      'Manual device pairing is not available yet. Relaunch OpenClaw from aimarkets.vn: your signed launch link pairs this browser automatically.'
+      'Device pairing is not available yet. Relaunch OpenClaw from aimarkets.vn: your signed launch link pairs this browser automatically.'
     );
   }
-  const rpc = { ...cfg, fetchImpl };
-  let list;
-  try {
-    list = await adminRpc(rpc, 'device.pair.list', {});
-  } catch (err) {
-    if (err instanceof PairingError) throw err;
-    throw new PairingError(502, 'gateway_unreachable', 'OpenClaw gateway is unreachable. Try again in a minute.');
-  }
-  const pending = (Array.isArray(list?.pending) ? list.pending : []).find((p) => p?.requestId === rid);
+  const list = await loadPairingList(cfg, fetchImpl);
+  const pending = rid
+    ? (Array.isArray(list?.pending) ? list.pending : []).find((p) => p?.requestId === rid)
+    : ownApprovable(list, uid, cfg).at(-1);
   const denied = checkPendingOwnership(pending, { userId: uid, hostSuffix: cfg.hostSuffix, allowedScopes: cfg.allowedScopes });
   if (denied) throw denied;
-  await adminRpc(rpc, 'device.pair.approve', { requestId: rid });
-  return { requestId: rid, deviceId: pending.deviceId, approved: true };
+  const approvedId = pending.requestId;
+  await adminRpc({ ...cfg, fetchImpl }, 'device.pair.approve', { requestId: approvedId });
+  return { requestId: approvedId, deviceId: pending.deviceId, approved: true };
 }
 
 /**
@@ -118,13 +135,7 @@ async function listOwnPairings({ userId, fetchImpl = fetch, env = process.env })
   if (!cfg.url || !cfg.token) {
     throw new PairingError(503, 'not_configured', 'Device pairing is not available yet. Relaunch OpenClaw from aimarkets.vn.');
   }
-  let list;
-  try {
-    list = await adminRpc({ ...cfg, fetchImpl }, 'device.pair.list', {});
-  } catch (err) {
-    if (err instanceof PairingError) throw err;
-    throw new PairingError(502, 'gateway_unreachable', 'OpenClaw gateway is unreachable. Try again in a minute.');
-  }
+  const list = await loadPairingList(cfg, fetchImpl);
   const expectedHost = `${uid}.${cfg.hostSuffix}`;
   return (Array.isArray(list?.pending) ? list.pending : [])
     .filter((p) => p && originHost(p.browserOrigin) === expectedHost && REQUEST_ID_RE.test(String(p.requestId || '')))

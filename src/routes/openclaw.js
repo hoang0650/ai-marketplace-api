@@ -20,7 +20,7 @@ const { issueMarketTicket, tenantGatewayToken } = require('../utils/openclaw-tic
 const { serviceSecretOk } = require('../utils/service-secret');
 const { issueIsolatedSshSession } = require('../services/ssh-sandbox');
 const byokRoutes = require('./openclaw-byok');
-const { approveOwnPairing, PairingError } = require('../services/openclaw-pairing');
+const { approveOwnPairing, listOwnPairings, PairingError } = require('../services/openclaw-pairing');
 
 const router = express.Router();
 router.use('/byok', byokRoutes);
@@ -223,6 +223,20 @@ router.post('/launch', authenticate, async (req, res, next) => {
       gatewayToken: token,
     });
   } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/device-pairings/pending', authenticate, async (req, res, next) => {
+  try {
+    await assertActiveSubscription(req.user, 'openclaw');
+    const pending = await listOwnPairings({ userId: String(req.user?._id || req.user?.id || '') });
+    res.set('Cache-Control', 'no-store');
+    return res.json({ success: true, pending });
+  } catch (err) {
+    if (err instanceof PairingError) {
+      return res.status(err.status).json({ success: false, code: err.code, message: err.message });
+    }
     next(err);
   }
 });
