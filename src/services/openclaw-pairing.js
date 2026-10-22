@@ -7,7 +7,9 @@
  * approves a request ONLY when:
  *   - the request id exists and is still pending,
  *   - it was opened from the buyer's own Control UI origin
- *     (https://<userId>.openclaw.aimarkets.vn),
+ *     (https://<userId>.openclaw.aimarkets.vn), or, on gateways >= 2026.10.5
+ *     that no longer record browserOrigin for Control UI requests, it is a
+ *     fresh Control UI request from the same public IP as the signed-in buyer,
  *   - it asks for the operator role and no admin/pairing scopes.
  * The gateway admin token never leaves the API.
  */
@@ -43,8 +45,54 @@ function originHost(origin) {
   }
 }
 
+const CONTROL_UI_CLIENT_IDS = new Set(['openclaw-control-ui', 'control-ui']);
+const IP_MATCH_MAX_AGE_MS = 15 * 60 * 1000;
+
+function normalizeIp(ip) {
+  let v = String(ip || '').trim().toLowerCase();
+  if (v.startsWith('::ffff:')) v = v.slice(7);
+  return v;
+}
+
+function pendingCreatedMs(p) {
+  const raw = p?.createdAtMs ?? p?.requestedAtMs ?? p?.ts ?? p?.createdAt ?? p?.requestedAt;
+  if (raw == null) return null;
+  const n = typeof raw === 'number' ? raw : Date.parse(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Pending requests from either gateway format: { pending: [...] } (all versions),
+ * a bare array, or { pendingById: { id: req } }.
+ */
+function pendingOf(list) {
+  if (Array.isArray(list)) return list;
+  if (Array.isArray(list?.pending)) return list.pending;
+  if (list?.pendingById && typeof list.pendingById === 'object') {
+    return Object.entries(list.pendingById).map(([id, p]) => ({ requestId: id, ...p }));
+  }
+  return [];
+}
+
+/**
+ * Does this pending request belong to the buyer? Old gateways record the Control UI
+ * origin (browserOrigin); OpenClaw 2026.10.5+ only records it for browser-copilot
+ * extensions, so Control UI requests carry just remoteIp/clientId. In that case the
+ * request must come from the Control UI, from the buyer's current public IP, recently.
+ */
+function isOwnPending(p, { userId, hostSuffix, clientIp, nowMs = Date.now() }) {
+  if (!p) return false;
+  if (p.browserOrigin) return originHost(p.browserOrigin) === `${userId}.${hostSuffix}`;
+  const ip = normalizeIp(clientIp);
+  if (!ip || normalizeIp(p.remoteIp) !== ip) return false;
+  if (p.clientId && !CONTROL_UI_CLIENT_IDS.has(String(p.clientId))) return false;
+  const created = pendingCreatedMs(p);
+  if (created != null && nowMs - created > IP_MATCH_MAX_AGE_MS) return false;
+  return true;
+}
+
 /** Pure ownership/scope check, exported for tests. Returns null when allowed, else a PairingError. */
-function checkPendingOwnership(pending, { userId, hostSuffix, allowedScopes }) {
+function checkPendingOwnership(pending, { userId, hostSuffix, allowedScopes, clientIp, nowMs }) {
   if (!pending) {
     return new PairingError(
       404,
@@ -52,8 +100,7 @@ function checkPendingOwnership(pending, { userId, hostSuffix, allowedScopes }) {
       'No pending pairing request from your workspace. Open the Control UI from aimarkets.vn, then click Approve on the setup page. The gateway token is not a request id.',
     );
   }
-  const expectedHost = `${userId}.${hostSuffix}`;
-  if (originHost(pending.browserOrigin) !== expectedHost) {
+  if (!isOwnPending(pending, { userId, hostSuffix, clientIp, nowMs })) {
     return new PairingError(403, 'not_owner', 'This pairing request was not opened from your own OpenClaw workspace.');
   }
   const roles = [pending.role, ...(Array.isArray(pending.roles) ? pending.roles : [])].filter(Boolean);
@@ -85,9 +132,9 @@ async function adminRpc({ url, token, fetchImpl }, method, params) {
 /**
  * @param {{ userId: string, requestId: string, fetchImpl?: typeof fetch, env?: NodeJS.ProcessEnv }} p
  */
-function ownApprovable(list, uid, cfg) {
-  return (Array.isArray(list?.pending) ? list.pending : []).filter(
-    (p) => !checkPendingOwnership(p, { userId: uid, hostSuffix: cfg.hostSuffix, allowedScopes: cfg.allowedScopes }),
+function ownApprovable(list, uid, cfg, clientIp) {
+  return pendingOf(list).filter(
+    (p) => !checkPendingOwnership(p, { userId: uid, hostSuffix: cfg.hostSuffix, allowedScopes: cfg.allowedScopes, clientIp }),
   );
 }
 
@@ -100,7 +147,7 @@ async function loadPairingList(cfg, fetchImpl) {
   }
 }
 
-async function approveOwnPairing({ userId, requestId, fetchImpl = fetch, env = process.env }) {
+async function approveOwnPairing({ userId, requestId, clientIp, fetchImpl = fetch, env = process.env }) {
   const uid = String(userId || '').trim().toLowerCase();
   const rid = String(requestId || '').trim();
   if (!USER_ID_RE.test(uid)) throw new PairingError(400, 'bad_user', 'Signed-in marketplace user required.');
@@ -115,9 +162,9 @@ async function approveOwnPairing({ userId, requestId, fetchImpl = fetch, env = p
   }
   const list = await loadPairingList(cfg, fetchImpl);
   const pending = rid
-    ? (Array.isArray(list?.pending) ? list.pending : []).find((p) => p?.requestId === rid)
-    : ownApprovable(list, uid, cfg).at(-1);
-  const denied = checkPendingOwnership(pending, { userId: uid, hostSuffix: cfg.hostSuffix, allowedScopes: cfg.allowedScopes });
+    ? pendingOf(list).find((p) => p?.requestId === rid)
+    : ownApprovable(list, uid, cfg, clientIp).at(-1);
+  const denied = checkPendingOwnership(pending, { userId: uid, hostSuffix: cfg.hostSuffix, allowedScopes: cfg.allowedScopes, clientIp });
   if (denied) throw denied;
   const approvedId = pending.requestId;
   await adminRpc({ ...cfg, fetchImpl }, 'device.pair.approve', { requestId: approvedId });
@@ -128,7 +175,7 @@ async function approveOwnPairing({ userId, requestId, fetchImpl = fetch, env = p
  * Pending pairing requests that belong to this buyer (opened from their own
  * Control UI origin). Other buyers' requests are never returned.
  */
-async function listOwnPairings({ userId, fetchImpl = fetch, env = process.env }) {
+async function listOwnPairings({ userId, clientIp, fetchImpl = fetch, env = process.env }) {
   const uid = String(userId || '').trim().toLowerCase();
   if (!USER_ID_RE.test(uid)) throw new PairingError(400, 'bad_user', 'Signed-in marketplace user required.');
   const cfg = gatewayConfig(env);
@@ -136,17 +183,16 @@ async function listOwnPairings({ userId, fetchImpl = fetch, env = process.env })
     throw new PairingError(503, 'not_configured', 'Device pairing is not available yet. Relaunch OpenClaw from aimarkets.vn.');
   }
   const list = await loadPairingList(cfg, fetchImpl);
-  const expectedHost = `${uid}.${cfg.hostSuffix}`;
-  return (Array.isArray(list?.pending) ? list.pending : [])
-    .filter((p) => p && originHost(p.browserOrigin) === expectedHost && REQUEST_ID_RE.test(String(p.requestId || '')))
+  return pendingOf(list)
+    .filter((p) => isOwnPending(p, { userId: uid, hostSuffix: cfg.hostSuffix, clientIp }) && REQUEST_ID_RE.test(String(p.requestId || '')))
     .map((p) => {
-      const denied = checkPendingOwnership(p, { userId: uid, hostSuffix: cfg.hostSuffix, allowedScopes: cfg.allowedScopes });
+      const denied = checkPendingOwnership(p, { userId: uid, hostSuffix: cfg.hostSuffix, allowedScopes: cfg.allowedScopes, clientIp });
       return {
         requestId: p.requestId,
         deviceId: p.deviceId,
         role: p.role,
         scopes: Array.isArray(p.scopes) ? p.scopes : [],
-        createdAt: p.createdAt || p.requestedAt || p.ts || null,
+        createdAt: p.createdAt || p.requestedAt || p.ts || p.createdAtMs || null,
         approvable: !denied,
         ...(denied ? { reason: denied.code } : {}),
       };
