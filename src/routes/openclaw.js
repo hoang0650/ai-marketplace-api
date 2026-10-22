@@ -235,7 +235,7 @@ router.get('/device-pairings/pending', authenticate, async (req, res, next) => {
     return res.json({ success: true, pending });
   } catch (err) {
     if (err instanceof PairingError) {
-      return res.status(err.status).json({ success: false, code: err.code, message: err.message });
+      return res.status(err.status).json({ success: false, code: err.code, message: err.message, ...(err.disallowedScopes ? { disallowedScopes: err.disallowedScopes } : {}) });
     }
     next(err);
   }
@@ -257,7 +257,7 @@ router.post('/device-pairings/approve', authenticate, async (req, res, next) => 
     return res.json({ success: true, message: 'Device approved.', ...result });
   } catch (err) {
     if (err instanceof PairingError) {
-      return res.status(err.status).json({ success: false, code: err.code, message: err.message });
+      return res.status(err.status).json({ success: false, code: err.code, message: err.message, ...(err.disallowedScopes ? { disallowedScopes: err.disallowedScopes } : {}) });
     }
     next(err);
   }

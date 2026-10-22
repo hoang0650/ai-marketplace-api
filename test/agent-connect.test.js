@@ -244,3 +244,23 @@ test('2026.10.5 format: approve and list work end to end', async () => {
     (e) => e.code === 'not_owner'
   );
 });
+
+test('scopes: Control UI 2026.10.5 default set is refused for buyers with a clear message', () => {
+  const p = pending({ scopes: ['operator.admin', 'operator.read', 'operator.write', 'operator.approvals', 'operator.questions', 'operator.pairing'] });
+  const err = checkPendingOwnership(p, opts);
+  assert.equal(err.code, 'scope_not_allowed');
+  assert.deepEqual(err.disallowedScopes, ['operator.admin', 'operator.pairing']);
+  assert.match(err.message, /^Not allowed: .*gateway admin permissions \(operator\.admin, operator\.pairing\)/);
+  assert.equal(checkPendingOwnership(pending({ scopes: ['operator.questions', 'operator.read'] }), opts), null);
+});
+
+test('scopes: configured gateway owners may approve the full default set; roles still enforced', () => {
+  const full = ['operator.admin', 'operator.read', 'operator.write', 'operator.approvals', 'operator.questions', 'operator.pairing'];
+  assert.equal(checkPendingOwnership(pending({ scopes: full }), { ...opts, ownerUserIds: [UID] }), null);
+  assert.equal(checkPendingOwnership(pending({ scopes: full }), { ...opts, ownerUserIds: [OTHER] }).code, 'scope_not_allowed');
+  assert.equal(checkPendingOwnership(pending({ role: 'node' }), { ...opts, ownerUserIds: [UID] }).code, 'role_not_allowed');
+  const foreign = pending({ scopes: full, browserOrigin: `https://${OTHER}.openclaw.aimarkets.vn` });
+  assert.equal(checkPendingOwnership(foreign, { ...opts, ownerUserIds: [UID] }).code, 'not_owner');
+  const { gatewayConfig } = require('../src/services/openclaw-pairing');
+  assert.deepEqual(gatewayConfig({ OPENCLAW_PAIRING_OWNER_USER_IDS: ` ${UID.toUpperCase()}, bad,` }).ownerUserIds, [UID]);
+});

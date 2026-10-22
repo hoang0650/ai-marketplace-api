@@ -44,11 +44,11 @@ const RUNTIME_FEATURES = {
 
 function sendError(res, err, next) {
   if (err instanceof PairingError) {
-    return res.status(err.status).json({ success: false, code: err.code, message: err.message });
+    return res.status(err.status).json({ success: false, code: err.code, message: err.message, ...(err.disallowedScopes ? { disallowedScopes: err.disallowedScopes } : {}) });
   }
   const status = Number(err?.status || err?.statusCode);
   if (Number.isInteger(status) && status >= 400 && status < 500) {
-    return res.status(status).json({ success: false, code: err.code, message: err.message });
+    return res.status(status).json({ success: false, code: err.code, message: err.message, ...(err.disallowedScopes ? { disallowedScopes: err.disallowedScopes } : {}) });
   }
   return next(err);
 }
