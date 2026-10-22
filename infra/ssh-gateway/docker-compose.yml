@@ -19,13 +19,16 @@ services:
       SANDBOX_CPUS: ${SANDBOX_CPUS:-1}
       SANDBOX_PIDS_LIMIT: ${SANDBOX_PIDS_LIMIT:-256}
       SANDBOX_RUNTIME: ${SANDBOX_RUNTIME:-}
+      # OpenClaw Control UI bootstrap-token issuer (reached only through Traefik, IP-allowlisted)
+      BOOTSTRAP_ISSUER_ENABLED: ${BOOTSTRAP_ISSUER_ENABLED:-0}
+      OPENCLAW_SWARM_SERVICE: ${OPENCLAW_SWARM_SERVICE:-phhotel-openclaw-cexp1q}
     volumes:
       - gw-data:/data
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     mem_limit: 256m
-    networks: [gw-egress, gw-docker]
+    networks: [gw-egress, gw-docker, dokploy-network]
     depends_on: [docker-proxy]
 
   # Only the gateway can reach this; it exposes containers + exec, nothing else.
@@ -65,6 +68,9 @@ networks:
   gw-egress: {}
   gw-docker:
     internal: true
+  # Lets Traefik reach the issuer port; nothing is published on the host.
+  dokploy-network:
+    external: true
   # Sandboxes only. No inter-container traffic; fixed subnet so the host
   # firewall (DOCKER-USER) can block private ranges and the host itself.
   aim-sbx-net:

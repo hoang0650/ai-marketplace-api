@@ -62,3 +62,14 @@ Test with a test-buyer account: generate on the setup page, then `ssh -p 2422 oc
 ## Tests
 
 `npm test` covers the spec hardening checks, the demuxer, username parsing and the rate limiter. It also runs an end-to-end ssh2 test against a fake API and fake docker: wrong password, `root` login, port forwarding, revoke and reaper.
+
+## OpenClaw Control UI bootstrap issuer
+
+Lets buyers pair the Control UI themselves with **non-admin** scopes. OpenClaw mints device bootstrap tokens only on the gateway host, so the gateway runs a small HTTP issuer (`src/bootstrap-issuer.js`, port 8790, not published on the host).
+
+* **Route**: Traefik `openclaw.aimarkets.vn/__aim/issuer/*` ? `aim-ssh-gateway-gateway-1:8790`, IP allowlist = API host only (`traefik-bootstrap-issuer.yml` ? `/etc/dokploy/traefik/dynamic/`). The gateway joins `dokploy-network` for this; docker access stays on the internal `gw-docker` network behind the socket proxy.
+* **Auth**: `X-Aim-Ts` / `X-Aim-Nonce` / `X-Aim-Sig` = HMAC-SHA256 over `v1\n<ts>\n<nonce>\n<sha256(body)>` with a key derived from `SSH_GATEWAY_SHARED_SECRET` (`src/issuer-auth.js`). Skew 60 s, nonces single-use.
+* **Profile**: fixed server-side: role `operator`, purpose `control-ui`, scopes `operator.read/write/approvals/questions/talk.secrets`. OpenClaw also strips anything outside its non-admin handoff set. `operator.admin` and `operator.pairing` are never issued.
+* **Limits**: 6 per user and 120 total per 10 min, one mint at a time. Tokens are single-use and expire after 10 min (OpenClaw TTL). Logs keep only `userId` plus a 12-hex fingerprint.
+* **Enable**: in `/opt/aim-ssh-gateway/.env` set `BOOTSTRAP_ISSUER_ENABLED=1`, then `docker compose up -d --build gateway`. On the API, set `OPENCLAW_BOOTSTRAP_ISSUER_URL=https://openclaw.aimarkets.vn/__aim/issuer/v1/openclaw/bootstrap-token`.
+* **Rollback**: unset the API env var (the setup page falls back to the token launch) and/or set `BOOTSTRAP_ISSUER_ENABLED=0`.

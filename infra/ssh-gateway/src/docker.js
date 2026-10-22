@@ -125,6 +125,60 @@ class DockerClient {
     }));
   }
 
+  /** Running container of a Swarm service (by its exact service-name label). */
+  async findServiceContainer(service) {
+    if (!/^[\w.-]{1,128}$/.test(String(service || ''))) return null;
+    const filters = encodeURIComponent(
+      JSON.stringify({ label: [`com.docker.swarm.service.name=${service}`], status: ['running'] }),
+    );
+    const rows = await this.request('GET', `/containers/json?filters=${filters}`);
+    const row = (rows || []).find((c) => c.Labels?.['com.docker.swarm.service.name'] === service);
+    return row ? row.Id : null;
+  }
+
+  /** Non-interactive exec; collects stdout (capped) and returns the exit code. */
+  async execCollect(containerId, cmd, { user, workdir, timeoutMs = 20_000, maxBytes = 64 * 1024 } = {}) {
+    const created = await this.request('POST', `/containers/${containerId}/exec`, {
+      AttachStdin: false,
+      AttachStdout: true,
+      AttachStderr: true,
+      Tty: false,
+      User: user,
+      WorkingDir: workdir,
+      Env: [],
+      Cmd: cmd,
+      Privileged: false,
+    });
+    const socket = await this.request('POST', `/exec/${created.Id}/start`, { Detach: false, Tty: false }, { upgrade: true });
+    let out = Buffer.alloc(0);
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        socket.destroy();
+        reject(new Error('exec timeout'));
+      }, timeoutMs);
+      const demux = createDemuxer(
+        (b) => {
+          if (out.length < maxBytes) out = Buffer.concat([out, b]).subarray(0, maxBytes);
+        },
+        () => {},
+      );
+      socket.on('data', demux);
+      socket.on('error', (e) => {
+        clearTimeout(timer);
+        reject(e);
+      });
+      socket.on('end', () => {
+        clearTimeout(timer);
+        resolve();
+      });
+      socket.on('close', () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+    return { stdout: out.toString('utf8'), exitCode: await this.exitCode(created.Id) };
+  }
+
   removeContainer(id) {
     return this.request('DELETE', `/containers/${id}?force=1&v=0`);
   }
