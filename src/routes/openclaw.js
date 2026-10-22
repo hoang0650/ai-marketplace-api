@@ -230,7 +230,7 @@ router.post('/launch', authenticate, async (req, res, next) => {
 router.get('/device-pairings/pending', authenticate, async (req, res, next) => {
   try {
     await assertActiveSubscription(req.user, 'openclaw');
-    const pending = await listOwnPairings({ userId: String(req.user?._id || req.user?.id || '') });
+    const pending = await listOwnPairings({ userId: String(req.user?._id || req.user?.id || ''), clientIp: req.ip });
     res.set('Cache-Control', 'no-store');
     return res.json({ success: true, pending });
   } catch (err) {
@@ -251,6 +251,7 @@ router.post('/device-pairings/approve', authenticate, async (req, res, next) => 
     await assertActiveSubscription(req.user, 'openclaw');
     const result = await approveOwnPairing({
       userId: String(req.user?._id || req.user?.id || ''),
+      clientIp: req.ip,
       requestId: req.body?.requestId || req.body?.request_id,
     });
     return res.json({ success: true, message: 'Device approved.', ...result });

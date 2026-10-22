@@ -203,3 +203,44 @@ test('ssh gateway hands the sandbox a pairing.manage token for openclaw only, ex
   assert.equal(sandboxCliToken({ userId: UID, agentId: 'hermes', expiresAt }, now), null);
   assert.equal(sandboxCliToken({ userId: UID, agentId: 'openclaw', expiresAt: new Date(now - 1).toISOString() }, now), null);
 });
+
+// OpenClaw 2026.10.5+: Control UI pending requests have no browserOrigin, only remoteIp/clientId/createdAtMs.
+const v2 = (over = {}) => {
+  const p = { ...pending(), clientId: 'openclaw-control-ui', remoteIp: '118.68.108.235', createdAtMs: Date.now(), ...over };
+  delete p.browserOrigin;
+  return p;
+};
+
+test('2026.10.5 format: same public IP + Control UI + fresh is allowed', () => {
+  assert.equal(checkPendingOwnership(v2(), { ...opts, clientIp: '118.68.108.235' }), null);
+  assert.equal(checkPendingOwnership(v2({ remoteIp: '::ffff:118.68.108.235' }), { ...opts, clientIp: '118.68.108.235' }), null);
+});
+
+test('2026.10.5 format: other IP, no IP, non-Control-UI client, or stale request is refused', () => {
+  for (const [p, ip] of [
+    [v2(), '1.2.3.4'],
+    [v2(), undefined],
+    [v2({ remoteIp: undefined }), '118.68.108.235'],
+    [v2({ clientId: 'openclaw-cli' }), '118.68.108.235'],
+    [v2({ createdAtMs: Date.now() - 60 * 60 * 1000 }), '118.68.108.235'],
+  ]) {
+    assert.equal(checkPendingOwnership(p, { ...opts, clientIp: ip }).code, 'not_owner');
+  }
+  // A recorded origin still wins over IP matching.
+  const foreign = { ...v2(), browserOrigin: `https://${OTHER}.openclaw.aimarkets.vn` };
+  assert.equal(checkPendingOwnership(foreign, { ...opts, clientIp: '118.68.108.235' }).code, 'not_owner');
+});
+
+test('2026.10.5 format: approve and list work end to end', async () => {
+  const { listOwnPairings } = require('../src/services/openclaw-pairing');
+  const gw = fakeGateway([v2(), v2({ requestId: 'someone-else-req', remoteIp: '9.9.9.9' })]);
+  const listed = await listOwnPairings({ userId: UID, clientIp: '118.68.108.235', fetchImpl: gw.fetchImpl, env });
+  assert.deepEqual(listed.map((p) => p.requestId), [RID]);
+  assert.equal(listed[0].approvable, true);
+  const r = await approveOwnPairing({ userId: UID, requestId: RID, clientIp: '118.68.108.235', fetchImpl: gw.fetchImpl, env });
+  assert.equal(r.approved, true);
+  await assert.rejects(
+    approveOwnPairing({ userId: UID, requestId: 'someone-else-req', clientIp: '118.68.108.235', fetchImpl: gw.fetchImpl, env }),
+    (e) => e.code === 'not_owner'
+  );
+});

@@ -238,7 +238,7 @@ router.get('/:runtime/pairing/pending', userOrCommandToken(['pairing.list', 'pai
     const runtime = String(req.params.runtime).toLowerCase();
     if (!RUNTIME_FEATURES[runtime].pairing) return res.json({ success: true, pending: [] });
     await assertActiveSubscription(req.user, runtime);
-    const pending = await listOwnPairings({ userId: String(req.user._id) });
+    const pending = await listOwnPairings({ userId: String(req.user._id), clientIp: req.ip });
     res.set('Cache-Control', 'no-store');
     return res.json({ success: true, pending });
   } catch (err) {
@@ -255,6 +255,7 @@ router.post('/:runtime/pairing/approve', userOrCommandToken(['pairing.approve', 
     await assertActiveSubscription(req.user, runtime);
     const result = await approveOwnPairing({
       userId: String(req.user._id),
+      clientIp: req.ip,
       requestId: req.body?.requestId || req.body?.request_id,
     });
     return res.json({ success: true, message: 'Device approved.', ...result });
