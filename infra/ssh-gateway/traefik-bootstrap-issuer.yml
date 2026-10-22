@@ -1,0 +1,29 @@
+# Install on the gateway host: /etc/dokploy/traefik/dynamic/aim-bootstrap-issuer.yml
+# Routes ONE path on the existing openclaw.aimarkets.vn TLS host to the issuer in
+# aim-ssh-gateway (not published on any host port). Only the AI Markets API host
+# may call it; requests are additionally HMAC-signed (see src/issuer-auth.js).
+http:
+  middlewares:
+    aim-issuer-allow-api:
+      ipAllowList:
+        sourceRange:
+          - "103.97.127.39/32"   # api.aimarkets.vn (123HOST)
+    aim-issuer-strip:
+      stripPrefix:
+        prefixes: ["/__aim/issuer"]
+  routers:
+    aim-bootstrap-issuer:
+      rule: "Host(`openclaw.aimarkets.vn`) && PathPrefix(`/__aim/issuer/`)"
+      entryPoints: [websecure]
+      middlewares: [aim-issuer-allow-api, aim-issuer-strip]
+      service: aim-bootstrap-issuer-svc
+      priority: 1000
+      tls:
+        certResolver: letsencrypt
+        domains:
+          - main: "openclaw.aimarkets.vn"
+  services:
+    aim-bootstrap-issuer-svc:
+      loadBalancer:
+        servers:
+          - url: "http://aim-ssh-gateway-gateway-1:8790"

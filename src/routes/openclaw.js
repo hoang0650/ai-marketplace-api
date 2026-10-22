@@ -21,6 +21,7 @@ const { serviceSecretOk } = require('../utils/service-secret');
 const { issueIsolatedSshSession } = require('../services/ssh-sandbox');
 const byokRoutes = require('./openclaw-byok');
 const { approveOwnPairing, listOwnPairings, PairingError } = require('../services/openclaw-pairing');
+const { requestBootstrapToken, buildBootstrapUrl, issuerEnabled } = require('../services/openclaw-bootstrap');
 
 const router = express.Router();
 router.use('/byok', byokRoutes);
@@ -160,6 +161,35 @@ router.post('/launch', authenticate, async (req, res, next) => {
     }
     await assertActiveSubscription(req.user, 'openclaw');
 
+    // Self-serve pairing: a single-use, non-admin bootstrap token for this buyer's own
+    // host. Falls back to the token launch below when the issuer is unavailable.
+    let bootstrapFallback = '';
+    if (req.body?.controlUiBootstrap === true && issuerEnabled()) {
+      try {
+        const issued = await requestBootstrapToken({ userId });
+        const url = withMarketTicket(
+          buildBootstrapUrl({ uiBaseUrl: aimarketsPublicBase(userId), userId, token: issued.token }),
+          userId,
+        );
+        if (url) {
+          res.set('Cache-Control', 'no-store');
+          return res.json({
+            success: true,
+            url,
+            audience: 'aimarkets',
+            userId,
+            pairingMode: 'bootstrap',
+            bootstrapExpiresAt: issued.expiresAtMs,
+            scopes: issued.scopes,
+          });
+        }
+        bootstrapFallback = 'bad_url';
+      } catch (err) {
+        bootstrapFallback = err?.code || 'error';
+        console.warn('[openclaw/launch] bootstrap pairing unavailable, using token launch:', bootstrapFallback);
+      }
+    }
+
     const aiUrl = aiBaseUrl();
     if (aiUrl) {
       try {
@@ -221,6 +251,8 @@ router.post('/launch', authenticate, async (req, res, next) => {
       userId,
       autoLogin: true,
       gatewayToken: token,
+      pairingMode: 'token',
+      ...(bootstrapFallback ? { bootstrapFallback } : {}),
     });
   } catch (err) {
     next(err);

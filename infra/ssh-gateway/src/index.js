@@ -6,6 +6,7 @@ const { loadConfig } = require('./config');
 const { ApiClient } = require('./api');
 const { DockerClient } = require('./docker');
 const { FailLimiter, Registry, handleClient, reapOnce } = require('./gateway');
+const { startIssuer } = require('./bootstrap-issuer');
 
 function log(event, fields = {}) {
   // Never log passwords or secrets; only event names, IPs and sandbox keys.
@@ -45,6 +46,8 @@ function main() {
   const server = createServer(deps, loadHostKey(cfg.hostKeyPath));
   server.on('error', (err) => log('server_error', { error: err.message }));
   server.listen(cfg.listenPort, '0.0.0.0', () => log('listening', { port: cfg.listenPort }));
+
+  if (cfg.issuerEnabled) startIssuer(deps);
 
   const tick = () =>
     reapOnce(deps)

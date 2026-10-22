@@ -15,6 +15,15 @@ function loadConfig(env = process.env) {
     maxConnsPerSandbox: int('SANDBOX_MAX_CONNECTIONS', 4),
     authFailWindowMs: int('AUTH_FAIL_WINDOW_MS', 10 * 60_000),
     authFailMax: int('AUTH_FAIL_MAX_PER_IP', 20),
+    // Control UI bootstrap-token issuer (see bootstrap-issuer.js). Off unless enabled.
+    issuerEnabled: env.BOOTSTRAP_ISSUER_ENABLED === '1',
+    issuerPort: int('BOOTSTRAP_ISSUER_PORT', 8790),
+    issuerWindowMs: int('BOOTSTRAP_ISSUER_WINDOW_MS', 10 * 60_000),
+    issuerPerUserMax: int('BOOTSTRAP_ISSUER_PER_USER_MAX', 6),
+    issuerGlobalMax: int('BOOTSTRAP_ISSUER_GLOBAL_MAX', 120),
+    openclawService: env.OPENCLAW_SWARM_SERVICE || 'phhotel-openclaw-cexp1q',
+    openclawUser: env.OPENCLAW_CONTAINER_USER || 'node',
+    mintTimeoutMs: int('BOOTSTRAP_MINT_TIMEOUT_MS', 20_000),
     sandbox: {
       image: env.SANDBOX_IMAGE || 'aimarkets/sandbox-base:latest',
       network: env.SANDBOX_NETWORK || 'aim-sbx-net',
