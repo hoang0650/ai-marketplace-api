@@ -15,7 +15,11 @@
  */
 const REQUEST_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/;
 const USER_ID_RE = /^[a-f0-9]{24}$/;
-const DEFAULT_ALLOWED_SCOPES = ['operator.read', 'operator.write', 'operator.approvals', 'operator.talk.secrets'];
+// Standard (non-admin) Control UI access. Matches OpenClaw's own non-admin operator set.
+const DEFAULT_ALLOWED_SCOPES = ['operator.read', 'operator.write', 'operator.approvals', 'operator.questions', 'operator.talk.secrets'];
+// Gateway-wide powers: admin = config/exec approvals/node bindings for EVERY workspace on
+// the shared gateway; pairing = approve any device. Buyers never get these.
+const PRIVILEGED_SCOPES = new Set(['operator.admin', 'operator.pairing']);
 
 class PairingError extends Error {
   constructor(status, code, message) {
@@ -34,6 +38,12 @@ function gatewayConfig(env = process.env) {
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean),
+    // Gateway operators (AI Markets staff who own the shared gateway) may self-approve
+    // the Control UI's full default scope set. Comma-separated marketplace user ids.
+    ownerUserIds: String(env.OPENCLAW_PAIRING_OWNER_USER_IDS || '')
+      .split(',')
+      .map((s) => s.trim().toLowerCase())
+      .filter((s) => USER_ID_RE.test(s)),
   };
 }
 
@@ -92,7 +102,7 @@ function isOwnPending(p, { userId, hostSuffix, clientIp, nowMs = Date.now() }) {
 }
 
 /** Pure ownership/scope check, exported for tests. Returns null when allowed, else a PairingError. */
-function checkPendingOwnership(pending, { userId, hostSuffix, allowedScopes, clientIp, nowMs }) {
+function checkPendingOwnership(pending, { userId, hostSuffix, allowedScopes, ownerUserIds, clientIp, nowMs }) {
   if (!pending) {
     return new PairingError(
       404,
@@ -107,10 +117,23 @@ function checkPendingOwnership(pending, { userId, hostSuffix, allowedScopes, cli
   if (roles.some((r) => r !== 'operator')) {
     return new PairingError(403, 'role_not_allowed', 'Only operator (Control UI) devices can be approved from AI Markets.');
   }
+  if (Array.isArray(ownerUserIds) && ownerUserIds.includes(userId)) return null;
   const allowed = new Set(allowedScopes && allowedScopes.length ? allowedScopes : DEFAULT_ALLOWED_SCOPES);
   const extra = (Array.isArray(pending.scopes) ? pending.scopes : []).filter((s) => !allowed.has(s));
   if (extra.length) {
-    return new PairingError(403, 'scope_not_allowed', `This device asks for scopes buyers cannot self-approve: ${extra.join(', ')}.`);
+    const privileged = extra.filter((s) => PRIVILEGED_SCOPES.has(s));
+    const err = new PairingError(
+      403,
+      'scope_not_allowed',
+      privileged.length
+        ? `Not allowed: this browser asked for gateway admin permissions (${privileged.join(', ')}). ` +
+            'Your OpenClaw workspace runs on a shared AI Markets gateway, where those permissions would control every workspace, ' +
+            'so they cannot be approved from AI Markets. Standard access (chat, read/write, approvals) is unaffected. ' +
+            'Contact AI Markets support if you need this device paired.'
+        : `Not allowed: this browser asked for permissions that cannot be self-approved (${extra.join(', ')}). Contact AI Markets support.`,
+    );
+    err.disallowedScopes = extra;
+    return err;
   }
   return null;
 }
@@ -134,7 +157,7 @@ async function adminRpc({ url, token, fetchImpl }, method, params) {
  */
 function ownApprovable(list, uid, cfg, clientIp) {
   return pendingOf(list).filter(
-    (p) => !checkPendingOwnership(p, { userId: uid, hostSuffix: cfg.hostSuffix, allowedScopes: cfg.allowedScopes, clientIp }),
+    (p) => !checkPendingOwnership(p, { userId: uid, hostSuffix: cfg.hostSuffix, allowedScopes: cfg.allowedScopes, ownerUserIds: cfg.ownerUserIds, clientIp }),
   );
 }
 
@@ -164,7 +187,7 @@ async function approveOwnPairing({ userId, requestId, clientIp, fetchImpl = fetc
   const pending = rid
     ? pendingOf(list).find((p) => p?.requestId === rid)
     : ownApprovable(list, uid, cfg, clientIp).at(-1);
-  const denied = checkPendingOwnership(pending, { userId: uid, hostSuffix: cfg.hostSuffix, allowedScopes: cfg.allowedScopes, clientIp });
+  const denied = checkPendingOwnership(pending, { userId: uid, hostSuffix: cfg.hostSuffix, allowedScopes: cfg.allowedScopes, ownerUserIds: cfg.ownerUserIds, clientIp });
   if (denied) throw denied;
   const approvedId = pending.requestId;
   await adminRpc({ ...cfg, fetchImpl }, 'device.pair.approve', { requestId: approvedId });
@@ -186,7 +209,7 @@ async function listOwnPairings({ userId, clientIp, fetchImpl = fetch, env = proc
   return pendingOf(list)
     .filter((p) => isOwnPending(p, { userId: uid, hostSuffix: cfg.hostSuffix, clientIp }) && REQUEST_ID_RE.test(String(p.requestId || '')))
     .map((p) => {
-      const denied = checkPendingOwnership(p, { userId: uid, hostSuffix: cfg.hostSuffix, allowedScopes: cfg.allowedScopes, clientIp });
+      const denied = checkPendingOwnership(p, { userId: uid, hostSuffix: cfg.hostSuffix, allowedScopes: cfg.allowedScopes, ownerUserIds: cfg.ownerUserIds, clientIp });
       return {
         requestId: p.requestId,
         deviceId: p.deviceId,
@@ -194,7 +217,7 @@ async function listOwnPairings({ userId, clientIp, fetchImpl = fetch, env = proc
         scopes: Array.isArray(p.scopes) ? p.scopes : [],
         createdAt: p.createdAt || p.requestedAt || p.ts || p.createdAtMs || null,
         approvable: !denied,
-        ...(denied ? { reason: denied.code } : {}),
+        ...(denied ? { reason: denied.code, message: denied.message } : {}),
       };
     });
 }
