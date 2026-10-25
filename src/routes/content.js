@@ -20,6 +20,7 @@ const {
 const minioCfg = require('../config/minio');
 const { playableSourceUrl } = require('../data/content-hub-products');
 const { fetchSafeHttp } = require('../utils/safe-http-url');
+const online = require('../utils/online-access');
 
 const router = express.Router();
 
@@ -103,12 +104,12 @@ async function assertCanPlay(req, episode, { allowFree = false } = {}) {
   const productId = String(episode.product);
   const sellerId = episode.seller ? String(episode.seller) : '';
   const userId = req.user?._id ? String(req.user._id) : '';
-  if (req.user && (req.user.role === 'admin' || (sellerId && userId && sellerId === userId))) {
-    return { ok: true, license: null, seller: true };
-  }
+  if (req.user && req.user.role === 'admin') return { ok: true, license: null, seller: true, via: 'moderation' };
+  if (req.user && sellerId && userId && sellerId === userId) return { ok: true, license: null, seller: true, via: 'owner' };
   if (allowFree && episode.free === true && req.user) {
-    return { ok: true, license: null, seller: false, free: true };
+    return { ok: true, license: null, seller: false, free: true, via: 'free' };
   }
+  // Owner-bound: findActiveLicense ignores keys that were issued to another account.
   const license = await findActiveLicense({
     buyerId: req.user?._id,
     licenseKey: req.body?.licenseKey || req.query?.licenseKey || req.get('x-license-key'),
@@ -120,7 +121,18 @@ async function assertCanPlay(req, episode, { allowFree = false } = {}) {
     err.code = 'LICENSE_REQUIRED';
     throw err;
   }
-  return { ok: true, license, seller: false };
+  return { ok: true, license, seller: false, via: 'license' };
+}
+
+function maskKey(key) {
+  const k = String(key || '');
+  return k.length > 9 ? `${k.slice(0, 4)}…${k.slice(-4)}` : k;
+}
+
+function maskEmail(email) {
+  const [u, d] = String(email || '').split('@');
+  if (!d) return '';
+  return `${u.slice(0, 2)}***@${d}`;
 }
 
 router.get('/products/:slug/episodes', async (req, res, next) => {
@@ -250,12 +262,27 @@ router.post('/unlock', authenticate, async (req, res, next) => {
       return res.status(404).json({ message: 'Episode not found' });
     }
     const gate = await assertCanPlay(req, episode, { allowFree: true });
+    const product = await Product.findById(episode.product).select('category slug creator').lean();
+    // Dataset / skill files are never streamed to buyers: they use the rows API / server-side runs.
+    if (!gate.seller && product && ['dataset', 'skill-pack'].includes(product.category)) {
+      return res.status(403).json(online.onlineOnlyBody(product));
+    }
+    if (!gate.seller) {
+      await online
+        .takeQuota({ scope: online.usageScope(gate, req.user, product), kind: 'play', limits: online.quotaDefaults().play })
+        .then((q) => q.commit(0));
+    }
+    const trace = online.traceId(gate.license?._id || req.user._id);
     const token = issuePlayToken({
       episodeId: episode._id,
       productId: episode.product,
       licenseId: gate.license?._id,
       mime: episode.contentType,
+      userId: req.user._id,
+      trace,
     });
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('X-Trace-Id', trace);
     const origin = publicApiOrigin(req);
     const pages = resolveEpisodePages(episode);
     const playPath = (page) => {
@@ -267,7 +294,18 @@ router.post('/unlock', authenticate, async (req, res, next) => {
       ok: true,
       playToken: token,
       playUrl: playPath(first),
-      downloadUrl: origin ? `${origin}/v1/content/episodes/${episode._id}/download` : `/v1/content/episodes/${episode._id}/download`,
+      // Online-only: only the listing owner / admin (moderation) get a download link.
+      downloadUrl: gate.seller
+        ? origin
+          ? `${origin}/v1/content/episodes/${episode._id}/download`
+          : `/v1/content/episodes/${episode._id}/download`
+        : null,
+      onlineOnly: true,
+      access: gate.via,
+      traceId: trace,
+      watermark: gate.license
+        ? [maskEmail(req.user.email), maskKey(gate.license.licenseKey), trace].filter(Boolean).join(' · ')
+        : '',
       kind: episode.kind,
       mime: episode.contentType,
       title: episode.title,
@@ -279,6 +317,7 @@ router.post('/unlock', authenticate, async (req, res, next) => {
       free: gate.free === true,
     });
   } catch (err) {
+    if (err.status === 429) return online.sendQuotaError(res, err);
     if (err.status) return res.status(err.status).json({ message: err.message, code: err.code });
     next(err);
   }
@@ -303,6 +342,17 @@ async function handlePlay(req, res, next) {
     res.setHeader('Cache-Control', 'private, no-store');
     res.setHeader('X-Content-DRM', 'aimc-v1');
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    if (row.trace) res.setHeader('X-Trace-Id', row.trace);
+    // Reader pages (no Range header) count against the per-license read quota; video byte ranges don't.
+    if (row.licenseId && !req.headers.range) {
+      try {
+        const q = await online.takeQuota({ scope: `lic:${row.licenseId}`, kind: 'read', limits: online.quotaDefaults().read });
+        await q.commit(0);
+      } catch (e) {
+        if (e.status === 429) return online.sendQuotaError(res, e);
+        throw e;
+      }
+    }
 
     const pages = resolveEpisodePages(episode);
     const pageNum = Math.max(1, Number(req.query?.page) || 1);
@@ -354,7 +404,14 @@ router.get('/episodes/:id/download', authenticate, async (req, res, next) => {
   try {
     const episode = await ContentEpisode.findById(req.params.id);
     if (!episode) return res.status(404).json({ message: 'Not found' });
-    await assertCanPlay(req, episode);
+    const gate = await assertCanPlay(req, episode);
+    if (!gate.seller) {
+      // Online-only: licensed buyers stream / read; only the owner and admins (moderation) download.
+      const product = await Product.findById(episode.product).select('category slug').lean();
+      res.setHeader('Cache-Control', 'private, no-store');
+      return res.status(403).json(online.onlineOnlyBody(product || {}));
+    }
+    res.setHeader('X-Access', gate.via);
     let plain;
     if (episode.objectName) {
       const stream = await getContentObjectStream(episode.objectName);

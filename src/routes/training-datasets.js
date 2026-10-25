@@ -8,7 +8,7 @@ const LicenseKey = require('../models/LicenseKey');
 const Product = require('../models/Product');
 const ContentEpisode = require('../models/ContentEpisode');
 const { effectiveLicenseStatus } = require('../utils/license-keys');
-const { findActiveLicense } = require('../utils/content-drm');
+const { findOwnActiveLicense } = require('../utils/online-access');
 const { fetchSafeHttp } = require('../utils/safe-http-url');
 
 const router = express.Router();
@@ -219,7 +219,9 @@ router.post(
     if (!mongoose.isValidObjectId(pid)) throw catalog.httpError(404, 'DATASET_NOT_FOUND');
     const product = await Product.findById(pid).select('name category').lean();
     if (!product || !LICENSED_DATASET.has(product.category)) throw catalog.httpError(404, 'DATASET_NOT_FOUND');
-    const license = await findActiveLicense({ buyerId: req.user._id, productId: pid });
+    // Same owner-bound check as the online rows API. The copy stays in private training storage (no download
+    // URL is ever exposed) and training jobs re-check the license before they start.
+    const license = await findOwnActiveLicense({ userId: req.user._id, productId: pid });
     if (!license) throw catalog.httpError(402, 'LICENSE_REQUIRED');
     const existing = await TrainingDataset.findOne({ owner: req.user._id, licensedProduct: pid });
     if (existing) return res.json({ dataset: publicDataset(existing), imported: false });

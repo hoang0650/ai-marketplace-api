@@ -2,8 +2,11 @@
  * Downloadable files for licensed skill packs and datasets.
  *
  * Files are stored as ContentEpisode rows (objectName in the private content prefix), the same storage
- * the licensed-dataset training import already reads. Buyers with an active license (or the seller /
- * an admin) download the original bytes; everyone else only sees the file list.
+ * the licensed-dataset training import already reads.
+ *
+ * Online-only: buyers never download these files. A buyer with an active license of their own uses the
+ * product online (GET /v1/datasets/:slug/rows, POST /v1/skills/:slug/run). Only the listing's seller
+ * ('seller') and admins ('admin', moderation access) can download the original bytes.
  */
 const express = require('express');
 const mongoose = require('mongoose');
@@ -13,6 +16,7 @@ const ContentEpisode = require('../models/ContentEpisode');
 const { authenticate, optionalAuth, requireRoles } = require('../middleware/auth');
 const { findActiveLicense } = require('../utils/content-drm');
 const minio = require('../config/minio');
+const online = require('../utils/online-access');
 
 const router = express.Router();
 
@@ -97,10 +101,14 @@ router.get('/:productId', optionalAuth, async (req, res, next) => {
       .lean();
     const access = await resolveAccess(req.user, product, licenseKeyOf(req));
     res.setHeader('Cache-Control', 'private, no-store');
+    const canDownload = access.via === 'admin' || access.via === 'seller';
     res.json({
       files: rows.map(publicFile),
       unlocked: !!access.via,
       access: access.via,
+      canDownload,
+      onlineOnly: true,
+      online: online.onlineEndpoints(product),
       licenseExpiresAt: access.license?.expiresAt || null,
     });
   } catch (err) {
@@ -108,7 +116,7 @@ router.get('/:productId', optionalAuth, async (req, res, next) => {
   }
 });
 
-/** GET /v1/product-files/:productId/:fileId/download — original bytes, active license required. */
+/** GET /v1/product-files/:productId/:fileId/download — original bytes, seller or admin (moderation) only. */
 router.get('/:productId/:fileId/download', authenticate, async (req, res, next) => {
   try {
     const product = await loadProduct(req);
@@ -120,8 +128,13 @@ router.get('/:productId/:fileId/download', authenticate, async (req, res, next) 
     const access = await resolveAccess(req.user, product, licenseKeyOf(req));
     if (!access.via) {
       res.setHeader('Cache-Control', 'private, no-store');
-      return res.status(402).json({ message: 'Active license required to download', code: 'LICENSE_REQUIRED' });
+      return res.status(402).json({ message: 'Active license required', code: 'LICENSE_REQUIRED' });
     }
+    if (access.via === 'license') {
+      res.setHeader('Cache-Control', 'private, no-store');
+      return res.status(403).json(online.onlineOnlyBody(product));
+    }
+    res.setHeader('X-Access', access.via === 'admin' ? 'moderation' : 'owner');
     if (!minio.isMinioEnabled()) return res.status(503).json({ message: 'Storage not configured', code: 'MINIO_NOT_CONFIGURED' });
     const stream = await minio.getContentObjectStream(file.objectName);
     const filename = safeFilename(file.title);

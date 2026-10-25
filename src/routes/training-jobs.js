@@ -28,6 +28,7 @@ const ARTIFACT_GET_TTL_S = 3600;
 
 const MESSAGES = {
   LICENSE_REQUIRED: 'License của dataset này đã hết hạn. Gia hạn để tiếp tục train.',
+  LICENSED_DATASET_SHARED_ONLY: 'Dataset mua license chỉ dùng online: train trên GPU dùng chung của AI Markets, không đưa lên máy GPU thuê riêng.',
   MINIO_NOT_CONFIGURED: 'Kho lưu trữ dữ liệu train chưa được cấu hình.',
   DATASET_NOT_FOUND: 'Không tìm thấy bộ dữ liệu.',
   TRAINING_SOURCE_INVALID: 'Loại dữ liệu không hợp lệ (raw, video hoặc audio).',
@@ -442,6 +443,8 @@ router.post(
     if (!catalog.isSource(source)) throw catalog.httpError(400, 'TRAINING_SOURCE_INVALID');
     if (!minio.isMinioEnabled()) throw catalog.httpError(503, 'MINIO_NOT_CONFIGURED');
     const dataset = await loadDataset(req.user, body.datasetId);
+    // Online-only: a rented GPU is the buyer's own machine (shell + env), so licensed data never goes there.
+    if (dataset?.licensedProduct) throw catalog.httpError(409, 'LICENSED_DATASET_SHARED_ONLY');
     const plan = catalog.planJob({ source, task, dataset, hfDataset: body.hfDataset, modelId: body.modelId });
     const config = catalog.sanitizeConfig(task, body.config);
     const labels = [...new Set(plan.files.map((f) => f.label).filter(Boolean))].sort();
