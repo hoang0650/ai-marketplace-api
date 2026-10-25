@@ -33,6 +33,7 @@ const sceneSchema = new Schema({
   prompt: { type: String, default: '', maxlength: 600 },
   narration: { type: String, default: '', maxlength: 1500 },
   voice: { type: String, default: 'Binh', maxlength: 80 },
+  lang: { type: String, default: '', maxlength: 8 }, // '' = project language
   camera: { type: String, default: 'push-in', maxlength: 20 },
   transition: { type: String, default: 'cut', maxlength: 20 },
   duration: { type: Number, default: 15, min: 5, max: 60 },
@@ -74,6 +75,7 @@ const filmProjectSchema = new Schema({
   user: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   title: { type: String, default: 'Phim AI', maxlength: 120 },
   lang: { type: String, default: 'vi', maxlength: 8 },
+  subtitles: { type: String, enum: ['off', 'soft', 'burn'], default: 'off' },
   scenes: { type: [sceneSchema], default: [] },
   uploads: { type: [uploadSchema], default: [] },
   music: { uploadId: { type: String, default: '' }, volume: { type: Number, default: 0.25, min: 0, max: 1 } },

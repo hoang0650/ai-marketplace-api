@@ -16,6 +16,7 @@ const { withWalletLock } = require('../utils/wallet-lock');
 const { gpuConfig, gpuFetch } = require('../utils/aimx-gpu');
 const { studioPolicy } = require('../utils/studio-policy');
 const { voiceLang } = require('../utils/voice-params');
+const filmLangs = require('../utils/film-langs');
 const fp = require('../utils/film-pricing');
 const minio = require('../config/minio');
 const FilmAsset = require('../models/FilmAsset');
@@ -118,6 +119,7 @@ function sceneIn(raw, prev) {
   if (raw.prompt !== undefined) s.prompt = clean(raw.prompt, 600);
   if (raw.narration !== undefined) s.narration = clean(raw.narration, 1500);
   if (raw.voice !== undefined) s.voice = clean(raw.voice, 80) || 'Binh';
+  if (raw.lang !== undefined) s.lang = filmLangs.filmLang(raw.lang); // '' = use the project language
   if (raw.camera !== undefined) s.camera = CAMERAS.includes(raw.camera) ? raw.camera : 'push-in';
   if (raw.transition !== undefined) s.transition = clean(raw.transition, 20) || 'cut';
   if (raw.source !== undefined) s.source = raw.source === 'upload' ? 'upload' : 'ai';
@@ -213,7 +215,8 @@ router.get('/config', authenticate, async (req, res, next) => {
     res.json({
       available: a.film, perSecond: pr.perSecond, perImage: pr.perImage, ttsPerK: studioPolicy().tts.perKChars,
       durations: fp.WAN_DURATIONS, sceneMaxSec: fp.SCENE_MAX_SEC, projectMaxSec: fp.PROJECT_MAX_SEC, freePerDay: 0,
-      cameras: CAMERAS, models: { video: 'Wan 2.2 I2V 720p', image: 'Qwen-Image-Edit-2511' },
+      cameras: CAMERAS, models: { video: 'Wan 2.2 I2V 720p', image: 'Qwen-Image-Edit-2511', tts: { vi: 'VieNeu-TTS', other: 'Chatterbox Multilingual' } },
+      ...filmLangs.catalog(),
     });
   } catch (e) { next(e); }
 });
@@ -231,7 +234,7 @@ router.post('/projects', authenticate, async (req, res, next) => {
     if (n >= MAX_PROJECTS) return fail(res, 409, 'LIMIT');
     const b = req.body || {};
     const scenes = (Array.isArray(b.scenes) ? b.scenes : []).slice(0, 1440).map((s) => sceneIn({ ...s, source: 'ai' }, null));
-    const p = new FilmProject({ user: req.user._id, title: clean(b.title, 120) || 'Phim AI', lang: voiceLang(b.lang), scenes });
+    const p = new FilmProject({ user: req.user._id, title: clean(b.title, 120) || 'Phim AI', lang: voiceLang(b.lang), subtitles: filmLangs.subtitleMode(b.subtitles), scenes });
     if (projectSeconds(p) > fp.PROJECT_MAX_SEC) return fail(res, 400, 'TOO_LONG');
     await p.save();
     res.status(201).json(await view(p));
@@ -259,6 +262,7 @@ router.put('/projects/:id', authenticate, async (req, res, next) => {
     const p = await mutate(p0._id, (p) => {
       if (b.title !== undefined) p.title = clean(b.title, 120) || 'Phim AI';
       if (b.lang !== undefined) p.lang = voiceLang(b.lang);
+      if (b.subtitles !== undefined) p.subtitles = filmLangs.subtitleMode(b.subtitles);
       if (b.music && typeof b.music === 'object') {
         if (b.music.uploadId !== undefined) p.music.uploadId = (p.uploads || []).some((u) => u.uid === b.music.uploadId && u.kind === 'audio') ? b.music.uploadId : '';
         if (b.music.volume !== undefined) p.music.volume = Math.max(0, Math.min(1, Number(b.music.volume) || 0));
@@ -633,14 +637,14 @@ router.post('/projects/:id/render', authenticate, async (req, res, next) => {
       const videos = s.source === 'upload'
         ? [await sign(p.uploads.find((u) => u.uid === s.uploadId).key)]
         : await Promise.all(s.shots.map((sh) => sign(sh.versions[sh.active].videoKey)));
-      segments.push({ kind: s.source, videos, narration: s.narration ? { text: s.narration, voice: s.voice || 'Binh', lang: p.lang || 'vi' } : null });
+      segments.push({ kind: s.source, videos, narration: s.narration ? { text: s.narration, ...filmLangs.sceneVoice(p, s) } : null });
     }
     const music = p.music.uploadId ? p.uploads.find((u) => u.uid === p.music.uploadId && u.status === 'ready') : null;
     const rk = key(p, 'renders', `${Date.now().toString(36)}-${newSid()}.mp4`);
     const out = await billAndSubmit(req, {
       charge: { amount: rp.price, note: `Phim AI: lồng tiếng khi xuất phim (${rp.chars} ký tự)`, meta: { kind: 'film-render', unit: 'characters', quantity: rp.chars, project: String(p._id) } },
       path: '/film/render',
-      body: { segments, music: music ? { get: await sign(music.key), volume: p.music.volume } : null, put: await putUrl(rk) },
+      body: { segments, subtitles: filmLangs.subtitleMode(p.subtitles), music: music ? { get: await sign(music.key), volume: p.music.volume } : null, put: await putUrl(rk) },
       job: { kind: 'film-render', project: p._id, prompt: p.title, meta: { key: rk, chars: rp.chars } },
     });
     if (out.error) return fail(res, out.status, out.error);
