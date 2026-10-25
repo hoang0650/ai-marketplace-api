@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 const studioJobSchema = new mongoose.Schema(
   {
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-    kind: { type: String, enum: ['fast', 'talking', 'tts', 'film'], required: true },
+    kind: { type: String, enum: ['fast', 'talking', 'tts', 'film', 'film-scene', 'film-image', 'film-render'], required: true },
     remoteId: { type: String, required: true },
     status: { type: String, enum: ['queued', 'running', 'succeeded', 'failed'], default: 'queued' },
     free: { type: Boolean, default: true },
@@ -19,6 +19,11 @@ const studioJobSchema = new mongoose.Schema(
     // Small request bodies (text-only TTS) kept until the job settles, for one automatic retry.
     retryPayload: { type: mongoose.Schema.Types.Mixed, default: null },
     retries: { type: Number, default: 0 },
+    // AI Film (RunPod public endpoints via the AI service): project/scene refs, plan and settlement.
+    project: { type: mongoose.Schema.Types.ObjectId, ref: 'FilmProject', default: null },
+    meta: { type: mongoose.Schema.Types.Mixed, default: null },
+    settled: { type: Boolean, default: false },
+    refundedAmount: { type: Number, default: 0 },
   },
   { timestamps: true },
 );

@@ -6,6 +6,8 @@ const { getAvailableBalance } = require('../utils/wallet');
 const { studioPolicy, dayStart, decide } = require('../utils/studio-policy');
 
 const router = express.Router();
+const film = () => require('./studio-film'); // lazy: studio-film also imports this module's helpers indirectly
+const LEGACY_KINDS = ['fast', 'talking', 'tts', 'film'];
 const MAX_B64 = 11_000_000;
 
 const { gpuConfig, gpuFetch, promoInfo } = require('../utils/aimx-gpu');
@@ -45,9 +47,9 @@ async function submit(req, res, next, kind, payload, meta) {
   try {
     if (!gpu()) return fail(res, 503, 'STUDIO_UNAVAILABLE');
     const userId = req.user._id;
-    const mine = await StudioJob.find({ user: userId, status: { $in: ['queued', 'running'] } }).limit(5);
+    const mine = await StudioJob.find({ user: userId, kind: { $in: LEGACY_KINDS }, status: { $in: ['queued', 'running'] } }).limit(5);
     for (const j of mine) await refreshJob(j).catch(() => {});
-    const active = await StudioJob.countDocuments({ user: userId, status: { $in: ['queued', 'running'] }, createdAt: { $gte: new Date(Date.now() - 15 * 60e3) } });
+    const active = await StudioJob.countDocuments({ user: userId, kind: { $in: LEGACY_KINDS }, 'meta.film': { $ne: true }, status: { $in: ['queued', 'running'] }, createdAt: { $gte: new Date(Date.now() - 15 * 60e3) } });
     if (active > 0) return fail(res, 429, 'JOB_ACTIVE');
     const usedToday = await usage(userId, kind);
     const { available } = await getAvailableBalance(userId);
@@ -87,13 +89,19 @@ router.get('/quota', authenticate, async (req, res, next) => {
     const p = studioPolicy();
     const promo = promoInfo();
     const cap = (k) => (promo.active ? (p[k].promoCap != null ? p[k].promoCap : Math.max(p[k].freePerDay, p.promoPerDay)) : p[k].freePerDay);
-    const [fast, talking, tts, film, bal] = await Promise.all([usage(req.user._id, 'fast'), usage(req.user._id, 'talking'), usage(req.user._id, 'tts'), usage(req.user._id, 'film'), getAvailableBalance(req.user._id)]);
+    const [fast, talking, tts, bal, av] = await Promise.all([usage(req.user._id, 'fast'), usage(req.user._id, 'talking'), usage(req.user._id, 'tts'), getAvailableBalance(req.user._id), film().availability()]);
+    const fp = require('../utils/film-pricing').filmPricing();
+    // Real availability (AI service health): 5090 for talking/legacy fast, RunPod for film + fast fallback, serverless TTS.
+    const fastViaRunpod = !av.gpu && av.film;
     res.json({
-      enabled: Boolean(gpu()),
-      fast: { used: fast, free: cap('fast'), price: promo.active ? 0 : p.fast.price },
+      enabled: Boolean(av.gpu || av.film || av.tts),
+      kinds: { fast: Boolean(av.gpu || av.film), talking: av.gpu, tts: av.tts, film: av.film },
+      fast: fastViaRunpod
+        ? { used: 0, free: 0, price: fp.perSecond * 5, unit: 'video', seconds: 5, imagePrice: fp.perImage, backend: 'runpod' }
+        : { used: fast, free: cap('fast'), price: promo.active ? 0 : p.fast.price },
       talking: { used: talking, free: cap('talking'), price: promo.active ? 0 : p.talking.price },
       tts: { used: tts, free: cap('tts'), price: promo.active ? 0 : p.tts.perKChars, unit: 'characters', per: 1000, minCharge: promo.active ? 0 : p.tts.minCharge },
-      film: { used: film, free: cap('film'), price: promo.active ? 0 : p.film.price },
+      film: { used: 0, free: 0, price: fp.perSecond, unit: 'second', perSecond: fp.perSecond, perImage: fp.perImage, enabled: av.film },
       available: bal.available,
       promo: promoInfo(),
     });
@@ -106,7 +114,17 @@ router.post('/video/fast', authenticate, (req, res, next) => {
   const img = pickImage(b);
   if (img.error || (!prompt && !img.image_base64 && !img.image_url)) return fail(res, 400, 'BAD_INPUT');
   const seed = Number.isInteger(b.seed) ? b.seed : undefined;
-  return submit(req, res, next, 'fast', { prompt, ...img, seed }, { prompt });
+  (async () => {
+    const av = await film().availability();
+    if (!av.gpu && av.film) {
+      // The 5090 is down: one 5 s Wan 2.2 shot on RunPod (per-second price, no free quota).
+      if (img.image_url) return fail(res, 400, 'BAD_INPUT');
+      const buf = img.image_base64 ? Buffer.from(String(img.image_base64).replace(/^data:[^,]*,/, ''), 'base64') : null;
+      if (buf && buf.length > 15 * 1024 ** 2) return fail(res, 400, 'BAD_INPUT');
+      return film().fastViaFilm(req, res, { prompt, imageBuffer: buf && buf.length ? buf : null });
+    }
+    return submit(req, res, next, 'fast', { prompt, ...img, seed }, { prompt });
+  })().catch(next);
 });
 
 router.post('/video/talking', authenticate, (req, res, next) => {
@@ -197,6 +215,7 @@ const STALE_MS = Number(process.env.STUDIO_STALE_MIN || 30) * 60e3;
 /** Pull the GPU worker state into a queued/running job (also used by the background poller and before the one-active-job check). */
 async function refreshJob(job) {
   if (job.status !== 'queued' && job.status !== 'running') return job;
+  if (job.kind.startsWith('film-') || (job.meta && job.meta.film)) return film().refreshFilmJob(job);
     const r = await gpuFetch(`/v1/jobs/${job.remoteId}`).catch(() => null);
     if (r && r.status === 404) { job.status = 'failed'; job.error = 'lost'; }
     else if (r && r.ok) {
@@ -235,8 +254,9 @@ function startStudioPoller({ tickMs = 15000 } = {}) {
     try {
       const mongoose = require('mongoose');
       if (mongoose.connection.readyState !== 1 || !gpu()) return;
-      const rows = await StudioJob.find({ status: { $in: ['queued', 'running'] }, updatedAt: { $lt: new Date(Date.now() - 10000) } }).sort({ updatedAt: 1 }).limit(25);
+      const rows = await StudioJob.find({ kind: { $in: LEGACY_KINDS }, 'meta.film': { $ne: true }, status: { $in: ['queued', 'running'] }, updatedAt: { $lt: new Date(Date.now() - 10000) } }).sort({ updatedAt: 1 }).limit(25);
       for (const j of rows) await refreshJob(j).catch((e) => console.error('[studio] refresh', String(j._id), e.message));
+      await film().pollFilmJobs().catch((e) => console.error('[film] poller', e.message));
     } catch (e) { console.error('[studio] poller', e.message); }
   };
   pollTimer = setInterval(tick, tickMs);
@@ -272,6 +292,7 @@ async function stream(req, res, next, ext) {
     const job = await ownJob(req, res);
     if (!job) return;
     if (job.status !== 'succeeded') return res.status(409).json({ message: 'Not ready' });
+    if (job.meta && job.meta.film) return film().streamFilmFile(job, res, ext);
     const r = await gpuFetch(`/v1/files/${job.remoteId}.${ext}`, { timeout: 120000 });
     if (!r.ok) return res.status(410).json({ message: 'File đã hết hạn' });
     res.set('content-type', { mp4: 'video/mp4', wav: 'audio/wav', jpg: 'image/jpeg' }[ext]);

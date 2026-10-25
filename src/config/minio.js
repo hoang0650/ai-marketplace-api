@@ -391,7 +391,58 @@ async function getAttachmentStream(objectName) {
   return getMinioClient().getObject(cfg.bucket, objectName);
 }
 
+/**
+ * Private AI Film objects under aimarkets/film/{userId}/{projectId}/… (shots, frames, uploads, renders).
+ * Never public: the browser and the AI service read/write them through presigned URLs only.
+ */
+function filmObjectName(userId, ...parts) {
+  const uid = String(userId || '').replace(/[^\w-]+/g, '');
+  if (!uid) throw new Error('userId required for film objects');
+  const rest = parts.map((p) => String(p || '').replace(/[^\w.\-/]+/g, '_').replace(/^\/+|\/+$/g, '')).filter(Boolean);
+  if (rest.some((p) => p.includes('..'))) throw new Error('bad film object path');
+  return [cleanPrefix(minioEnv('MINIO_FILM_PREFIX'), 'aimarkets/film'), uid, ...rest].join('/');
+}
+
+function isFilmObjectFor(objectName, userId, projectId = '') {
+  const key = String(objectName || '');
+  if (!key || key.includes('..')) return false;
+  const base = filmObjectName(userId, projectId || '');
+  return key.startsWith(`${base}/`);
+}
+
+async function presignFilmPut(objectName, expirySeconds = 6 * 3600) {
+  const cfg = await ensurePlaygroundBucket();
+  return getMinioClient().presignedPutObject(cfg.bucket, objectName, expirySeconds);
+}
+
+/** MinIO caps presigned links at 7 days. */
+async function presignFilmGet(objectName, expirySeconds = 6 * 3600) {
+  const cfg = await ensurePlaygroundBucket();
+  return getMinioClient().presignedGetObject(cfg.bucket, objectName, Math.min(expirySeconds, 7 * 24 * 3600));
+}
+
+async function removeFilmPrefix(prefix) {
+  if (!isMinioEnabled() || !prefix || !prefix.includes('/film/')) return 0;
+  const cfg = await ensurePlaygroundBucket();
+  const minio = getMinioClient();
+  const keys = await new Promise((resolve, reject) => {
+    const out = [];
+    const st = minio.listObjectsV2(cfg.bucket, prefix.endsWith('/') ? prefix : `${prefix}/`, true);
+    st.on('data', (o) => o.name && out.push(o.name));
+    st.on('error', reject);
+    st.on('end', () => resolve(out));
+  });
+  for (let i = 0; i < keys.length; i += 500) await minio.removeObjects(cfg.bucket, keys.slice(i, i + 500));
+  return keys.length;
+}
+
 module.exports = {
+  filmObjectName,
+  isFilmObjectFor,
+  presignFilmPut,
+  presignFilmGet,
+  removeFilmPrefix,
+  statFilmObject: (name) => statTrainingObject(name),
   putAttachmentObject,
   getAttachmentStream,
   statKycObject,
