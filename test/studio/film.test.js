@@ -26,5 +26,5 @@ test('playground voice language defaults to Vietnamese (VieNeu)', () => {
   assert.equal(aimxTts.langOf({}), 'vi');
   assert.equal(aimxTts.langOf({ language: 'zh-CN' }), 'zh');
   assert.equal(aimxTts.langOf({ lang: 'xx' }), 'vi');
-  assert.equal(aimxTts.VIENEU_MODEL, 'pnnbao-ump/VieNeu-TTS-v3-Turbo');
+  assert.equal(aimxTts.VIENEU_MODEL, 'pnnbao-ump/VieNeu-TTS');
 });

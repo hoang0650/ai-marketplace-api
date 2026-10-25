@@ -40,7 +40,7 @@ function voicePresetRuntime(presetName) {
     serverlessEndpoint: g.serverlessEndpoint,
     tokenizeEndpoint: g.tokenizeEndpoint,
     gatewayUrl: g.gatewayUrl,
-    env: withUpstreamEnv([{ key: 'VIENEU_DEFAULT_VOICE', value: String(presetName || 'Adam') }], {
+    env: withUpstreamEnv([{ key: 'VIENEU_DEFAULT_VOICE', value: String(presetName || 'Binh') }], {
       runsync: '',
       run: '',
       gateway: '',
@@ -105,10 +105,10 @@ function applyVoicePresetToProduct(product) {
     ...prev,
     voiceSource: 'preset',
     presetVoiceId: hit?.id || String(prev.presetVoiceId || '').trim(),
-    presetVoiceName: hit?.name || String(prev.presetVoiceName || '').trim() || 'Adam',
+    presetVoiceName: hit?.name || String(prev.presetVoiceName || '').trim() || 'Binh',
     cloneStatus: 'ready',
-    cloneProvider: 'runpod_serverless',
-    cloneEndpoint: VOICE_CLONE_MODEL,
+    cloneProvider: prev.cloneProvider || 'runpod_serverless',
+    cloneEndpoint: prev.cloneEndpoint || VOICE_CLONE_MODEL,
     cloneError: '',
     cloneReadyAt: prev.cloneReadyAt || new Date().toISOString(),
   };
@@ -176,7 +176,7 @@ function voiceTtsInput(product, input = {}) {
   const { id: _dropId, idempotencyKey: _dropKey, ...rest } =
     input && typeof input === 'object' ? input : {};
   const meta = product?.contentMeta || {};
-  const presetName = String(meta.presetVoiceName || rest.voice || rest.speaker || '').trim();
+  const presetName = String(meta.presetVoiceId || meta.presetVoiceName || rest.voice || rest.speaker || '').trim();
   const sample = String(meta.voiceSampleUrl || '').trim();
 
   if (isVoicePresetCategory(product?.category) || meta.voiceSource === 'preset') {
@@ -185,8 +185,8 @@ function voiceTtsInput(product, input = {}) {
       action: rest.action || 'tts',
       prompt,
       text: prompt,
-      voice: presetName || 'Adam',
-      speaker: presetName || 'Adam',
+      voice: presetName || 'Binh',
+      speaker: presetName || 'Binh',
       audio_url: '',
       ref_audio_url: '',
       denoise: rest.denoise !== false,

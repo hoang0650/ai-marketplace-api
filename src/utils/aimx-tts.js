@@ -1,7 +1,7 @@
 const { gpuConfig, gpuFetch } = require('./aimx-gpu');
 const { voiceLang, voiceFx } = require('./voice-params');
 
-const VIENEU_MODEL = 'pnnbao-ump/VieNeu-TTS-v3-Turbo';
+const VIENEU_MODEL = 'pnnbao-ump/VieNeu-TTS';
 const CHATTERBOX_MODEL = 'ResembleAI/chatterbox-multilingual';
 
 function enabled() {
@@ -13,7 +13,7 @@ function langOf(input = {}) {
   return voiceLang(l);
 }
 
-/** Synthesize on the AI Markets 5090 (VieNeu for vi/en, Chatterbox for zh); waits up to `waitMs`. */
+/** Synthesize on the AI Markets worker (VieNeu for vi, Chatterbox multilingual for every other language); waits up to `waitMs`. */
 async function synth({ text, lang = 'vi', voice, sampleBuffer, speed, pitch, waitMs = 90000 }) {
   const body = { text: String(text || '').slice(0, 2000), lang, ...voiceFx({ speed, pitch }) };
   if (voice) body.voice = voice;
@@ -27,7 +27,7 @@ async function synth({ text, lang = 'vi', voice, sampleBuffer, speed, pitch, wai
     const s = await (await gpuFetch(`/v1/jobs/${job.id}`)).json();
     if (s.status === 'succeeded') {
       const a = await gpuFetch(s.audio_url, { timeout: 60000 });
-      return { buffer: Buffer.from(await a.arrayBuffer()), contentType: 'audio/wav', timings: s.timings || {}, model: lang === 'zh' ? CHATTERBOX_MODEL : VIENEU_MODEL };
+      return { buffer: Buffer.from(await a.arrayBuffer()), contentType: 'audio/wav', timings: s.timings || {}, model: lang === 'vi' ? VIENEU_MODEL : CHATTERBOX_MODEL };
     }
     if (s.status === 'failed') throw Object.assign(new Error(s.error || 'TTS failed'), { status: 502 });
     if (Date.now() > until) throw Object.assign(new Error('TTS timed out'), { status: 504 });

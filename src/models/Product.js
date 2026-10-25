@@ -78,6 +78,11 @@ const contentMetaSchema = new mongoose.Schema(
     voiceSampleUrl: { type: String, default: '', maxlength: 500 },
     presetVoiceId: { type: String, default: '', maxlength: 64 },
     presetVoiceName: { type: String, default: '', maxlength: 120 },
+    /** Platform voices: engine (vieneu | chatterbox), languages served, gender/accent for filters. */
+    voiceEngine: { type: String, default: '', maxlength: 32 },
+    voiceLanguages: { type: [String], default: undefined },
+    voiceGender: { type: String, default: '', maxlength: 16 },
+    voiceAccent: { type: String, default: '', maxlength: 32 },
     cloneStatus: {
       type: String,
       enum: ['', 'pending', 'ready', 'failed'],
