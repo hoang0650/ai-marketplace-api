@@ -171,7 +171,10 @@ router.post('/run', authenticate, async (req, res, next) => {
 
     const quote = await preflight({ provider, endpointId, model, input: inferInput });
     if (voice) quote.usage = { ...quote.usage, unit: 'characters', quantity: charCount(voiceText(inferInput)) };
-    let estimatedCost = computeUsageCost(product, quote.usage, inferInput, quote.providerCost);
+    let estimatedCost = computeUsageCost(product, quote.usage, inferInput, {
+      upstream: quote.upstreamCost,
+      cost: quote.providerCost,
+    });
     let licenseCovered = false;
     if (isVoiceCategory(product.category) && estimatedCost > 0 && (await hasActiveVoiceLicense(buyerId, product))) {
       estimatedCost = 0;
@@ -236,8 +239,13 @@ router.post('/run', authenticate, async (req, res, next) => {
     // denglish-api reports RunPod's own price as upstream_cost and the sell price
     // (upstream + markup) as cost, computed from output.cost when RunPod returns
     // one, otherwise from the formula on the model's docs page.
+    const reported = Number(data.upstream_cost) > 0;
     const providerCost = sandbox ? 0 : Number(data.cost) || quote.providerCost || 0;
-    const cost = licenseCovered || sandbox ? 0 : computeUsageCost(product, usage, inferInput, providerCost);
+    const costParts = {
+      upstream: sandbox ? 0 : reported ? Number(data.upstream_cost) : Number(data.cost) ? 0 : quote.upstreamCost,
+      cost: providerCost,
+    };
+    const cost = licenseCovered || sandbox ? 0 : computeUsageCost(product, usage, inferInput, costParts);
 
     let charged = 0;
     let sellerNet = 0;

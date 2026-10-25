@@ -76,7 +76,10 @@ async function meterAndInfer(req, product, input, action = 'runsync') {
 
   try {
     const quote = await preflight({ provider, endpointId, model, input });
-    const estimatedCost = computeUsageCost(product, quote.usage, input, quote.providerCost);
+    const estimatedCost = computeUsageCost(product, quote.usage, input, {
+      upstream: quote.upstreamCost,
+      cost: quote.providerCost,
+    });
     if (estimatedCost > 0 && !selfUse) {
       try {
         hold = await placeHold(buyerId, estimatedCost, {
@@ -101,7 +104,13 @@ async function meterAndInfer(req, product, input, action = 'runsync') {
     const usage = ai.usage || { input_tokens: 0, output_tokens: 0, total_tokens: 0, unit: 'tokens' };
     const sandbox = Boolean(ai.raw?.sandbox || ai.data?.sandbox);
     if (sandbox) usage.sandbox = true;
-    const cost = sandbox ? 0 : computeUsageCost(product, usage, input, Number(ai.data?.cost) || 0);
+    const aiData = ai.data || {};
+    // Async `run` submissions have no cost yet: bill the pre-flight quote for the job.
+    const upstream =
+      Number(aiData.upstream_cost) || (Number(aiData.cost) ? 0 : Number(quote.upstreamCost) || 0);
+    const cost = sandbox
+      ? 0
+      : computeUsageCost(product, usage, input, { upstream, cost: Number(aiData.cost) || 0 });
     let charged = 0;
     let sellerNet = 0;
     let platformFee = 0;

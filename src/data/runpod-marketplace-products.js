@@ -6,6 +6,7 @@
 const catalog = require('./runpod-public-endpoints.json');
 const { publicGatewayUrls, withUpstreamEnv, upstreamRunpodUrls } = require('../utils/gateway-urls');
 const { catalogProductSlug } = require('../utils/product-slug');
+const { COST_BASIS, sellPrice, sellPricingText } = require('../utils/runpod-public-pricing');
 
 const CREATOR = {
   mockUserId: 'u-aimarkets',
@@ -31,7 +32,7 @@ const FEATURED = new Set([
   'qwen3-32b',
   'moonshot-kimi',
   'wan-2-5',
-  'kling-v2-1',
+  'p-video',
   'sora-2',
   'seedream-4-t2i',
 ]);
@@ -46,6 +47,34 @@ function usageUnitFromPricing(pricing, kind) {
   if (kind === 'video') return 'video';
   if (kind === 'audio') return 'second';
   return 'request';
+}
+
+/** Catalog entries that stay listed. Retired / deprecated ones are unpublished, never deleted. */
+function isListed(ep) {
+  return !ep.status || ep.status === 'active';
+}
+
+/**
+ * Listing price = provider price × (1 + markup), in the provider's own billing unit.
+ * The actual charge is computed from the provider-reported cost of each call
+ * (see computeUsageCost / costBasis 'upstream'), so tiers by resolution or duration
+ * are always billed exactly; `usageRate` is the "from" price shown on the card.
+ */
+function sellPricing(ep) {
+  const base = ep.price || {};
+  const unit = base.unit || usageUnitFromPricing(ep.pricing, ep.kind);
+  const rate = Number(base.rate) || usageRateFromPricing(ep.pricing);
+  const pricing = {
+    model: 'usage',
+    price: 0,
+    currency: 'USD',
+    usageUnit: unit,
+    usageRate: sellPrice(rate),
+    costBasis: COST_BASIS,
+  };
+  if (base.inputRate) pricing.inputRate = sellPrice(base.inputRate);
+  if (base.outputRate) pricing.outputRate = sellPrice(base.outputRate);
+  return pricing;
 }
 
 function usageRateFromPricing(pricing) {
@@ -67,7 +96,7 @@ Hosted on **AI Markets** (\`api.aimarkets.vn\` / \`ai.aimarkets.vn\`).
 - **Sync:** \`POST ${g.publicEndpoint}\`
 - **Async:** \`POST ${g.serverlessEndpoint}\`
 - **Tokenize:** \`POST ${g.tokenizeEndpoint}\`
-- **Pricing:** ${ep.pricing}
+- **Pricing:** ${sellPricingText(ep.pricing)}
 
 Prefer marketplace playground / \`POST /api/playground/run\` with your JWT (recommended).
 
@@ -84,13 +113,12 @@ ${openai}`;
 function buildRunpodMarketplaceProducts() {
   return catalog.map((ep, index) => {
     const cover = COVER_BY_KIND[ep.kind] || COVER_BY_KIND.image;
-    const usageUnit = usageUnitFromPricing(ep.pricing, ep.kind);
-    const usageRate = usageRateFromPricing(ep.pricing);
+    const pricing = sellPricing(ep);
     return {
       id: `p-${productSlug(ep.slug)}`,
       slug: productSlug(ep.slug),
       name: ep.name,
-      tagline: `${ep.pricing} · AI Markets endpoint`,
+      tagline: `${sellPricingText(ep.pricing)} · AI Markets endpoint`,
       description: `${ep.description} Available on AI Markets via \`api.aimarkets.vn\` (model \`${ep.slug}\`).`,
       category: ep.modality,
       creatorId: CREATOR.mockCreatorId,
@@ -98,13 +126,9 @@ function buildRunpodMarketplaceProducts() {
       creatorName: CREATOR.name,
       coverUrl: cover,
       gallery: [cover],
-      pricing: {
-        model: 'usage',
-        price: 0,
-        currency: 'USD',
-        usageUnit,
-        usageRate,
-      },
+      pricing,
+      published: isListed(ep),
+      lifecycle: ep.status || 'active',
       runtime: (() => {
         const g = publicGatewayUrls({ modelId: ep.slug });
         return {
@@ -158,7 +182,7 @@ function buildRunpodCreator() {
     avatarUrl: CREATOR.avatarUrl,
     coverUrl: CREATOR.coverUrl,
     verified: true,
-    productCount: catalog.length,
+    productCount: catalog.filter(isListed).length,
     rating: 4.9,
     totalSales: 50000,
   };
@@ -183,4 +207,6 @@ module.exports = {
   buildRunpodCreator,
   buildRunpodUser,
   productSlug,
+  sellPricing,
+  isListed,
 };

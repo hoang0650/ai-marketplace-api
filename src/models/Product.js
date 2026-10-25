@@ -12,6 +12,8 @@ const pricingSchema = new mongoose.Schema(
     /** Optional separate per-unit prices for prompt (input) and completion (output) tokens. */
     inputRate: { type: Number },
     outputRate: { type: Number },
+    /** 'upstream': bill provider-reported cost × (1 + markup); usageRate is the listed "from" price. */
+    costBasis: { type: String },
     /** List price before sale. When > price, listing shows as discounted. */
     compareAtPrice: { type: Number, default: 0, min: 0 },
     /** Hire listings: `price` is the starting quote and the buyer may counter-offer. */
@@ -128,6 +130,25 @@ const productSchema = new mongoose.Schema(
     },
     coverUrl: { type: String, default: '' },
     gallery: { type: [String], default: [] },
+    /** Real sample outputs shown on the product page: [{kind, url, posterUrl, text, prompt, inputImageUrl, settings}]. */
+    demos: {
+      type: [
+        new mongoose.Schema(
+          {
+            kind: { type: String, enum: ['image', 'video', 'audio', 'text'], required: true },
+            url: { type: String, default: '' },
+            posterUrl: { type: String, default: '' },
+            text: { type: String, default: '' },
+            prompt: { type: String, default: '' },
+            inputImageUrl: { type: String, default: '' },
+            settings: { type: String, default: '' },
+            createdAt: { type: Date, default: Date.now },
+          },
+          { _id: false }
+        ),
+      ],
+      default: [],
+    },
     pricing: { type: pricingSchema, required: true },
     /** Professional services: optional phase plan [{title, percent, days}] (percent sums to 100). */
     servicePlan: {
