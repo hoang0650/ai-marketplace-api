@@ -17,6 +17,8 @@ function gameBillingConfig() {
     tickMs: Number(process.env.GAME_BILLING_TICK_MS || 60_000),
     /** Clients that heartbeat are stopped after this much silence. */
     idleMs: GAME_IDLE_MS,
+    /** Dedicated game servers: the buyer plays in another app, so allow longer heartbeat gaps. */
+    dedicatedIdleMs: Math.max(GAME_IDLE_MS, Number(process.env.GAME_SERVER_IDLE_MS || 10 * 60_000)),
     /** Older clients never heartbeat: cap their sessions instead of billing forever. */
     noHeartbeatMaxMs: Number(process.env.GAME_NO_HEARTBEAT_MAX_MS || 4 * 3_600_000),
     warnMinutes: Number(process.env.GAME_LOW_BALANCE_MINUTES || 5),
@@ -31,7 +33,14 @@ function plain(product) {
 function sessionRate(session, product) {
   if (!product) return 0;
   if (String(session.user) === String(product.creator)) return 0;
+  // Dedicated game servers bill the real pod cost of this session (+ markup), not a flat listing rate.
+  if (session.dedicated) return Number(session.ratePerHour) || 0;
   return usageRatePerHour(product);
+}
+
+function hosting() {
+  // Lazy: game-hosting → gpu-rental provider; keeps this module light for tests.
+  return require('./game-hosting');
 }
 
 function cursorOf(session) {
@@ -80,7 +89,9 @@ async function recordCharge(session, product, a, rate) {
     cost: a.charge,
     // Time already elapsed: bill what the wallet covers, never below zero (enforceSession stops it).
     funds: 'cap',
-    note: `Stream: ${product.name} (${a.minutes}m · ${device})`,
+    note: session.dedicated
+      ? `Game server: ${product.name} (${a.minutes}m)`
+      : `Stream: ${product.name} (${a.minutes}m · ${device})`,
   });
   if (billed.skipped) return billed;
   await UsageEvent.create({
@@ -102,6 +113,7 @@ async function recordCharge(session, product, a, rate) {
       client: session.client || 'pc',
       device,
       hosting: session.hosting || '',
+      ...(session.dedicated ? { podCostPerHour: session.podCostPerHour, dedicated: true } : {}),
     },
     source: 'gpu',
     usageType: product.category === 'game-server' ? 'GAME_RUNTIME' : 'GPU_HOUR',
@@ -120,6 +132,8 @@ async function recordCharge(session, product, a, rate) {
  * ticks / replicas / a parallel stop can never bill the same minute twice.
  */
 async function settleSession(session, product, now = new Date(), opts = {}) {
+  // A dedicated server is billed from the moment it answers; a failed launch is never billed.
+  if (session.dedicated && !session.readyAt) return 0;
   const rate = sessionRate(session, product);
   // The final settle must not lose the tail when a concurrent tick moved the cursor first:
   // reload and re-accrue from the new cursor instead of giving up.
@@ -177,6 +191,7 @@ async function stopGameSession(doc, reason = 'user', { product: loaded } = {}) {
       console.error('[game-billing] final settle failed', doc.sessionId, err.code || err.message);
     }
   }
+  if (doc.dedicated) await hosting().teardownDedicated(doc);
   const server = await GpuServer.findById(doc.server);
   if (server?.webhookUrl) {
     callSellerWebhook(server, 'session.stop', {
@@ -197,7 +212,8 @@ async function enforceSession(session, product, now = new Date()) {
   const cfg = gameBillingConfig();
   const last = new Date(session.lastActivityAt || session.createdAt || now).getTime();
   const silentMs = now.getTime() - last;
-  if ((session.heartbeatAt && silentMs > cfg.idleMs) || (!session.heartbeatAt && silentMs > cfg.noHeartbeatMaxMs)) {
+  const idleMs = session.dedicated ? cfg.dedicatedIdleMs : cfg.idleMs;
+  if ((session.heartbeatAt && silentMs > idleMs) || (!session.heartbeatAt && silentMs > cfg.noHeartbeatMaxMs)) {
     await stopGameSession(session, 'idle', { product });
     return 'idle';
   }
@@ -232,6 +248,15 @@ async function enforceSession(session, product, now = new Date()) {
 }
 
 async function tickSession(session, product, now = new Date()) {
+  if (session.dedicated && session.status === 'starting') {
+    const fresh = await hosting().refreshDedicated(session, {
+      stop: (doc, reason) => stopGameSession(doc, reason, { product }),
+    });
+    if (fresh.status !== 'live') return fresh.status === 'stopped' ? 'stopped' : 'ok';
+    for (const k of ['status', 'readyAt', 'billingStartedAt', 'billedUntil', 'lastActivityAt', 'connectHost', 'connectPort']) {
+      session[k] = fresh[k];
+    }
+  }
   if (product) await settleSession(session, product, now);
   return enforceSession(session, product, now);
 }
@@ -244,6 +269,11 @@ async function runGameBillingTick(now = new Date()) {
   const products = ids.length ? await Product.find({ _id: { $in: ids } }).lean() : [];
   const byId = new Map(products.map((p) => [String(p._id), p]));
   const out = { total: rows.length, idle: 0, stopped: 0, errors: 0 };
+  try {
+    out.reaped = await hosting().reapDedicated();
+  } catch (err) {
+    console.error('[game-billing] reap failed', err.code || err.message);
+  }
   for (const session of rows) {
     try {
       const r = await tickSession(session, byId.get(String(session.product || '')) || null, now);

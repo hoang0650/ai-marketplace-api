@@ -150,6 +150,11 @@ const productSchema = new mongoose.Schema(
       default: [],
     },
     pricing: { type: pricingSchema, required: true },
+    /**
+     * Dedicated game server template (one RunPod pod per buyer session):
+     * { game, image, port, protocol, computeType, cpuFlavorIds, vcpuCount, gpuTypeIds, diskGb, env, dataCenterIds, connectHint }
+     */
+    gameServer: { type: mongoose.Schema.Types.Mixed, default: undefined },
     /** Professional services: optional phase plan [{title, percent, days}] (percent sums to 100). */
     servicePlan: {
       type: [new mongoose.Schema({ title: String, percent: Number, days: Number }, { _id: false })],

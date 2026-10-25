@@ -152,7 +152,20 @@ async function httpUpstream(id, port) {
   return { host: String(up.host), port: Number(up.port), tls: up.tls !== false };
 }
 
+/** Public IP:port of a raw TCP port (dedicated game servers); null until RunPod maps it. */
+async function tcpEndpoint(id, port) {
+  try {
+    const json = await call(`${prefix()}/servers/${sid(id)}/tcp/${Number(port)}`);
+    const ep = json.endpoint || {};
+    return ep.host && ep.port ? { host: String(ep.host), port: Number(ep.port) } : null;
+  } catch (err) {
+    if (err.code === 'SERVER_NOT_READY') return null;
+    throw err;
+  }
+}
+
 module.exports = {
+  tcpEndpoint,
   listGpuTypes,
   createServer,
   getServer,
