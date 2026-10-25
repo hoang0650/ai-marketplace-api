@@ -33,3 +33,28 @@ describe('studio policy', () => {
     assert.equal(typeof r, 'function');
   });
 });
+
+describe('studio TTS per-character billing', () => {
+  const { ttsCharge } = require('../../src/utils/studio-policy');
+  const p = studioPolicy({ STUDIO_FREE_TTS_PER_DAY: '2', STUDIO_PRICE_TTS_PER_1K_CHARS_USD: '0.01', STUDIO_PRICE_TTS_MIN_USD: '0.0005' });
+  it('prices by NFC characters with a per-job minimum', () => {
+    assert.equal(ttsCharge(1000, p.tts), 0.01);
+    assert.equal(ttsCharge(2000, p.tts), 0.02);
+    assert.equal(ttsCharge(150, p.tts), 0.0015);
+    assert.equal(ttsCharge(10, p.tts), 0.0005);
+    assert.equal(ttsCharge(0, p.tts), 0);
+  });
+  it('is free within the daily quota, then charges by length', () => {
+    assert.equal(decide({ kind: 'tts', usedToday: 1, available: 0, policy: p, chars: 1500 }).charge, 0);
+    const d = decide({ kind: 'tts', usedToday: 2, available: 1, policy: p, chars: 1500 });
+    assert.equal(d.ok, true); assert.equal(d.free, false); assert.equal(d.charge, 0.015);
+    assert.equal(decide({ kind: 'tts', usedToday: 2, available: 0.001, policy: p, chars: 1500 }).code, 'INSUFFICIENT_WALLET');
+  });
+  it('counts Vietnamese with combining marks once per letter', () => {
+    const { charCount } = require('../../src/utils/usage-pricing');
+    assert.equal(charCount('Xin chào'.normalize('NFD')), 8);
+  });
+  it('legacy STUDIO_PRICE_TTS_USD still sets the per-1K rate', () => {
+    assert.equal(studioPolicy({ STUDIO_PRICE_TTS_USD: '0.02' }).tts.perKChars, 0.02);
+  });
+});
