@@ -132,6 +132,7 @@ function createApp() {
       skip: (req) => req.path === '/health' || req.path === '/health/ready',
     })
   );
+  app.use('/v1/studio/film', express.json({ limit: '4mb' }), require('./routes/studio-film'));
   app.use('/v1/studio', express.json({ limit: '12mb' }), require('./routes/studio'));
   app.use(express.json({ limit: '1mb' }));
   app.use(cookieParser());
