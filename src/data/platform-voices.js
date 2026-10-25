@@ -26,20 +26,20 @@ const GENDER = { male: { vi: 'nam', en: 'male', zh: '男声' }, female: { vi: 'n
 function vieneuDescription(v) {
   const g = GENDER[v.gender];
   return [
-    `**Tiếng Việt** — Giọng sàn ${v.name} (${g.vi}, giọng ${v.region}) do AI Markets vận hành. Tiếng Việt chạy trên VieNeu-TTS; 23 ngôn ngữ khác dùng Chatterbox multilingual nhân bản giọng ${v.name}. Trả theo ký tự, hoặc mua license ngày/tháng/năm để dùng TTS không tính phí ký tự.`,
+    `Tiếng Việt — Giọng sàn ${v.name} (${g.vi}, giọng ${v.region}) do AI Markets vận hành. Tiếng Việt chạy trên VieNeu-TTS; 23 ngôn ngữ khác dùng Chatterbox multilingual nhân bản giọng ${v.name}. Trả theo ký tự, hoặc mua license ngày/tháng/năm để dùng TTS không tính phí ký tự.`,
     '',
-    `**English** — ${v.name}, a ${REGION[v.region].en} Vietnamese ${g.en} platform voice run by AI Markets. Vietnamese uses VieNeu-TTS; 23 other languages use Chatterbox multilingual cloning ${v.name}'s timbre. Pay per character, or buy a day/month/year license for unmetered TTS.`,
+    `English — ${v.name}, a ${REGION[v.region].en} Vietnamese ${g.en} platform voice run by AI Markets. Vietnamese uses VieNeu-TTS; 23 other languages use Chatterbox multilingual cloning ${v.name}'s timbre. Pay per character, or buy a day/month/year license for unmetered TTS.`,
     '',
-    `**中文** — ${v.name}：AI Markets 平台音色（越南${REGION[v.region].zh}口音，${g.zh}）。越南语使用 VieNeu-TTS；其他 23 种语言由 Chatterbox multilingual 克隆该音色。按字符计费，或购买日/月/年授权不限字符使用 TTS。`,
+    `中文 — ${v.name}：AI Markets 平台音色（越南${REGION[v.region].zh}口音，${g.zh}）。越南语使用 VieNeu-TTS；其他 23 种语言由 Chatterbox multilingual 克隆该音色。按字符计费，或购买日/月/年授权不限字符使用 TTS。`,
   ].join('\n');
 }
 
 const CHATTERBOX_DESCRIPTION = [
-  '**Tiếng Việt** — Giọng mặc định của Chatterbox multilingual cho 23 ngôn ngữ (Anh, Trung, Nhật, Hàn, Pháp, Đức, Tây Ban Nha…). Không hỗ trợ tiếng Việt — dùng giọng VieNeu cho tiếng Việt. Trả theo ký tự hoặc license ngày/tháng/năm.',
+  'Tiếng Việt — Giọng mặc định của Chatterbox multilingual cho 23 ngôn ngữ (Anh, Trung, Nhật, Hàn, Pháp, Đức, Tây Ban Nha…). Không hỗ trợ tiếng Việt — dùng giọng VieNeu cho tiếng Việt. Trả theo ký tự hoặc license ngày/tháng/năm.',
   '',
-  "**English** — Chatterbox multilingual's built-in voice for 23 languages (English, Chinese, Japanese, Korean, French, German, Spanish…). Vietnamese is not included — use a VieNeu voice for Vietnamese. Pay per character or buy a day/month/year license.",
+  "English — Chatterbox multilingual's built-in voice for 23 languages (English, Chinese, Japanese, Korean, French, German, Spanish…). Vietnamese is not included — use a VieNeu voice for Vietnamese. Pay per character or buy a day/month/year license.",
   '',
-  '**中文** — Chatterbox multilingual 默认音色，支持 23 种语言（英语、中文、日语、韩语、法语、德语、西班牙语等）。不含越南语，越南语请选用 VieNeu 音色。按字符计费，或购买日/月/年授权。',
+  '中文 — Chatterbox multilingual 默认音色，支持 23 种语言（英语、中文、日语、韩语、法语、德语、西班牙语等）。不含越南语，越南语请选用 VieNeu 音色。按字符计费，或购买日/月/年授权。',
 ].join('\n');
 
 function apiDocs(voiceId, langs) {
