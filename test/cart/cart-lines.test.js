@@ -41,3 +41,15 @@ test('cart rejects new lines beyond MAX_LINES', () => {
   assert.throws(() => applyCartLine(items, A, 1, 'add'), /Cart is full/);
   assert.equal(applyCartLine(items, items[0].product, 1, 'add')[0].qty, 2);
 });
+
+test('license period is stored per line, replaced when given, kept otherwise', () => {
+  let items = applyCartLine([], A, 1, 'add', new Date(), 'day');
+  assert.equal(items[0].licenseTerm, 'day');
+  items = applyCartLine(items, A, 1, 'set');
+  assert.equal(items[0].licenseTerm, 'day', 'qty change keeps the chosen period');
+  items = applyCartLine(items, A, 1, 'set', new Date(), 'YEAR');
+  assert.equal(items[0].licenseTerm, 'year');
+  items = applyCartLine(items, B, 1, 'add', new Date(), 'week');
+  assert.equal(items[1].licenseTerm, '', 'unknown periods are dropped');
+  assert.equal(removeCartLines(items, [B])[0].licenseTerm, 'year');
+});

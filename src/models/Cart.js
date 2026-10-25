@@ -4,6 +4,8 @@ const cartItemSchema = new mongoose.Schema(
   {
     product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
     qty: { type: Number, default: 1, min: 1, max: 99 },
+    /** Chosen license period for dataset / skill / content listings ('' for everything else). */
+    licenseTerm: { type: String, enum: ['day', 'month', 'year', ''], default: '' },
     addedAt: { type: Date, default: Date.now },
   },
   { _id: false },
