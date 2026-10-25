@@ -229,6 +229,20 @@ async function uploadContentBuffer(buffer, { filename, contentType = 'applicatio
   };
 }
 
+/** Private content object written by the AI service (story narration MP3) through a presigned PUT. */
+async function presignContentPut(ext = 'bin', expirySeconds = 6 * 3600, label = '') {
+  const cfg = await ensurePlaygroundBucket();
+  const tag = String(label || '').replace(/[^\w-]+/g, '').slice(0, 40);
+  const objectName = `${cfg.contentPrefix}/${tag ? `${tag}-` : ''}${Date.now()}-${crypto.randomBytes(12).toString('hex')}.${String(ext).replace(/\W+/g, '') || 'bin'}`;
+  const url = await getMinioClient().presignedPutObject(cfg.bucket, objectName, expirySeconds);
+  return { bucket: cfg.bucket, objectName, url };
+}
+
+async function statContentObject(objectName) {
+  const cfg = await ensurePlaygroundBucket();
+  return getMinioClient().statObject(cfg.bucket, objectName);
+}
+
 async function getContentObjectStream(objectName) {
   const cfg = await ensurePlaygroundBucket();
   const minio = getMinioClient();
@@ -447,6 +461,8 @@ async function removeFilmPrefix(prefix) {
 
 module.exports = {
   filmObjectName,
+  presignContentPut,
+  statContentObject,
   isFilmObjectFor,
   presignFilmPut,
   presignFilmGet,

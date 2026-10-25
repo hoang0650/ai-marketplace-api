@@ -1,5 +1,33 @@
 const mongoose = require('mongoose');
 
+/**
+ * Story-book narration made from a text chapter with per-sentence TTS timing (utils/story-narration).
+ * segments index the reader's paragraphs: p = paragraph, [c0, c1) = UTF-16 offsets, start/end = seconds.
+ */
+const narrationSchema = new mongoose.Schema(
+  {
+    forEpisode: { type: mongoose.Schema.Types.ObjectId, ref: 'ContentEpisode', index: true },
+    status: { type: String, enum: ['generating', 'ready', 'failed'], default: 'generating' },
+    lang: { type: String, default: 'vi', maxlength: 8 },
+    voice: { type: String, default: '', maxlength: 40 },
+    model: { type: String, default: '', maxlength: 60 },
+    jobId: { type: String, default: '', maxlength: 64 },
+    error: { type: String, default: '', maxlength: 500 },
+    textHash: { type: String, default: '', maxlength: 64 },
+    paraCount: { type: Number, default: 0, min: 0 },
+    paraSig: { type: [String], default: [] },
+    segments: {
+      type: [{ _id: false, p: Number, c0: Number, c1: Number, start: Number, end: Number }],
+      default: [],
+    },
+    ttsChars: { type: Number, default: 0, min: 0 },
+    cost: { type: Number, default: 0, min: 0 },
+    requestedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    finishedAt: { type: Date, default: null },
+  },
+  { _id: false }
+);
+
 const contentEpisodeSchema = new mongoose.Schema(
   {
     product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true, index: true },
@@ -39,6 +67,7 @@ const contentEpisodeSchema = new mongoose.Schema(
     free: { type: Boolean, default: false },
     synopsis: { type: String, default: '', maxlength: 2000 },
     posterUrl: { type: String, default: '', maxlength: 800 },
+    narration: { type: narrationSchema, default: undefined },
   },
   { timestamps: true, collection: 'content_episodes' }
 );
