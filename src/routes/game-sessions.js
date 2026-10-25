@@ -21,6 +21,7 @@ const {
   gameBillingConfig,
   stopGameSession,
   sessionBillingState,
+  runningUsage,
 } = require('../utils/game-billing');
 const { resolveClient, assertDeviceSupported, streamProfile, productDevices } = require('../utils/stream-clients');
 const { proxyToStream, setGameCookie } = require('../terminal/stream-proxy');
@@ -56,6 +57,7 @@ function dedicatedInfo(doc) {
       : null,
     readyAt: doc.readyAt || undefined,
     launchError: doc.launchError || undefined,
+    ...(runningUsage(doc, doc.ratePerHour || 0) || {}),
   };
 }
 
@@ -441,13 +443,20 @@ function dedicatedServerHtml(product) {
 </main><script>
 const base=location.pathname.replace(/\\/player$/,'')+location.search;
 const $=(id)=>document.getElementById(id);
+/* Same rule as the web app (CurrencyService.formatRateFromUsd): cents, or 3 significant digits under one cent. */
+const usd=(v)=>{v=Number(v)||0;const d=v>0&&v<0.01?Math.min(8,Math.max(3,2-Math.floor(Math.log10(v)))):2;return '$'+v.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:d});};
 $('cp').onclick=()=>navigator.clipboard&&navigator.clipboard.writeText($('addr').textContent);
 async function poll(){
   try{
     const r=await fetch(base,{credentials:'include'});const s=await r.json();
     if(s.connect){$('st').className='card live';$('msg').textContent='Máy chủ đang chạy · Server is live';$('cn').hidden=false;$('addr').textContent=s.connect.address;}
     else if(s.status==='stopped'||s.status==='error'){$('msg').textContent=s.stopReason==='launch_failed'?'Không khởi động được máy chủ, không tính phí. Vui lòng thử lại. · Launch failed, not billed. Please retry.':'Máy chủ đã dừng · Server stopped';$('cn').hidden=true;return;}
-    if(s.ratePerMinute){$('bill').textContent='Phí · Rate: $'+s.ratePerMinute.toFixed(4)+'/phút ($'+(s.ratePerHour||s.ratePerMinute*60).toFixed(3)+'/giờ · hour) · đã tính · billed: $'+(s.billedCost||0).toFixed(2)+' ('+(s.billedMinutes||0)+' phút)';}
+    if(s.ratePerMinute){
+      let t='Phí · Rate: '+usd(s.ratePerMinute)+'/phút · min ('+usd(s.ratePerHour||s.ratePerMinute*60)+'/giờ · hour)';
+      if(s.status==='live'&&s.usedMinutes!=null)t+=' · Đang chạy · Running: '+s.usedMinutes+' phút · min · '+usd(s.usedCost)+' (dừng bây giờ · if stopped now: '+usd(s.estimatedCharge)+')';
+      else t+=' · đã tính · billed: '+usd(s.billedCost)+' ('+(s.billedMinutes||0)+' phút · min)';
+      $('bill').textContent=t;
+    }
   }catch(e){}
   setTimeout(poll,5000);
 }

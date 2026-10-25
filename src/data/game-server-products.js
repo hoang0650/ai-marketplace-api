@@ -6,6 +6,7 @@
 const { inferProductType } = require('./marketplace-types');
 const { taxCategoryFromProduct } = require('../finance/tax-category');
 const { CREATOR } = require('./runpod-marketplace-products');
+const { dedicatedRatePerHour } = require('../utils/game-hosting');
 
 const CDN = 'https://cdn.aimarkets.vn/aimarkets/aimarkets/playground/game-servers';
 
@@ -15,8 +16,13 @@ const DATA_CENTERS = ['EUR-IS-1', 'EUR-IS-2', 'EUR-IS-3', 'US-KS-2', 'US-TX-3', 
 /** Sample sizes behind the "from" price; the session itself bills the pod's real cost. */
 const TYPICAL_POD_COST_PER_HOUR = { cpu3g2: 0.08, cpu3c2: 0.06 };
 
-function perMinute(costPerHour, markup = 0.3) {
-  return Math.ceil(((costPerHour * (1 + markup)) / 60) * 1e5) / 1e5;
+/**
+ * Listed per-minute rate for a pod: the exact rate a session on that pod bills
+ * ((pod cost + running disk) × (1 + markup), see dedicatedRatePerHour), divided by 60 and
+ * rounded the same way as the session's `ratePerMinute`, so the product page and the player agree.
+ */
+function perMinute(costPerHour, diskGb = 10) {
+  return Math.round((dedicatedRatePerHour(costPerHour, diskGb) / 60) * 1e6) / 1e6;
 }
 
 function docs(p) {

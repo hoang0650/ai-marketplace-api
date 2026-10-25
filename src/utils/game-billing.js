@@ -294,6 +294,22 @@ async function runGameBillingTick(now = new Date()) {
   return out;
 }
 
+/**
+ * Usage so far for a running session, on the same basis as the final settle: minutes since
+ * billing started with the partial minute counted (minimum 1), cost at `ratePerHour`.
+ * `usedCost` is the exact amount; `estimatedCharge` is what stopping now would have charged
+ * in total (cents, rounded up), never below what is already billed.
+ */
+function runningUsage(session, ratePerHour, now = new Date()) {
+  const start = session.dedicated ? session.readyAt : session.billingStartedAt || session.createdAt;
+  const billed = Math.round((Number(session.billedCost) || 0) * 100) / 100;
+  if (!start || !LIVE.includes(session.status)) return null;
+  const ms = now.getTime() - new Date(start).getTime();
+  const usedMinutes = ms > 0 ? Math.ceil(ms / 60_000) : 0;
+  const usedCost = Math.round(((usedMinutes * Math.max(0, Number(ratePerHour) || 0)) / 60) * 1e6) / 1e6;
+  return { usedMinutes, usedCost, estimatedCharge: Math.max(billed, toCents(usedCost, true)) };
+}
+
 /** Live billing snapshot for heartbeat responses. */
 async function sessionBillingState(session, product) {
   const rate = sessionRate(session, product);
@@ -302,6 +318,7 @@ async function sessionBillingState(session, product) {
     billedMinutes: session.billedMinutes || 0,
     billedCost: Math.round((session.billedCost || 0) * 100) / 100,
     currency: product?.pricing?.currency || 'USD',
+    ...(runningUsage(session, rate) || {}),
   };
   if (rate > 0) {
     const { available } = await getAvailableBalance(session.user);
@@ -349,6 +366,7 @@ module.exports = {
   tickSession,
   runGameBillingTick,
   sessionBillingState,
+  runningUsage,
   startGameBillingWorker,
   stopGameBillingWorker,
 };
