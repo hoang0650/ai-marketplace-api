@@ -87,7 +87,8 @@ describe('dedicated game servers', () => {
     assert.equal(doc.dedicated, true);
     assert.equal(doc.providerServerId, 'pod123');
     assert.equal(doc.podCostPerHour, 0.08);
-    assert.ok(doc.ratePerHour > 0.104 && doc.ratePerHour < 0.106);
+    // (0.08 + 10 GB disk) × 1.32 = 0.107408
+    assert.ok(doc.ratePerHour > 0.107 && doc.ratePerHour < 0.108);
   });
 
   test('a failed session insert terminates the pod (no orphans)', async () => {

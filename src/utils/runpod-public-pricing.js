@@ -5,7 +5,7 @@
  *
  * Buyer price = upstream (provider) price × (1 + markup). The markup comes from
  * RUNPOD_PUBLIC_MARKUP and defaults to the GPU rental markup (GPU_RENTAL_MARKUP,
- * 0.30) so both platform-direct compute products earn the same margin.
+ * 0.32) so both platform-direct compute products earn the same margin.
  */
 const { gpuRentalConfig } = require('./gpu-rental/config');
 
