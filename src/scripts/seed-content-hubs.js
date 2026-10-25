@@ -4,7 +4,7 @@
  */
 require('dotenv').config();
 
-const bcrypt = require('bcryptjs');
+const { seedPasswordHash } = require('../utils/seed-password');
 const mongoose = require('mongoose');
 const config = require('../config/env');
 const User = require('../models/User');
@@ -68,7 +68,7 @@ async function seedHubs() {
   });
   console.log('[seed:hubs] connected', String(config.mongoUri).replace(/\/\/.*@/, '//***@'));
 
-  const passwordHash = await bcrypt.hash('password', 10);
+  const passwordHash = await seedPasswordHash();
   const creators = {};
   for (const spec of CREATORS) {
     creators[spec.creatorSlug] = await ensureUser(spec, passwordHash);
@@ -198,7 +198,7 @@ async function seedHubs() {
     'ai-film-series': countMap['ai-film-series'] || 0,
     'story-book': countMap['story-book'] || 0,
   });
-  console.log('[seed:hubs] buyer login: buyer@example.com / password');
+  console.log('[seed:hubs] buyer login: buyer@example.com (password: SEED_PASSWORD or random)');
   await mongoose.disconnect();
 }
 

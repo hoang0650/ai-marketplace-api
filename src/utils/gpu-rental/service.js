@@ -1,7 +1,8 @@
 const crypto = require('crypto');
 const GpuRental = require('../../models/GpuRental');
 const WalletTx = require('../../models/WalletTx');
-const { getAvailableBalance } = require('../wallet');
+const { getAvailableBalance, getSpendableBalance } = require('../wallet');
+const { withWalletLock } = require('../wallet-lock');
 const { roundMoney } = require('../payout-hold');
 const { notifyUser } = require('../notify');
 const { gpuRentalConfig } = require('./config');
@@ -144,17 +145,32 @@ async function assertPrepay(userId, pricePerHour) {
 
 // ---------- billing ----------
 
-/** Pure accrual: whole minutes since the cursor at `rate` USD/hour, charged in cents. */
-function accrue({ billedUntil, carry = 0 }, rate, now = new Date()) {
+function toCents(amount, up = false) {
+  const micro = Math.round(amount * 1e6) / 1e4;
+  return (up ? Math.ceil(micro - 1e-9) : Math.floor(micro + 1e-9)) / 100;
+}
+
+/**
+ * Pure accrual: whole minutes since the cursor at `rate` USD/hour, charged in cents.
+ * `final` (stop / terminate / state change) bills the last partial minute and rounds
+ * the sub-cent carry up, so a rental never ends with unbilled time.
+ */
+function accrue({ billedUntil, carry = 0 }, rate, now = new Date(), { final = false } = {}) {
   const from = new Date(billedUntil);
-  const minutes = Math.floor((now.getTime() - from.getTime()) / 60_000);
-  if (minutes < 1) return { minutes: 0, charge: 0, carry, to: from };
-  const accrued = (minutes * Math.max(0, rate)) / 60 + (Number(carry) || 0);
-  const charge = Math.floor(Math.round(accrued * 1e6) / 1e4) / 100;
+  const ms = now.getTime() - from.getTime();
+  const prevCarry = Number(carry) || 0;
+  let minutes = ms > 0 ? Math.floor(ms / 60_000) : 0;
+  if (final && ms > 0 && ms % 60_000 > 0) minutes += 1;
+  if (minutes < 1) {
+    if (final && prevCarry > 0) return { minutes: 0, charge: toCents(prevCarry, true), carry: 0, to: from };
+    return { minutes: 0, charge: 0, carry, to: from };
+  }
+  const accrued = (minutes * Math.max(0, rate)) / 60 + prevCarry;
+  const charge = toCents(accrued, final);
   return {
     minutes,
     charge,
-    carry: Math.max(0, Math.round((accrued - charge) * 1e6) / 1e6),
+    carry: final ? 0 : Math.max(0, Math.round((accrued - charge) * 1e6) / 1e6),
     to: new Date(from.getTime() + minutes * 60_000),
   };
 }
@@ -169,25 +185,50 @@ function rateFor(rental) {
  * Charge everything up to `now` at the rental's current rate. The cursor moves with a
  * compare-and-set so concurrent ticks/replicas can never double-charge a minute.
  */
-async function settle(rental, now = new Date()) {
+async function settle(rental, now = new Date(), opts = {}) {
   const rate = rateFor(rental);
-  const a = accrue(rental, rate, now);
-  if (!a.minutes) return 0;
-  const moved = await GpuRental.findOneAndUpdate(
-    { _id: rental._id, billedUntil: rental.billedUntil },
-    { $set: { billedUntil: a.to, carry: a.carry }, $inc: { billedMinutes: rate > 0 ? a.minutes : 0, billedTotal: a.charge } },
-    { new: true }
-  );
-  if (!moved) return 0;
-  rental.billedUntil = moved.billedUntil;
-  rental.carry = moved.carry;
-  rental.billedMinutes = moved.billedMinutes;
-  rental.billedTotal = moved.billedTotal;
-  if (a.charge > 0) {
+  const attempts = opts.final ? 4 : 1;
+  for (let i = 0; i < attempts; i += 1) {
+    const a = accrue(rental, rate, now, opts);
+    if (!a.minutes && !a.charge) return 0;
+    const moved = await GpuRental.findOneAndUpdate(
+      { _id: rental._id, billedUntil: rental.billedUntil },
+      { $set: { billedUntil: a.to, carry: a.carry }, $inc: { billedMinutes: rate > 0 ? a.minutes : 0, billedTotal: a.charge } },
+      { new: true }
+    );
+    if (!moved) {
+      // Lost the CAS to a concurrent tick: on the final settle reload and bill the remaining tail.
+      if (i + 1 >= attempts) return 0;
+      const fresh = await GpuRental.findById(rental._id).lean();
+      if (!fresh) return 0;
+      rental.billedUntil = fresh.billedUntil;
+      rental.carry = fresh.carry;
+      continue;
+    }
+    rental.billedUntil = moved.billedUntil;
+    rental.carry = moved.carry;
+    rental.billedMinutes = moved.billedMinutes;
+    rental.billedTotal = moved.billedTotal;
+    if (a.charge > 0) await debitRental(rental, a, rate);
+    return a.charge;
+  }
+  return 0;
+}
+
+/** Debit under the wallet lock, capped at what the owner can cover (never below zero). */
+async function debitRental(rental, a, rate) {
+  return withWalletLock(rental.owner, async () => {
+    const spendable = await getSpendableBalance(rental.owner);
+    const amount = Math.min(a.charge, Math.floor(spendable * 100 + 1e-9) / 100);
+    const shortfall = Math.round((a.charge - amount) * 100) / 100;
+    if (!(amount > 0)) {
+      console.warn('[gpu-rental] unbilled (no funds)', String(rental._id), a.charge);
+      return 0;
+    }
     await WalletTx.create({
       user: rental.owner,
       type: 'debit',
-      amount: a.charge,
+      amount,
       currency: 'USD',
       status: 'completed',
       note: `GPU ${rental.gpuName || rental.offerId} · ${rental.name} (${a.minutes}m${rental.status === 'stopped' ? ', storage' : ''})`,
@@ -198,10 +239,11 @@ async function settle(rental, now = new Date()) {
         rate,
         from: new Date(a.to.getTime() - a.minutes * 60_000),
         to: a.to,
+        ...(shortfall > 0 ? { shortfall } : {}),
       },
     });
-  }
-  return a.charge;
+    return amount;
+  });
 }
 
 // ---------- lifecycle ----------
@@ -297,7 +339,7 @@ async function refreshRental(rental) {
   try {
     const live = await provider.getServer(rental.providerServerId);
     if (live.status === 'terminated') {
-      await settle(rental);
+      await settle(rental, new Date(), { final: true });
       rental.status = 'terminated';
       rental.terminatedAt = rental.terminatedAt || new Date();
     } else if (live.status === 'running' || live.status === 'creating') {
@@ -306,7 +348,7 @@ async function refreshRental(rental) {
         rental.ready = live.status === 'running' && live.ready;
       }
     } else if (live.status === 'stopped' && rental.status !== 'stopped') {
-      await settle(rental);
+      await settle(rental, new Date(), { final: true });
       rental.status = 'stopped';
       rental.ready = false;
       rental.stoppedAt = rental.stoppedAt || new Date();
@@ -315,7 +357,7 @@ async function refreshRental(rental) {
     await rental.save();
   } catch (err) {
     if (err.code === 'SERVER_NOT_FOUND') {
-      await settle(rental);
+      await settle(rental, new Date(), { final: true });
       rental.status = 'terminated';
       rental.ready = false;
       rental.terminatedAt = rental.terminatedAt || new Date();
@@ -328,7 +370,7 @@ async function refreshRental(rental) {
 async function startRental(rental) {
   if (rental.status === 'terminated') throw httpError(409, 'RENTAL_TERMINATED');
   if (rental.status === 'running' || rental.status === 'creating') return rental;
-  await settle(rental);
+  await settle(rental, new Date(), { final: true });
   await assertPrepay(rental.owner, rental.pricePerHour);
   await provider.startServer(rental.providerServerId, rental.gpuCount);
   rental.status = 'creating';
@@ -344,7 +386,7 @@ async function startRental(rental) {
 async function stopRental(rental, reason = 'user') {
   if (rental.status === 'terminated') throw httpError(409, 'RENTAL_TERMINATED');
   if (rental.status === 'stopped') return rental;
-  await settle(rental);
+  await settle(rental, new Date(), { final: true });
   await provider.stopServer(rental.providerServerId);
   rental.status = 'stopped';
   rental.ready = false;
@@ -359,7 +401,7 @@ async function stopRental(rental, reason = 'user') {
 
 async function terminateRental(rental) {
   if (rental.status === 'terminated') return rental;
-  await settle(rental);
+  await settle(rental, new Date(), { final: true });
   if (rental.providerServerId) {
     try {
       await provider.terminateServer(rental.providerServerId);

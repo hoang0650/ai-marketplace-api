@@ -41,7 +41,7 @@ API base: `http://localhost:4100/v1`
 Gateway v2: `http://localhost:4100/v2`  
 Health: `http://localhost:4100/health` · Readiness: `http://localhost:4100/health/ready`
 
-## Seed accounts (password: `password`)
+## Seed accounts (password: `SEED_PASSWORD` env, min 12 chars — otherwise random; there is no shared default)
 
 | Email | Role |
 |-------|------|

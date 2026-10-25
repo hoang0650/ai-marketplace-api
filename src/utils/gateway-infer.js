@@ -2,7 +2,9 @@ const crypto = require('crypto');
 const Product = require('../models/Product');
 const UsageEvent = require('../models/UsageEvent');
 const UsageStat = require('../models/UsageStat');
-const { requireAvailableFunds } = require('./wallet');
+const { placeHold, releaseHold } = require('./wallet');
+const { preflight } = require('./usage-preflight');
+const { claimIdempotencyKey, completeIdempotencyKey, releaseIdempotencyKey } = require('./idempotency');
 const { chargeUsage } = require('../finance/charge-usage');
 const { resolveProviderForProduct, computeUsageCost } = require('./provider-resolve');
 const { inferWithFallback, fetchJobStatus } = require('./denglish-client');
@@ -45,85 +47,123 @@ function assertKeyOwnsProduct(req, product) {
 
 async function meterAndInfer(req, product, input, action = 'runsync') {
   const resolved = resolveProviderForProduct(product);
-  const provider = req.body?.provider || resolved.provider;
+  // The listing decides the upstream: a buyer-supplied `provider` is never honoured.
+  const provider = resolved.provider;
   const model = resolved.model || product.runtime?.baseModel || product.slug;
   const endpointId = resolved.endpointId;
-  const idempotencyKey = String(req.headers['idempotency-key'] || req.body?.id || '').slice(0, 120) || null;
-
-  if (idempotencyKey) {
-    const dup = await UsageEvent.findOne({ idempotencyKey });
-    if (dup) {
-      return { replay: true, event: dup, ai: { ok: true, data: { replay: true }, usage: dup.rawUsage }, provider, model, charged: 0 };
-    }
-  }
-
-  const ai = await inferWithFallback({
-    provider,
-    model,
-    endpointId,
-    input,
-    action,
-    buyerId: String(req.user._id),
-    idempotencyKey,
-  });
-  const usage = ai.usage || { input_tokens: 0, output_tokens: 0, total_tokens: 0, unit: 'tokens' };
-  const cost = computeUsageCost(product, usage, input, Number(ai.data?.cost) || 0);
   const buyerId = req.user._id;
+  const rawKey = req.headers['idempotency-key'] || req.body?.id;
+
+  // Keys are scoped per buyer and claimed before the upstream call, so concurrent retries
+  // can't both run (and bill) and one buyer's key never replays another buyer's result.
+  const idem = await claimIdempotencyKey(buyerId, 'gateway', rawKey);
+  if (idem.state === 'replay') {
+    const stored = idem.claim.response || {};
+    return {
+      replay: true,
+      event: { _id: idem.claim.usageEvent, id: String(idem.claim.usageEvent || '') },
+      ai: stored.ai || { ok: true, data: { replay: true } },
+      provider,
+      model,
+      charged: 0,
+    };
+  }
+  let claim = idem.claim;
+  const scopedKey = claim ? `${buyerId}:${claim.key}` : null;
   const sellerId = product.creator;
   const selfUse = String(buyerId) === String(sellerId);
-  let charged = 0;
-  let sellerNet = 0;
-  let platformFee = 0;
+  let hold = null;
 
-  if (cost > 0 && !selfUse) {
-    try {
-      await requireAvailableFunds(buyerId, cost);
-    } catch (err) {
-      if (err.status === 402) {
-        err.body = { cost, ...(err.body || {}) };
+  try {
+    const quote = await preflight({ provider, endpointId, model, input });
+    const estimatedCost = computeUsageCost(product, quote.usage, input, quote.providerCost);
+    if (estimatedCost > 0 && !selfUse) {
+      try {
+        hold = await placeHold(buyerId, estimatedCost, {
+          note: `Gateway (reserved): ${product.name}`,
+          meta: { channel: 'gateway', productId: String(product._id) },
+        });
+      } catch (err) {
+        if (err.status === 402) err.body = { estimatedCost, ...(err.body || {}) };
         throw err;
       }
-      throw err;
     }
-    const billed = await chargeUsage({
-      buyerId,
-      sellerId,
-      product,
-      cost,
-      note: `Gateway: ${product.name}`,
+
+    const ai = await inferWithFallback({
+      provider,
+      model,
+      endpointId,
+      input,
+      action,
+      buyerId: String(buyerId),
+      idempotencyKey: scopedKey,
     });
-    platformFee = billed.platformFee;
-    sellerNet = billed.sellerNet;
-    charged = billed.charged;
+    const usage = ai.usage || { input_tokens: 0, output_tokens: 0, total_tokens: 0, unit: 'tokens' };
+    const sandbox = Boolean(ai.raw?.sandbox || ai.data?.sandbox);
+    if (sandbox) usage.sandbox = true;
+    const cost = sandbox ? 0 : computeUsageCost(product, usage, input, Number(ai.data?.cost) || 0);
+    let charged = 0;
+    let sellerNet = 0;
+    let platformFee = 0;
+    let shortfall = 0;
+
+    if (cost > 0 && !selfUse) {
+      const billed = await chargeUsage({
+        buyerId,
+        sellerId,
+        product,
+        cost,
+        holdId: hold?._id || null,
+        funds: 'cap',
+        note: `Gateway: ${product.name}`,
+      });
+      hold = null;
+      platformFee = billed.platformFee;
+      sellerNet = billed.sellerNet;
+      charged = billed.charged;
+      shortfall = billed.shortfall || 0;
+    } else if (hold) {
+      await releaseHold(hold);
+      hold = null;
+    }
+
+    const event = await UsageEvent.create({
+      deployment: null,
+      product: product._id,
+      buyer: buyerId,
+      seller: sellerId,
+      inputTokens: Number(usage.input_tokens) || 0,
+      outputTokens: Number(usage.output_tokens) || 0,
+      cost: charged,
+      platformFee,
+      sellerNet,
+      provider,
+      unit: usage.unit || 'tokens',
+      quantity: Number(usage.quantity) || Number(usage.total_tokens) || 0,
+      rawUsage: shortfall > 0 ? { ...usage, shortfall } : usage,
+      source: 'gateway',
+      usageType: 'API_REQUEST',
+      idempotencyKey: scopedKey ? `gw_${scopedKey}` : `gw_${crypto.randomBytes(8).toString('hex')}`,
+    });
+
+    const day = new Date().toISOString().slice(0, 10);
+    await UsageStat.updateOne(
+      { creator: sellerId, date: day },
+      { $inc: { tokens: (usage.input_tokens || 0) + (usage.output_tokens || 0), requests: 1, revenue: sellerNet } },
+      { upsert: true }
+    ).catch(() => {});
+
+    await completeIdempotencyKey(
+      claim,
+      { ai: { ok: ai.ok, data: ai.data, usage: ai.usage, raw: ai.raw, latency_ms: ai.latency_ms, model: ai.model } },
+      event._id
+    );
+    claim = null;
+    return { replay: false, event, ai, provider, model, charged };
+  } finally {
+    if (hold) await releaseHold(hold);
+    if (claim) await releaseIdempotencyKey(claim);
   }
-
-  const event = await UsageEvent.create({
-    deployment: null,
-    product: product._id,
-    buyer: buyerId,
-    seller: sellerId,
-    inputTokens: Number(usage.input_tokens) || 0,
-    outputTokens: Number(usage.output_tokens) || 0,
-    cost: charged,
-    platformFee,
-    sellerNet,
-    provider,
-    unit: usage.unit || 'tokens',
-    quantity: Number(usage.quantity) || Number(usage.total_tokens) || 0,
-    rawUsage: usage,
-    source: 'gateway',
-    usageType: 'API_REQUEST',
-    idempotencyKey: idempotencyKey || `gw_${crypto.randomBytes(8).toString('hex')}`,
-  });
-
-  const day = new Date().toISOString().slice(0, 10);
-  await UsageStat.updateOne(
-    { creator: sellerId, date: day },
-    { $inc: { tokens: (usage.input_tokens || 0) + (usage.output_tokens || 0), requests: 1, revenue: sellerNet } },
-    { upsert: true }
-  ).catch(() => {});
-
-  return { replay: false, event, ai, provider, model, charged };
 }
 
 function shapeRunpodResponse(out, action = 'runsync') {

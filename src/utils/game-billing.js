@@ -3,7 +3,7 @@ const GpuServer = require('../models/GpuServer');
 const Product = require('../models/Product');
 const UsageEvent = require('../models/UsageEvent');
 const UsageStat = require('../models/UsageStat');
-const { getAvailableBalance } = require('./wallet');
+const { getAvailableBalance, sweepStaleHolds } = require('./wallet');
 const { chargeUsage } = require('../finance/charge-usage');
 const { notifyUser } = require('./notify');
 const { callSellerWebhook, usageRatePerHour } = require('./compute-session');
@@ -38,22 +38,33 @@ function cursorOf(session) {
   return new Date(session.billedUntil || session.billingStartedAt || session.createdAt || Date.now());
 }
 
+/** Cents, rounded down (ticks) or up (final settle) after snapping float noise to 1e-6. */
+function toCents(amount, up = false) {
+  const micro = Math.round(amount * 1e6) / 1e4;
+  return (up ? Math.ceil(micro - 1e-9) : Math.floor(micro + 1e-9)) / 100;
+}
+
 /**
  * Whole minutes since the cursor at `ratePerHour`, charged in cents with the sub-cent
- * remainder carried. `final` rounds the last partial minute up (minimum 1 minute per session).
+ * remainder carried. `final` rounds the last partial minute up (minimum 1 minute per session)
+ * and rounds the remaining sub-cent carry up so nothing is left unbilled at stop.
  */
 function accrue({ from, carry = 0 }, ratePerHour, now = new Date(), { final = false } = {}) {
   const start = new Date(from);
   const ms = now.getTime() - start.getTime();
+  const prevCarry = Number(carry) || 0;
   let minutes = ms > 0 ? Math.floor(ms / 60_000) : 0;
   if (final && ms > 0 && ms % 60_000 > 0) minutes += 1;
-  if (minutes < 1) return { minutes: 0, charge: 0, carry, to: start };
-  const accrued = (minutes * Math.max(0, ratePerHour)) / 60 + (Number(carry) || 0);
-  const charge = Math.floor(Math.round(accrued * 1e6) / 1e4) / 100;
+  if (minutes < 1) {
+    if (final && prevCarry > 0) return { minutes: 0, charge: toCents(prevCarry, true), carry: 0, to: start };
+    return { minutes: 0, charge: 0, carry, to: start };
+  }
+  const accrued = (minutes * Math.max(0, ratePerHour)) / 60 + prevCarry;
+  const charge = toCents(accrued, final);
   return {
     minutes,
     charge,
-    carry: Math.max(0, Math.round((accrued - charge) * 1e6) / 1e6),
+    carry: final ? 0 : Math.max(0, Math.round((accrued - charge) * 1e6) / 1e6),
     to: new Date(start.getTime() + minutes * 60_000),
   };
 }
@@ -67,6 +78,8 @@ async function recordCharge(session, product, a, rate) {
     sellerId,
     product,
     cost: a.charge,
+    // Time already elapsed: bill what the wallet covers, never below zero (enforceSession stops it).
+    funds: 'cap',
     note: `Stream: ${product.name} (${a.minutes}m · ${device})`,
   });
   if (billed.skipped) return billed;
@@ -76,7 +89,7 @@ async function recordCharge(session, product, a, rate) {
     seller: sellerId,
     inputTokens: 0,
     outputTokens: 0,
-    cost: a.charge,
+    cost: billed.charged,
     platformFee: billed.platformFee,
     sellerNet: billed.sellerNet,
     unit: product.pricing?.usageUnit || 'hours',
@@ -84,6 +97,7 @@ async function recordCharge(session, product, a, rate) {
     rawUsage: {
       minutes: a.minutes,
       ratePerHour: rate,
+      ...(billed.shortfall ? { shortfall: billed.shortfall } : {}),
       sessionId: session.sessionId,
       client: session.client || 'pc',
       device,
@@ -107,24 +121,38 @@ async function recordCharge(session, product, a, rate) {
  */
 async function settleSession(session, product, now = new Date(), opts = {}) {
   const rate = sessionRate(session, product);
-  const prev = session.billedUntil || null;
-  const a = accrue({ from: cursorOf(session), carry: session.billingCarry }, rate, now, opts);
-  if (!a.minutes) return 0;
-  const moved = await GameSession.findOneAndUpdate(
-    { _id: session._id, billedUntil: prev },
-    {
-      $set: { billedUntil: a.to, billingCarry: a.carry },
-      $inc: { billedMinutes: a.minutes, billedCost: a.charge },
-    },
-    { new: true }
-  );
-  if (!moved) return 0;
-  session.billedUntil = moved.billedUntil;
-  session.billingCarry = moved.billingCarry;
-  session.billedMinutes = moved.billedMinutes;
-  session.billedCost = moved.billedCost;
-  if (a.charge > 0) await recordCharge(session, plain(product), a, rate);
-  return a.charge;
+  // The final settle must not lose the tail when a concurrent tick moved the cursor first:
+  // reload and re-accrue from the new cursor instead of giving up.
+  const attempts = opts.final ? 4 : 1;
+  for (let i = 0; i < attempts; i += 1) {
+    const prev = session.billedUntil || null;
+    const a = accrue({ from: cursorOf(session), carry: session.billingCarry }, rate, now, opts);
+    if (!a.minutes && !a.charge) return 0;
+    const moved = await GameSession.findOneAndUpdate(
+      { _id: session._id, billedUntil: prev },
+      {
+        $set: { billedUntil: a.to, billingCarry: a.carry },
+        $inc: { billedMinutes: a.minutes, billedCost: a.charge },
+      },
+      { new: true }
+    );
+    if (moved) {
+      session.billedUntil = moved.billedUntil;
+      session.billingCarry = moved.billingCarry;
+      session.billedMinutes = moved.billedMinutes;
+      session.billedCost = moved.billedCost;
+      if (a.charge > 0) await recordCharge(session, plain(product), a, rate);
+      return a.charge;
+    }
+    if (i + 1 >= attempts) return 0;
+    const fresh = await GameSession.findById(session._id).lean();
+    if (!fresh) return 0;
+    session.billedUntil = fresh.billedUntil;
+    session.billingCarry = fresh.billingCarry;
+    session.billedMinutes = fresh.billedMinutes;
+    session.billedCost = fresh.billedCost;
+  }
+  return 0;
 }
 
 /** Stop once (atomic claim), bill the tail, tell the seller node. */
@@ -209,6 +237,8 @@ async function tickSession(session, product, now = new Date()) {
 }
 
 async function runGameBillingTick(now = new Date()) {
+  // Piggy-back: free spend reservations orphaned by a crashed playground/gateway request.
+  await sweepStaleHolds(null, now).catch(() => {});
   const rows = await GameSession.find({ status: { $in: LIVE } });
   const ids = [...new Set(rows.map((r) => String(r.product || '')).filter(Boolean))];
   const products = ids.length ? await Product.find({ _id: { $in: ids } }).lean() : [];

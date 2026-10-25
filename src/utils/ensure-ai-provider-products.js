@@ -1,4 +1,4 @@
-const bcrypt = require('bcryptjs');
+const { seedPasswordHash } = require('./seed-password');
 const User = require('../models/User');
 const Product = require('../models/Product');
 const SellerProfile = require('../models/SellerProfile');
@@ -96,7 +96,7 @@ async function ensureAiProviderProducts() {
   if (!creator) {
     creator = await User.create({
       email: CREATOR.email,
-      passwordHash: await bcrypt.hash('password', 10),
+      passwordHash: await seedPasswordHash(),
       name: CREATOR.name,
       role: 'seller',
       creatorSlug: CREATOR.creatorSlug,

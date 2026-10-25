@@ -7,6 +7,7 @@ const UsageStat = require('../models/UsageStat');
 const { authenticate, requireRoles } = require('../middleware/auth');
 const { requireAvailableFunds } = require('../utils/wallet');
 const { chargeUsage } = require('../finance/charge-usage');
+const { computeUsageCost } = require('../utils/provider-resolve');
 const { slugify } = require('../utils/serialize');
 const { normalizeRuntime, normalizeRuntimeForStorage, publicRuntime, mergeRuntime } = require('../utils/runtime');
 const { deleteCachePattern } = require('../utils/cache');
@@ -35,10 +36,15 @@ function estimateTokens(text) {
   return s.length === 0 ? 0 : Math.max(1, Math.ceil(s.length / 4));
 }
 
-function computeCost(product, totalTokens) {
+/** Same unit (1K/1M), input/output split and currency rules as the playground/gateway. */
+function computeCost(product, totalTokens, inputTokens = 0, outputTokens = 0) {
   if (product.pricing?.model !== 'usage') return 0;
-  const rate = Number(product.pricing.usageRate) || 0;
-  return Math.round((totalTokens / 1000) * rate * 1e6) / 1e6;
+  return computeUsageCost(product, {
+    unit: 'tokens',
+    input_tokens: inputTokens,
+    output_tokens: outputTokens,
+    total_tokens: totalTokens,
+  });
 }
 
 function toPublic(dep, { includeSecrets = false } = {}) {
@@ -255,7 +261,7 @@ router.delete('/:id', authenticate, requireRoles('seller', 'admin'), async (req,
 
 /**
  * Metered invoke — buyers (or seller self-test) call through the marketplace.
- * Tokens: client-reported → else estimate. Billing uses product usageRate / 1K tokens.
+ * Tokens: client-reported → else estimate. Billing uses product usageRate per its usageUnit (1K/1M tokens).
  */
 router.post('/:id/invoke', authenticate, async (req, res, next) => {
   try {
@@ -288,7 +294,7 @@ router.post('/:id/invoke', authenticate, async (req, res, next) => {
     const product = await Product.findById(dep.product).lean();
     if (!product) return res.status(404).json({ message: 'Product behind deployment is gone' });
 
-    const cost = computeCost(product, totalTokens);
+    const cost = computeCost(product, totalTokens, inputTokens, outputTokens);
     const buyerId = req.user._id;
     const sellerId = dep.seller;
     const selfUse = String(buyerId) === String(sellerId);
@@ -310,13 +316,20 @@ router.post('/:id/invoke', authenticate, async (req, res, next) => {
         }
         throw err;
       }
-      const billed = await chargeUsage({
-        buyerId,
-        sellerId,
-        product,
-        cost,
-        note: `Usage: ${dep.name} (${totalTokens} tokens)`,
-      });
+      let billed;
+      try {
+        billed = await chargeUsage({
+          buyerId,
+          sellerId,
+          product,
+          cost,
+          funds: 'require',
+          note: `Usage: ${dep.name} (${totalTokens} tokens)`,
+        });
+      } catch (err) {
+        if (err.status === 402) return res.status(402).json({ message: err.message, code: err.code, ...(err.body || {}) });
+        throw err;
+      }
       platformFee = billed.platformFee;
       sellerNet = billed.sellerNet;
       charged = billed.charged;
@@ -403,4 +416,5 @@ router.get('/:id/usage', authenticate, requireRoles('seller', 'admin'), async (r
   }
 });
 
+router._computeCost = computeCost;
 module.exports = router;
