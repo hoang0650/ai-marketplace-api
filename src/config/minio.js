@@ -421,6 +421,15 @@ async function presignFilmGet(objectName, expirySeconds = 6 * 3600) {
   return getMinioClient().presignedGetObject(cfg.bucket, objectName, Math.min(expirySeconds, 7 * 24 * 3600));
 }
 
+/** Delete individual film objects (never anything outside the film prefix). */
+async function removeFilmObjects(keys) {
+  const list = (keys || []).filter((k) => typeof k === 'string' && k.includes('/film/') && !k.includes('..'));
+  if (!isMinioEnabled() || !list.length) return 0;
+  const cfg = await ensurePlaygroundBucket();
+  for (let i = 0; i < list.length; i += 500) await getMinioClient().removeObjects(cfg.bucket, list.slice(i, i + 500));
+  return list.length;
+}
+
 async function removeFilmPrefix(prefix) {
   if (!isMinioEnabled() || !prefix || !prefix.includes('/film/')) return 0;
   const cfg = await ensurePlaygroundBucket();
@@ -442,6 +451,7 @@ module.exports = {
   presignFilmPut,
   presignFilmGet,
   removeFilmPrefix,
+  removeFilmObjects,
   statFilmObject: (name) => statTrainingObject(name),
   putAttachmentObject,
   getAttachmentStream,
