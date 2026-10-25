@@ -4,6 +4,7 @@ const { authenticate } = require('../middleware/auth');
 const { mapProduct } = require('../utils/mappers');
 const { findProductByRef, isMongoId } = require('../utils/wishlist');
 const { applyCartLine, removeCartLines } = require('../utils/cart');
+const { isLicenseCategory, resolveLicensePrice } = require('../utils/license-keys');
 
 const router = express.Router();
 
@@ -15,7 +16,18 @@ async function respond(res, cart) {
   await cart.populate({ path: 'items.product' });
   const items = (cart.items || [])
     .filter((it) => it.product)
-    .map((it) => ({ product: mapProduct(it.product), qty: it.qty, addedAt: it.addedAt }))
+    .map((it) => {
+      const raw = it.product.toObject ? it.product.toObject() : it.product;
+      // Same price checkout will charge: the line's license period, else the listing default.
+      const pick = isLicenseCategory(raw.category) ? resolveLicensePrice(raw, it.licenseTerm) : null;
+      return {
+        product: mapProduct(it.product),
+        qty: it.qty,
+        addedAt: it.addedAt,
+        licenseTerm: pick ? pick.term : '',
+        unitPrice: pick ? pick.unitPrice : null,
+      };
+    })
     .filter((it) => it.product);
   res.json({ items, count: items.reduce((s, it) => s + it.qty, 0) });
 }
@@ -41,7 +53,7 @@ router.post('/items', authenticate, async (req, res, next) => {
     const product = await findProductByRef(ref);
     if (!product) return res.status(404).json({ message: 'Product not found' });
     const cart = await loadCart(req.user._id);
-    cart.items = applyCartLine(cart.items, product._id, req.body?.qty ?? 1, 'add');
+    cart.items = applyCartLine(cart.items, product._id, req.body?.qty ?? 1, 'add', new Date(), req.body?.licenseTerm);
     await cart.save();
     await respond(res, cart);
   } catch (err) {
@@ -56,7 +68,7 @@ router.patch('/items/:ref', authenticate, async (req, res, next) => {
     const id = await resolveProductId(String(req.params.ref || '').trim());
     if (!id) return res.status(404).json({ message: 'Product not found' });
     const cart = await loadCart(req.user._id);
-    cart.items = applyCartLine(cart.items, id, qty, 'set');
+    cart.items = applyCartLine(cart.items, id, qty, 'set', new Date(), req.body?.licenseTerm);
     await cart.save();
     await respond(res, cart);
   } catch (err) {

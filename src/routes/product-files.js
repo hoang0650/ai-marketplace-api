@@ -55,6 +55,26 @@ function isManager(user, product) {
   return user.role === 'admin' || String(product.creator) === String(user._id);
 }
 
+/** A license key sent by the caller only counts when it was issued to that same account. */
+function licenseBelongsTo(license, userId) {
+  if (!license || !userId) return false;
+  return String(license.buyer?._id || license.buyer || '') === String(userId);
+}
+
+/**
+ * Who may download raw files: 'admin' / 'seller' (listing owner, intentional for moderation and
+ * self-checks), or 'license' for a buyer whose own license for this product is active right now.
+ * Expiry is evaluated on every request, so downloads stop the moment a license expires.
+ */
+async function resolveAccess(user, product, licenseKey) {
+  if (!user) return { via: null, license: null };
+  if (user.role === 'admin') return { via: 'admin', license: null };
+  if (String(product.creator) === String(user._id)) return { via: 'seller', license: null };
+  const license = await findActiveLicense({ buyerId: user._id, licenseKey, productId: product._id });
+  if (license && licenseBelongsTo(license, user._id)) return { via: 'license', license };
+  return { via: null, license: null };
+}
+
 async function loadProduct(req) {
   const id = String(req.params.productId || '');
   if (!mongoose.isValidObjectId(id)) return null;
@@ -75,16 +95,13 @@ router.get('/:productId', optionalAuth, async (req, res, next) => {
     const rows = await ContentEpisode.find({ product: product._id, published: true })
       .sort({ index: 1, createdAt: 1 })
       .lean();
-    let unlocked = isManager(req.user, product);
-    let license = null;
-    if (!unlocked && req.user) {
-      license = await findActiveLicense({ buyerId: req.user._id, licenseKey: licenseKeyOf(req), productId: product._id });
-      unlocked = !!license;
-    }
+    const access = await resolveAccess(req.user, product, licenseKeyOf(req));
+    res.setHeader('Cache-Control', 'private, no-store');
     res.json({
       files: rows.map(publicFile),
-      unlocked,
-      licenseExpiresAt: license?.expiresAt || null,
+      unlocked: !!access.via,
+      access: access.via,
+      licenseExpiresAt: access.license?.expiresAt || null,
     });
   } catch (err) {
     next(err);
@@ -100,11 +117,10 @@ router.get('/:productId/:fileId/download', authenticate, async (req, res, next) 
     if (!mongoose.isValidObjectId(fileId)) return res.status(404).json({ message: 'File not found' });
     const file = await ContentEpisode.findOne({ _id: fileId, product: product._id, published: true }).lean();
     if (!file || !file.objectName) return res.status(404).json({ message: 'File not found' });
-    if (!isManager(req.user, product)) {
-      const license = await findActiveLicense({ buyerId: req.user._id, licenseKey: licenseKeyOf(req), productId: product._id });
-      if (!license) {
-        return res.status(402).json({ message: 'Active license required to download', code: 'LICENSE_REQUIRED' });
-      }
+    const access = await resolveAccess(req.user, product, licenseKeyOf(req));
+    if (!access.via) {
+      res.setHeader('Cache-Control', 'private, no-store');
+      return res.status(402).json({ message: 'Active license required to download', code: 'LICENSE_REQUIRED' });
     }
     if (!minio.isMinioEnabled()) return res.status(503).json({ message: 'Storage not configured', code: 'MINIO_NOT_CONFIGURED' });
     const stream = await minio.getContentObjectStream(file.objectName);
@@ -184,3 +200,5 @@ router.delete('/:productId/:fileId', authenticate, requireRoles('seller', 'admin
 module.exports = router;
 module.exports.isDownloadCategory = isDownloadCategory;
 module.exports.safeFilename = safeFilename;
+module.exports.licenseBelongsTo = licenseBelongsTo;
+module.exports.resolveAccess = resolveAccess;
