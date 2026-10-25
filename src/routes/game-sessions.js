@@ -439,7 +439,7 @@ function dedicatedServerHtml(product) {
 </div>
 <div class="card muted" id="bill"></div>
 </main><script>
-const base=location.pathname.replace(/\/player$/,'')+location.search;
+const base=location.pathname.replace(/\\/player$/,'')+location.search;
 const $=(id)=>document.getElementById(id);
 $('cp').onclick=()=>navigator.clipboard&&navigator.clipboard.writeText($('addr').textContent);
 async function poll(){
@@ -447,7 +447,7 @@ async function poll(){
     const r=await fetch(base,{credentials:'include'});const s=await r.json();
     if(s.connect){$('st').className='card live';$('msg').textContent='Máy chủ đang chạy · Server is live';$('cn').hidden=false;$('addr').textContent=s.connect.address;}
     else if(s.status==='stopped'||s.status==='error'){$('msg').textContent=s.stopReason==='launch_failed'?'Không khởi động được máy chủ, không tính phí. Vui lòng thử lại. · Launch failed, not billed. Please retry.':'Máy chủ đã dừng · Server stopped';$('cn').hidden=true;return;}
-    if(s.ratePerMinute){$('bill').textContent='Phí · Rate: $'+s.ratePerMinute.toFixed(4)+'/phút · đã tính · billed: $'+(s.billedCost||0).toFixed(2)+' ('+(s.billedMinutes||0)+' phút)';}
+    if(s.ratePerMinute){$('bill').textContent='Phí · Rate: $'+s.ratePerMinute.toFixed(4)+'/phút ($'+(s.ratePerHour||s.ratePerMinute*60).toFixed(3)+'/giờ · hour) · đã tính · billed: $'+(s.billedCost||0).toFixed(2)+' ('+(s.billedMinutes||0)+' phút)';}
   }catch(e){}
   setTimeout(poll,5000);
 }
@@ -506,5 +506,8 @@ router.use('/:sessionId/proxy', authenticate, async (req, res, next) => {
     next(e);
   }
 });
+
+/** Exposed for tests (inline player script must stay valid JS). */
+router.dedicatedServerHtml = dedicatedServerHtml;
 
 module.exports = router;
