@@ -31,6 +31,9 @@ function mapProduct(doc, { includeSecrets = false } = {}) {
     provider: publicProvider(o.infraProvider || o.provider),
     license: o.license || '',
     termsSummary: scrubVendor(o.termsSummary || ''),
+    onlineTerms: o.onlineTerms?.version
+      ? { version: o.onlineTerms.version, acceptedAt: o.onlineTerms.acceptedAt || null, url: 'https://www.aimarkets.vn/terms-of-service#online-license' }
+      : null,
     complianceStatus: o.complianceStatus || 'pending',
     moderationStatus: o.moderationStatus || 'active',
     creatorId: o.creator ? String(o.creator._id || o.creator) : '',
