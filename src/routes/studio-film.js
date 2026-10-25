@@ -18,6 +18,7 @@ const { studioPolicy } = require('../utils/studio-policy');
 const { voiceLang } = require('../utils/voice-params');
 const fp = require('../utils/film-pricing');
 const minio = require('../config/minio');
+const FilmAsset = require('../models/FilmAsset');
 
 const router = express.Router();
 const MAX_PROJECTS = Number(process.env.FILM_MAX_PROJECTS || 30);
@@ -368,7 +369,7 @@ router.delete('/projects/:id/uploads/:uid', authenticate, async (req, res, next)
       return true;
     });
     if (used) return fail(res, 409, 'BUSY');
-    if (k) minio.removeFilmPrefix(k).catch(() => {});
+    if (k) minio.removeFilmObjects([k]).catch(() => {});
     res.json({ ok: true });
   } catch (e) { next(e); }
 });
@@ -461,9 +462,10 @@ router.post('/projects/:id/scenes/:sid/generate', authenticate, async (req, res,
     const base = (n) => key(p, 'scenes', scene.sid, n);
     const kfKey = plan.start ? '' : base(`key-g${gen}.jpg`);
     const startKey = plan.start ? base(`start-g${gen}.jpg`) : '';
+    const refs = await sceneRefs(req.user._id, scene);
     const spec = {
-      scene: { prompt: scene.prompt, camera: scene.camera },
-      keyframe: plan.start ? null : { mode: 'keyframe', prompt: scene.prompt, images: [], put: await putUrl(kfKey), get: await sign(kfKey), seed: seedOf() },
+      scene: { prompt: scene.prompt, camera: scene.camera, characters: refs.characters, setting: refs.setting },
+      keyframe: plan.start ? null : { mode: 'keyframe', prompt: scene.prompt, images: refs.images, charImages: refs.charImages, settingImage: refs.settingImage, put: await putUrl(kfKey), get: await sign(kfKey), seed: seedOf() },
       start: plan.start ? { get: await sign(plan.start.key) } : null,
       shots: [],
     };
@@ -541,6 +543,186 @@ router.post('/projects/:id/render', authenticate, async (req, res, next) => {
   }
 });
 
+/* ------------------------------------------------- character / setting library -- */
+const MAX_ASSETS = 100;
+const MAX_ASSET_IMAGES = 6;
+const assetKey = (userId, assetId, name) => minio.filmObjectName(userId, 'assets', String(assetId), name);
+
+async function assetView(a) {
+  const o = typeof a.toObject === 'function' ? a.toObject() : a;
+  const images = [];
+  for (const im of o.images || []) images.push({ key: im.key, source: im.source, url: await sign(im.key) });
+  return { id: String(o._id), type: o.type, name: o.name, description: o.description, status: o.status, images, updatedAt: o.updatedAt };
+}
+
+/**
+ * References for a scene keyframe: characters with a reference image come first (Qwen sees "image 1..n"),
+ * then the setting image; at most 3 images in total. Characters without images still go in by name + description.
+ */
+async function sceneRefs(userId, scene) {
+  const ids = [...(scene.characterIds || []).map(String), ...(scene.settingId ? [String(scene.settingId)] : [])];
+  const out = { characters: [], setting: null, images: [], charImages: 0, settingImage: false };
+  if (!ids.length) return out;
+  const rows = await FilmAsset.find({ _id: { $in: ids }, user: userId }).lean();
+  const byId = new Map(rows.map((r) => [String(r._id), r]));
+  const chars = (scene.characterIds || []).map((id) => byId.get(String(id))).filter((a) => a && a.type === 'character');
+  const withImg = chars.filter((a) => a.images && a.images.length);
+  for (const a of withImg.slice(0, 3)) { out.images.push(await sign(a.images[0].key)); out.charImages += 1; }
+  const ordered = [...withImg.slice(0, 3), ...chars.filter((a) => !withImg.slice(0, 3).includes(a))];
+  out.characters = ordered.map((a) => ({ name: a.name, description: a.description || '' }));
+  const st = scene.settingId ? byId.get(String(scene.settingId)) : null;
+  if (st && st.type === 'setting') {
+    out.setting = { name: st.name, description: st.description || '' };
+    if (st.images && st.images.length && out.images.length < 3) { out.images.push(await sign(st.images[0].key)); out.settingImage = true; }
+  }
+  return out;
+}
+
+async function ownAsset(req, res) {
+  const a = await FilmAsset.findOne({ _id: req.params.aid, user: req.user._id }).catch(() => null);
+  if (!a) { fail(res, 404, 'NOT_FOUND'); return null; }
+  return a;
+}
+
+router.get('/assets', authenticate, async (req, res, next) => {
+  try {
+    const q = { user: req.user._id };
+    if (['character', 'setting'].includes(req.query.type)) q.type = req.query.type;
+    const rows = await FilmAsset.find(q).sort({ updatedAt: -1 }).limit(MAX_ASSETS);
+    const active = await StudioJob.find({ user: req.user._id, kind: 'film-image', status: { $in: ['queued', 'running'] } }).limit(10);
+    for (const j of active) await refreshFilmJob(j).catch(() => {});
+    const fresh = active.length ? await FilmAsset.find(q).sort({ updatedAt: -1 }).limit(MAX_ASSETS) : rows;
+    res.json({ items: await Promise.all(fresh.map(assetView)) });
+  } catch (e) { next(e); }
+});
+
+router.post('/assets', authenticate, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const type = ['character', 'setting'].includes(b.type) ? b.type : null;
+    const name = clean(b.name, 60);
+    if (!type || !name) return fail(res, 400, 'BAD_INPUT');
+    if ((await FilmAsset.countDocuments({ user: req.user._id })) >= MAX_ASSETS) return fail(res, 409, 'LIMIT');
+    const a = await FilmAsset.create({ user: req.user._id, type, name, description: clean(b.description, 400) });
+    res.status(201).json(await assetView(a));
+  } catch (e) { next(e); }
+});
+
+router.put('/assets/:aid', authenticate, async (req, res, next) => {
+  try {
+    const a = await ownAsset(req, res);
+    if (!a) return;
+    const b = req.body || {};
+    if (b.name !== undefined) a.name = clean(b.name, 60) || a.name;
+    if (b.description !== undefined) a.description = clean(b.description, 400);
+    if (Array.isArray(b.order)) { // reorder: first image is the one used as reference
+      const keys = b.order.map(String);
+      a.images = [...a.images].sort((x, y) => (keys.indexOf(x.key) + 1 || 99) - (keys.indexOf(y.key) + 1 || 99));
+    }
+    await a.save();
+    res.json(await assetView(a));
+  } catch (e) { next(e); }
+});
+
+router.delete('/assets/:aid', authenticate, async (req, res, next) => {
+  try {
+    const a = await ownAsset(req, res);
+    if (!a) return;
+    if (a.status === 'generating') return fail(res, 409, 'BUSY');
+    await minio.removeFilmPrefix(minio.filmObjectName(req.user._id, 'assets', String(a._id))).catch(() => 0);
+    await FilmAsset.deleteOne({ _id: a._id });
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+router.post('/assets/:aid/uploads', authenticate, async (req, res, next) => {
+  try {
+    const a = await ownAsset(req, res);
+    if (!a) return;
+    const b = req.body || {};
+    const size = Number(b.size) || 0;
+    const ct = clean(b.contentType, 80).toLowerCase();
+    if (!ct.startsWith('image/') || size <= 0 || size > UPLOAD_LIMITS.image) return fail(res, 400, 'BAD_INPUT', { maxBytes: UPLOAD_LIMITS.image });
+    if (a.images.length >= MAX_ASSET_IMAGES) return fail(res, 409, 'LIMIT');
+    const ext = (clean(b.name, 160).match(/\.(jpe?g|png|webp)$/i) || [, 'jpg'])[1].toLowerCase();
+    const k = assetKey(req.user._id, a._id, `u-${newSid()}.${ext}`);
+    res.status(201).json({ key: k, putUrl: await putUrl(k), headers: { 'content-type': ct } });
+  } catch (e) { next(e); }
+});
+
+router.post('/assets/:aid/uploads/confirm', authenticate, async (req, res, next) => {
+  try {
+    const a = await ownAsset(req, res);
+    if (!a) return;
+    const k = String((req.body || {}).key || '');
+    if (!k.startsWith(`${minio.filmObjectName(req.user._id, 'assets', String(a._id))}/`) || k.includes('..')) return fail(res, 400, 'BAD_INPUT');
+    const st = await minio.statFilmObject(k).catch(() => null);
+    if (!st || !st.size || st.size > UPLOAD_LIMITS.image) return fail(res, 400, 'BAD_INPUT', { reason: 'upload missing' });
+    const upd = await FilmAsset.findOneAndUpdate(
+      { _id: a._id, 'images.key': { $ne: k }, [`images.${MAX_ASSET_IMAGES - 1}`]: { $exists: false } },
+      { $push: { images: { key: k, source: 'upload' } } }, { new: true },
+    );
+    if (!upd) return fail(res, 409, 'LIMIT');
+    res.json(await assetView(upd));
+  } catch (e) { next(e); }
+});
+
+router.delete('/assets/:aid/images', authenticate, async (req, res, next) => {
+  try {
+    const a = await ownAsset(req, res);
+    if (!a) return;
+    const k = String(req.query.key || '');
+    if (!a.images.some((im) => im.key === k)) return fail(res, 404, 'NOT_FOUND');
+    const upd = await FilmAsset.findOneAndUpdate({ _id: a._id }, { $pull: { images: { key: k } } }, { new: true });
+    minio.removeFilmObjects([k]).catch(() => {});
+    res.json(await assetView(upd));
+  } catch (e) { next(e); }
+});
+
+/** Reference image with Qwen-Image-Edit-2511: from the description (blank canvas) or as a variation of the first image. Billed per image, refunded on failure. */
+router.post('/assets/:aid/generate', authenticate, async (req, res, next) => {
+  try {
+    const a = await ownAsset(req, res);
+    if (!a) return;
+    if (!(await availability()).film) return fail(res, 503, 'STUDIO_UNAVAILABLE');
+    if (a.images.length >= MAX_ASSET_IMAGES) return fail(res, 409, 'LIMIT');
+    const price = fp.filmCharge({ images: 1 });
+    if (!priceGate(req, res, price)) return;
+    if ((await checkActive(req.user._id)) >= MAX_ACTIVE) return fail(res, 429, 'JOB_ACTIVE');
+    const claim = await FilmAsset.updateOne({ _id: a._id, status: { $ne: 'generating' } }, { $set: { status: 'generating' } });
+    if (!claim.modifiedCount) return fail(res, 409, 'BUSY');
+    let out;
+    try {
+      const extra = clean((req.body || {}).prompt, 300);
+      const k = assetKey(req.user._id, a._id, `g-${Date.now().toString(36)}-${newSid()}.jpg`);
+      const base = a.images.length ? await sign(a.images[0].key) : null;
+      const prompt = `${a.name}: ${a.description || ''}${extra ? `. ${extra}` : ''}${base ? '. Keep exactly the same identity as in image 1' : ''}`;
+      out = await billAndSubmit(req, {
+        charge: { amount: price, note: `Phim AI: ảnh tham chiếu ${a.type === 'character' ? 'nhân vật' : 'bối cảnh'} “${a.name}”`, meta: { kind: 'film-image', unit: 'images', quantity: 1, asset: String(a._id) } },
+        path: '/film/image',
+        body: { mode: a.type, prompt, images: base ? [base] : [], put: await putUrl(k), get: await sign(k), seed: seedOf() },
+        job: { kind: 'film-image', prompt: prompt.slice(0, 1000), meta: { asset: String(a._id), key: k, images: 1, rates: fp.filmPricing() } },
+      });
+    } catch (e) { await FilmAsset.updateOne({ _id: a._id }, { $set: { status: 'ready' } }); throw e; }
+    if (out.error) { await FilmAsset.updateOne({ _id: a._id }, { $set: { status: 'ready' } }); return fail(res, out.status, out.error); }
+    res.status(202).json({ job: jobView(out.job), price, asset: await assetView(await FilmAsset.findById(a._id)) });
+  } catch (e) {
+    if (e.code === 'INSUFFICIENT_WALLET') return fail(res, 402, 'INSUFFICIENT_WALLET', { available: e.available });
+    if (e.code === 'WALLET_BUSY') return fail(res, 503, 'STUDIO_UNAVAILABLE');
+    next(e);
+  }
+});
+
+/** Settlement hook for library images (jobs without a project). */
+async function afterSettle(job, remote, final) {
+  if (job.kind !== 'film-image' || !job.meta || !job.meta.asset) return;
+  const ok = final === 'succeeded';
+  await FilmAsset.updateOne(
+    { _id: job.meta.asset },
+    ok ? { $set: { status: 'ready' }, $push: { images: { key: job.meta.key, source: 'generated' } } } : { $set: { status: 'ready' } },
+  );
+}
+
 /* -------------------------------------------------------------- settlement -- */
 function jobView(j) {
   return {
@@ -549,6 +731,7 @@ function jobView(j) {
   };
 }
 
+const evicted = [];
 /** Apply a finished scene job to its project: new versions for produced shots; failed shots keep their old take. */
 function applyScene(doc, job, remote) {
   const m = job.meta || {};
@@ -563,7 +746,7 @@ function applyScene(doc, job, remote) {
     if (r.status === 'succeeded') {
       ok += 1;
       sh.versions.push({ v: (sh.versions.length ? sh.versions[sh.versions.length - 1].v : 0) + 1, videoKey: ms.videoKey, frameKey: ms.frameKey, startKey: i === 0 ? (m.startKey || m.keyframeKey || '') : '', prompt: ms.prompt, seed: ms.seed, seconds: ms.duration, job: job._id });
-      if (sh.versions.length > MAX_VERSIONS) sh.versions.splice(0, sh.versions.length - MAX_VERSIONS);
+      if (sh.versions.length > MAX_VERSIONS) evicted.push(...sh.versions.splice(0, sh.versions.length - MAX_VERSIONS).flatMap((v) => [v.videoKey, v.frameKey, /\/key-g\d+\.jpg$/.test(v.startKey || '') ? '' : v.startKey]));
       sh.active = sh.versions.length - 1; sh.status = 'ready'; sh.error = '';
     } else {
       sh.status = sh.active >= 0 ? 'ready' : 'failed';
@@ -572,9 +755,12 @@ function applyScene(doc, job, remote) {
   });
   if (m.keyframeKey && remote && remote.keyframe && remote.keyframe.status === 'succeeded') {
     s.keyframes.push({ v: s.keyframes.length + 1, frameKey: m.keyframeKey, job: job._id });
-    if (s.keyframes.length > MAX_VERSIONS) s.keyframes.splice(0, s.keyframes.length - MAX_VERSIONS);
+    if (s.keyframes.length > MAX_VERSIONS) evicted.push(...s.keyframes.splice(0, s.keyframes.length - MAX_VERSIONS).map((k) => k.frameKey));
   }
-  s.status = ok === m.shots.length ? 'ready' : ok ? 'partial' : (s.shots.every((x) => x.active >= 0) ? 'ready' : 'failed');
+  const all = s.shots.every((x) => x.active >= 0);
+  const any = s.shots.some((x) => x.active >= 0);
+  if (ok === m.shots.length) s.status = all ? 'ready' : 'partial';
+  else s.status = ok ? 'partial' : all ? 'ready' : any ? 'partial' : 'failed';
   s.error = ok === m.shots.length ? '' : String((remote && remote.error) || job.error || 'failed').slice(0, 200);
   return true;
 }
@@ -628,11 +814,12 @@ async function refreshFilmJob(job) {
         rr.status = final; rr.duration = (remote && remote.duration) || 0; rr.bytes = (remote && remote.bytes) || 0;
         return true;
       }
-      if (job.kind === 'film-image' && typeof module.exports.applyImage === 'function') return module.exports.applyImage(doc, job, remote, final);
       return false;
     }).catch((e) => console.error('[film] apply', String(job._id), e.message));
+    // Versions pushed past MAX_VERSIONS: delete their files (keys that are no longer referenced anywhere).
+    if (evicted.length) minio.removeFilmObjects(evicted.splice(0).filter(Boolean)).catch(() => {});
   }
-  if (typeof module.exports.afterSettle === 'function') await module.exports.afterSettle(job, remote, final).catch(() => {});
+  await afterSettle(job, remote, final).catch((e) => console.error('[film] asset settle', String(job._id), e.message));
   return job;
 }
 
@@ -703,5 +890,5 @@ async function pollFilmJobs(limit = 25) {
 module.exports = router;
 Object.assign(module.exports, {
   availability, refreshFilmJob, fastViaFilm, streamFilmFile, pollFilmJobs, FILM_KINDS,
-  _internal: { sceneIn, scenePlan, renderPlan, applyScene, planShots, projectSeconds, priceGate, debit, credit, mutate, view, key, sign, putUrl, billAndSubmit, checkActive, newSid, seedOf, fail, clean, jobView },
+  _internal: { sceneRefs, afterSettle, assetView, sceneIn, scenePlan, renderPlan, applyScene, planShots, projectSeconds, priceGate, debit, credit, mutate, view, key, sign, putUrl, billAndSubmit, checkActive, newSid, seedOf, fail, clean, jobView },
 });

@@ -125,3 +125,57 @@ test('settling a partial scene refunds failed shots once and versions the produc
   await filmRoutes.refreshFilmJob(mk()); // a second poller pass must not refund again
   assert.equal(db.tx.filter((t) => t.type === 'credit').length, 1);
 });
+
+const FilmAsset = require('../../src/models/FilmAsset');
+const minio = require('../../src/config/minio');
+
+test('scene refs: characters with images first (image 1..n), setting image last, max 3 images, owner-scoped', async () => {
+  const user = new mongoose.Types.ObjectId();
+  const id = () => new mongoose.Types.ObjectId();
+  const [lan, minh, ba, cafe] = [id(), id(), id(), id()];
+  let query = null;
+  const rows = [
+    { _id: lan, type: 'character', name: 'Lan', description: 'red ao dai', images: [{ key: 'k/lan.jpg' }] },
+    { _id: minh, type: 'character', name: 'Minh', description: 'denim jacket', images: [] },
+    { _id: ba, type: 'character', name: 'Ba', description: 'old fisherman', images: [{ key: 'k/ba.jpg' }] },
+    { _id: cafe, type: 'setting', name: 'Cafe', description: 'lantern-lit cafe', images: [{ key: 'k/cafe.jpg' }] },
+  ];
+  for (const [o, k, fn] of [
+    [FilmAsset, 'find', (q) => { query = q; return { lean: async () => rows }; }],
+    [minio, 'presignFilmGet', async (k) => `https://cdn.test/${k}`],
+  ]) { saved.push([o, k, o[k]]); o[k] = fn; }
+  const r = await filmRoutes._internal.sceneRefs(user, { characterIds: [minh, lan, ba], settingId: cafe });
+  assert.equal(String(query.user), String(user));
+  assert.deepEqual(r.images, ['https://cdn.test/k/lan.jpg', 'https://cdn.test/k/ba.jpg', 'https://cdn.test/k/cafe.jpg']);
+  assert.equal(r.charImages, 2);
+  assert.equal(r.settingImage, true);
+  assert.deepEqual(r.characters.map((c) => c.name), ['Lan', 'Ba', 'Minh']);
+  assert.equal(r.setting.description, 'lantern-lit cafe');
+  const none = await filmRoutes._internal.sceneRefs(user, { characterIds: [], settingId: null });
+  assert.deepEqual(none, { characters: [], setting: null, images: [], charImages: 0, settingImage: false });
+});
+
+test('library image settles once: success adds the image, failure refunds the full image price', async () => {
+  const db = installFakeLedger({ saved });
+  process.env.AIMX_PROVIDER_URL = 'http://ai.test';
+  process.env.DENGLISH_SERVICE_KEY = 'k';
+  const user = new mongoose.Types.ObjectId();
+  const asset = new mongoose.Types.ObjectId();
+  const assetUpdates = [];
+  let remote = { status: 'succeeded', cost: 0.02 };
+  for (const [o, k, fn] of [
+    [StudioJob, 'updateOne', async () => ({ modifiedCount: 1 })],
+    [FilmAsset, 'updateOne', async (q, u) => { assetUpdates.push(u); return { modifiedCount: 1 }; }],
+    [global, 'fetch', async () => new Response(JSON.stringify(remote), { status: 200 })],
+  ]) { saved.push([o, k, o[k]]); o[k] = fn; }
+  const mk = () => ({ _id: new mongoose.Types.ObjectId(), user, kind: 'film-image', status: 'running', remoteId: 'cd'.repeat(16), charged: 0.0264, project: null,
+    createdAt: new Date(), $locals: {}, save: async () => {}, meta: { asset: String(asset), key: 'k/g1.jpg', images: 1, rates: fp.filmPricing({}) } });
+  const ok = await filmRoutes.refreshFilmJob(mk());
+  assert.equal(ok.status, 'succeeded'); assert.equal(ok.refundedAmount, 0);
+  assert.deepEqual(assetUpdates[0].$push.images, { key: 'k/g1.jpg', source: 'generated' });
+  remote = { status: 'failed', error: 'safety', cost: 0 };
+  const bad = await filmRoutes.refreshFilmJob(mk());
+  assert.equal(bad.status, 'failed'); assert.equal(bad.refundedAmount, 0.0264);
+  assert.equal(assetUpdates[1].$push, undefined);
+  assert.equal(db.tx.filter((t) => t.type === 'credit').length, 1);
+});
