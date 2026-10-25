@@ -6,6 +6,7 @@ const provider = require('../utils/denglish-providers');
 const { assertSafeHttpUrl, assertSafeStreamHost } = require('./safe-http-url');
 const { publicProvider, internalProvider, publicNodeId } = require('./white-label');
 const { deviceNodeFilter, normalizeDevices, nodeDevices } = require('./stream-clients');
+const { ratePerHourUsd, toUsd } = require('./usage-pricing');
 
 const COMPUTE_CATEGORIES = new Set(['gpu-compute', 'game-server']);
 
@@ -232,10 +233,9 @@ function usageRatePerHour(product) {
   if (pricing.model !== 'usage') return 0;
   const rate = Number(pricing.usageRate) || 0;
   if (rate <= 0) return 0;
-  const unit = String(pricing.usageUnit || 'hours').toLowerCase();
-  if (unit.startsWith('min')) return rate * 60;
-  if (unit.startsWith('sec')) return rate * 3600;
-  return rate;
+  // "phút", "per minute", "/min", "1 minute", "sec", "GPU hour"… and VND listings → USD/hour.
+  const perHour = ratePerHourUsd(rate, pricing.usageUnit || 'hour', pricing.currency || 'USD');
+  return perHour === null ? toUsd(rate, pricing.currency || 'USD') : perHour;
 }
 
 async function assertBuyerAccess(user, product) {

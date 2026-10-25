@@ -1,4 +1,4 @@
-const bcrypt = require('bcryptjs');
+const { seedPasswordHash } = require('./seed-password');
 const User = require('../models/User');
 const Product = require('../models/Product');
 const {
@@ -60,7 +60,7 @@ async function ensureRunpodMarketplaceProducts() {
     (await User.findOne({ creatorSlug: 'runpod' }));
 
   if (!creator) {
-    const passwordHash = await bcrypt.hash('password', 10);
+    const passwordHash = await seedPasswordHash();
     creator = await User.create({
       email: CREATOR.email,
       passwordHash,

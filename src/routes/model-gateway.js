@@ -14,6 +14,9 @@ function sendError(res, next, e) {
   if (e.status === 402) return res.status(402).json({ message: e.message, ...e.body });
   if (e.status === 403) return res.status(403).json({ message: e.message, ...e.body });
   if (e.status === 404) return res.status(404).json({ message: e.message, ...e.body });
+  if (e.status === 409 || (e.status === 503 && e.code === 'WALLET_BUSY')) {
+    return res.status(e.status).json({ message: e.message, code: e.code, ...e.body });
+  }
   return next(e);
 }
 

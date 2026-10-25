@@ -6,6 +6,8 @@ const GameSession = require('../../src/models/GameSession');
 const GpuServer = require('../../src/models/GpuServer');
 const Product = require('../../src/models/Product');
 const WalletTx = require('../../src/models/WalletTx');
+const WalletLock = require('../../src/models/WalletLock');
+const AffiliateCommission = require('../../src/models/AffiliateCommission');
 const Order = require('../../src/models/Order');
 const UsageEvent = require('../../src/models/UsageEvent');
 const UsageStat = require('../../src/models/UsageStat');
@@ -68,6 +70,9 @@ function makeSession(over = {}) {
 
 function stubLedger(balance) {
   stub(WalletTx, 'aggregate', async () => [{ balance }]);
+  stub(AffiliateCommission, 'find', () => ({ lean: async () => [] }));
+  stub(WalletLock, 'findOneAndUpdate', async () => ({}));
+  stub(WalletLock, 'deleteOne', async () => ({}));
   stub(Order, 'find', () => ({ sort: () => ({ lean: async () => [] }) }));
   stub(UsageEvent, 'aggregate', async () => []);
 }
@@ -178,6 +183,7 @@ describe('game session per-minute billing', () => {
         billedCost: u.$inc.billedCost,
       };
     });
+    stubLedger(100);
     stub(GpuServer, 'findById', async () => null);
     stub(Product, 'findById', () => ({ lean: async () => null }));
   });

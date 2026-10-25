@@ -6,7 +6,7 @@ require('dotenv').config();
 
 const fs = require('fs');
 const path = require('path');
-const bcrypt = require('bcryptjs');
+const { seedPasswordHash } = require('../utils/seed-password');
 const mongoose = require('mongoose');
 const config = require('../config/env');
 const User = require('../models/User');
@@ -95,7 +95,7 @@ async function seed() {
     LicenseKey.deleteMany({}),
   ]);
 
-  const passwordHash = await bcrypt.hash('password', 10);
+  const passwordHash = await seedPasswordHash();
   const creatorByMockId = new Map();
   const userByMockId = new Map();
   const productByMockId = new Map();
@@ -425,7 +425,7 @@ async function seed() {
   }
 
   console.log('[seed] done');
-  console.log('[seed] login with any seeded email / password: password');
+  console.log('[seed] seeded accounts use SEED_PASSWORD when set, otherwise a random password (reset via Forgot password)');
   await mongoose.disconnect();
 }
 

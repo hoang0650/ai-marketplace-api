@@ -9,6 +9,9 @@ const pricingSchema = new mongoose.Schema(
     interval: { type: String, enum: ['day', 'month', 'year', null], default: null },
     usageUnit: { type: String },
     usageRate: { type: Number },
+    /** Optional separate per-unit prices for prompt (input) and completion (output) tokens. */
+    inputRate: { type: Number },
+    outputRate: { type: Number },
     /** List price before sale. When > price, listing shows as discounted. */
     compareAtPrice: { type: Number, default: 0, min: 0 },
     /** Hire listings: `price` is the starting quote and the buyer may counter-offer. */
