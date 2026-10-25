@@ -182,3 +182,31 @@ test('library image settles once: success adds the image, failure refunds the fu
   assert.equal(assetUpdates[1].$push, undefined);
   assert.equal(db.tx.filter((t) => t.type === 'credit').length, 1);
 });
+
+test('re-shooting one shot: start frame comes from the scene start or the previous take, new take becomes active', () => {
+  const { shotStart, applyScene } = filmRoutes._internal;
+  const doc = new FilmProject({ user: new mongoose.Types.ObjectId(), scenes: [{ sid: 'sc', prompt: 'x', duration: 15, status: 'generating', generation: 1,
+    keyframes: [{ v: 1, frameKey: 'kf1' }],
+    shots: [
+      { sid: 'a', duration: 8, active: 0, status: 'ready', versions: [{ v: 1, videoKey: 'va1', frameKey: 'fa1', startKey: 'kf1' }] },
+      { sid: 'b', duration: 8, active: -1, status: 'failed', versions: [] },
+    ] }] });
+  const sc = doc.scenes[0];
+  assert.equal(shotStart(sc, 0), 'kf1');
+  assert.equal(shotStart(sc, 1), 'fa1');
+  const job = { _id: new mongoose.Types.ObjectId(), meta: { sid: 'sc', gen: 1, single: true, keyframeKey: '', startKey: '',
+    shots: [{ sid: 'b', duration: 8, seed: 3, prompt: 'turns', videoKey: 'vb2', frameKey: 'fb2', startKey: '' }] } };
+  assert.equal(applyScene(doc, job, { status: 'succeeded', shots: [{ id: 'b', status: 'succeeded' }] }), true);
+  assert.equal(sc.shots[1].active, 0); assert.equal(sc.shots[1].versions[0].videoKey, 'vb2');
+  assert.equal(sc.shots[0].versions.length, 1, 'other shots untouched');
+  assert.equal(sc.status, 'ready');
+  // shot 1 re-take keeps sharing the keyframe as its start; old takes beyond 10 are evicted but the shared start frame is not deleted
+  for (let n = 2; n <= 11; n += 1) {
+    sc.status = 'generating';
+    applyScene(doc, { _id: job._id, meta: { sid: 'sc', gen: 1, single: true, keyframeKey: '', startKey: '',
+      shots: [{ sid: 'a', duration: 8, seed: n, prompt: '', videoKey: `va${n}`, frameKey: `fa${n}`, startKey: 'kf1' }] } }, { status: 'succeeded', shots: [{ status: 'succeeded' }] });
+  }
+  assert.equal(sc.shots[0].versions.length, 10);
+  assert.equal(sc.shots[0].versions[sc.shots[0].active].videoKey, 'va11');
+  assert.equal(shotStart(sc, 0), 'kf1');
+});

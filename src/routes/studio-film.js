@@ -502,6 +502,116 @@ router.post('/projects/:id/scenes/:sid/generate', authenticate, async (req, res,
   }
 });
 
+/* ---------------------------------------------------- per-shot regenerate + versions -- */
+/** Start frame for re-shooting one shot: shot 1 reuses the scene's start (keyframe / previous scene / upload), later shots the previous shot's last frame. */
+function shotStart(scene, i) {
+  if (i === 0) {
+    const sh = scene.shots[0];
+    const v = sh && sh.active >= 0 ? sh.versions[sh.active] : null;
+    if (v && v.startKey) return v.startKey;
+    const kf = scene.keyframes && scene.keyframes[scene.keyframes.length - 1];
+    return kf ? kf.frameKey : '';
+  }
+  const prev = scene.shots[i - 1];
+  const v = prev && prev.active >= 0 ? prev.versions[prev.active] : null;
+  return v ? v.frameKey : '';
+}
+
+router.post('/projects/:id/scenes/:sid/shots/:shot/estimate', authenticate, async (req, res, next) => {
+  try {
+    const p = await ownProject(req, res);
+    if (!p) return;
+    const scene = p.scenes.find((s) => s.sid === req.params.sid);
+    const i = scene ? scene.shots.findIndex((x) => x.sid === req.params.shot) : -1;
+    if (i < 0) return fail(res, 404, 'NOT_FOUND');
+    const seconds = scene.shots[i].duration;
+    res.json({ seconds, images: 0, price: fp.filmCharge({ seconds }), ready: !!shotStart(scene, i), available: await getSpendableBalance(req.user._id) });
+  } catch (e) { next(e); }
+});
+
+router.post('/projects/:id/scenes/:sid/shots/:shot/generate', authenticate, async (req, res, next) => {
+  try {
+    const p = await ownProject(req, res);
+    if (!p) return;
+    if (!(await availability()).film) return fail(res, 503, 'STUDIO_UNAVAILABLE');
+    const idx = p.scenes.findIndex((s) => s.sid === req.params.sid);
+    const scene = p.scenes[idx];
+    const i = scene && scene.source === 'ai' ? scene.shots.findIndex((x) => x.sid === req.params.shot) : -1;
+    if (i < 0) return fail(res, 404, 'NOT_FOUND');
+    if (scene.status === 'generating') return fail(res, 409, 'BUSY');
+    const startFrame = shotStart(scene, i);
+    if (!startFrame) return fail(res, 409, 'NEED_PREVIOUS', { reason: i ? 'previous shot has no video yet' : 'generate the scene first' });
+    const sh = scene.shots[i];
+    const price = fp.filmCharge({ seconds: sh.duration });
+    if (!priceGate(req, res, price)) return;
+    if ((await checkActive(req.user._id)) >= MAX_ACTIVE) return fail(res, 429, 'JOB_ACTIVE');
+    const prevStatus = scene.status;
+    const claim = await FilmProject.updateOne({ _id: p._id, scenes: { $elemMatch: { sid: scene.sid, status: { $ne: 'generating' } } } }, { $set: { 'scenes.$.status': 'generating' } });
+    if (!claim.modifiedCount) return fail(res, 409, 'BUSY');
+    const unclaim = () => FilmProject.updateOne({ _id: p._id, 'scenes.sid': scene.sid }, { $set: { 'scenes.$.status': prevStatus } }).catch(() => {});
+    let out;
+    try {
+      const gen = scene.generation || 0;
+      const tag = `${sh.sid}-g${gen}-r${Date.now().toString(36)}${newSid().slice(0, 4)}`;
+      const vk = key(p, 'scenes', scene.sid, `${tag}.mp4`);
+      const fk = key(p, 'scenes', scene.sid, `${tag}.jpg`);
+      const seed = seedOf();
+      const prompt = clean((req.body || {}).prompt, 600) || sh.prompt || '';
+      const refs = await sceneRefs(req.user._id, scene);
+      const spec = {
+        scene: { prompt: scene.prompt, camera: scene.camera, characters: refs.characters, setting: refs.setting },
+        keyframe: null,
+        start: { get: await sign(startFrame) },
+        shots: [{ id: sh.sid, prompt, duration: sh.duration, seed, camera: scene.camera, videoPut: await putUrl(vk), framePut: await putUrl(fk), frameGet: await sign(fk) }],
+      };
+      const meta = { sid: scene.sid, gen, single: true, seconds: sh.duration, images: 0, keyframeKey: '', startKey: '', rates: fp.filmPricing(),
+        shots: [{ sid: sh.sid, duration: sh.duration, seed, prompt, videoKey: vk, frameKey: fk, startKey: i === 0 ? startFrame : '' }] };
+      out = await billAndSubmit(req, {
+        charge: { amount: price, note: `Phim AI: quay lại đoạn ${i + 1} cảnh ${idx + 1} (${sh.duration}s)`, meta: { kind: 'film-scene', unit: 'seconds', quantity: sh.duration, images: 0, project: String(p._id) } },
+        path: '/film/scene', body: spec,
+        job: { kind: 'film-scene', project: p._id, prompt: (prompt || scene.prompt).slice(0, 1000), meta },
+      });
+    } catch (e) { await unclaim(); throw e; }
+    if (out.error) { await unclaim(); return fail(res, out.status, out.error); }
+    const saved = await mutate(p._id, (doc) => {
+      const s = doc.scenes.find((x) => x.sid === scene.sid);
+      const t = s && s.shots.find((x) => x.sid === sh.sid);
+      if (!t) return false;
+      s.status = 'generating'; t.status = 'generating'; t.error = '';
+      if ((req.body || {}).prompt !== undefined) t.prompt = clean(req.body.prompt, 600);
+      return true;
+    });
+    res.status(202).json({ job: jobView(out.job), price, project: await view(saved) });
+  } catch (e) {
+    if (e.code === 'INSUFFICIENT_WALLET') return fail(res, 402, 'INSUFFICIENT_WALLET', { available: e.available });
+    if (e.code === 'WALLET_BUSY') return fail(res, 503, 'STUDIO_UNAVAILABLE');
+    next(e);
+  }
+});
+
+/** Pick which take of a shot is used in the film (free). */
+router.post('/projects/:id/scenes/:sid/shots/:shot/active', authenticate, async (req, res, next) => {
+  try {
+    const p = await ownProject(req, res);
+    if (!p) return;
+    const v = Number((req.body || {}).v);
+    let code = '';
+    const saved = await mutate(p._id, (doc) => {
+      const s = doc.scenes.find((x) => x.sid === req.params.sid);
+      const t = s && s.shots.find((x) => x.sid === req.params.shot);
+      if (!t) { code = 'NOT_FOUND'; return false; }
+      if (s.status === 'generating') { code = 'BUSY'; return false; }
+      const k = t.versions.findIndex((x) => x.v === v);
+      if (k < 0) { code = 'NOT_FOUND'; return false; }
+      t.active = k; t.status = 'ready'; t.error = '';
+      if (s.status === 'partial' && s.shots.every((x) => x.active >= 0)) s.status = 'ready';
+      return true;
+    });
+    if (code) return fail(res, code === 'BUSY' ? 409 : 404, code);
+    res.json({ project: await view(saved) });
+  } catch (e) { next(e); }
+});
+
 /* ------------------------------------------------------------------ render -- */
 router.post('/projects/:id/render', authenticate, async (req, res, next) => {
   try {
@@ -738,6 +848,7 @@ function applyScene(doc, job, remote) {
   const s = doc.scenes.find((x) => x.sid === m.sid);
   if (!s || s.generation !== m.gen) return false;
   const rs = (remote && remote.shots) || [];
+  const dropped = [];
   let ok = 0;
   m.shots.forEach((ms, i) => {
     const r = rs[i] || {};
@@ -745,8 +856,8 @@ function applyScene(doc, job, remote) {
     if (!sh) return;
     if (r.status === 'succeeded') {
       ok += 1;
-      sh.versions.push({ v: (sh.versions.length ? sh.versions[sh.versions.length - 1].v : 0) + 1, videoKey: ms.videoKey, frameKey: ms.frameKey, startKey: i === 0 ? (m.startKey || m.keyframeKey || '') : '', prompt: ms.prompt, seed: ms.seed, seconds: ms.duration, job: job._id });
-      if (sh.versions.length > MAX_VERSIONS) evicted.push(...sh.versions.splice(0, sh.versions.length - MAX_VERSIONS).flatMap((v) => [v.videoKey, v.frameKey, /\/key-g\d+\.jpg$/.test(v.startKey || '') ? '' : v.startKey]));
+      sh.versions.push({ v: (sh.versions.length ? sh.versions[sh.versions.length - 1].v : 0) + 1, videoKey: ms.videoKey, frameKey: ms.frameKey, startKey: ms.startKey !== undefined ? ms.startKey : i === 0 ? (m.startKey || m.keyframeKey || '') : '', prompt: ms.prompt, seed: ms.seed, seconds: ms.duration, job: job._id });
+      if (sh.versions.length > MAX_VERSIONS) dropped.push(...sh.versions.splice(0, sh.versions.length - MAX_VERSIONS).flatMap((v) => [v.videoKey, v.frameKey, v.startKey]));
       sh.active = sh.versions.length - 1; sh.status = 'ready'; sh.error = '';
     } else {
       sh.status = sh.active >= 0 ? 'ready' : 'failed';
@@ -755,7 +866,17 @@ function applyScene(doc, job, remote) {
   });
   if (m.keyframeKey && remote && remote.keyframe && remote.keyframe.status === 'succeeded') {
     s.keyframes.push({ v: s.keyframes.length + 1, frameKey: m.keyframeKey, job: job._id });
-    if (s.keyframes.length > MAX_VERSIONS) evicted.push(...s.keyframes.splice(0, s.keyframes.length - MAX_VERSIONS).map((k) => k.frameKey));
+    if (s.keyframes.length > MAX_VERSIONS) dropped.push(...s.keyframes.splice(0, s.keyframes.length - MAX_VERSIONS).map((k) => k.frameKey));
+  }
+  if (dropped.length) {
+    // Only delete files nothing in the project still points at (start frames can be shared between versions/scenes).
+    const live = new Set();
+    for (const sc of doc.scenes) {
+      for (const k of sc.keyframes || []) live.add(k.frameKey);
+      for (const x of sc.shots || []) for (const v of x.versions || []) { live.add(v.videoKey); live.add(v.frameKey); live.add(v.startKey); }
+    }
+    for (const u of doc.uploads || []) live.add(u.key);
+    evicted.push(...dropped.filter((k) => k && !live.has(k)));
   }
   const all = s.shots.every((x) => x.active >= 0);
   const any = s.shots.some((x) => x.active >= 0);
@@ -890,5 +1011,5 @@ async function pollFilmJobs(limit = 25) {
 module.exports = router;
 Object.assign(module.exports, {
   availability, refreshFilmJob, fastViaFilm, streamFilmFile, pollFilmJobs, FILM_KINDS,
-  _internal: { sceneRefs, afterSettle, assetView, sceneIn, scenePlan, renderPlan, applyScene, planShots, projectSeconds, priceGate, debit, credit, mutate, view, key, sign, putUrl, billAndSubmit, checkActive, newSid, seedOf, fail, clean, jobView },
+  _internal: { shotStart, sceneRefs, afterSettle, assetView, sceneIn, scenePlan, renderPlan, applyScene, planShots, projectSeconds, priceGate, debit, credit, mutate, view, key, sign, putUrl, billAndSubmit, checkActive, newSid, seedOf, fail, clean, jobView },
 });
