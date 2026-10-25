@@ -75,6 +75,23 @@ describe('game sessions: final settle', () => {
     assert.equal(db.balanceOf(s.user), 5);
   });
 
+  test('wallet label covers every minute since the last wallet line (sub-cent ticks)', async () => {
+    const s = session({ user: oid(), dedicated: true, readyAt: t0, ratePerHour: 0.105781 });
+    db.fund(s.user, 5);
+    const row = casStore(GameSession, s, { cursor: 'billedUntil' });
+    // Two ticks at ~$0.0018/min: nothing reaches a cent, so no wallet line yet.
+    assert.equal(await billing.settleSession(s, product, new Date(t0.getTime() + 60_000)), 0);
+    assert.equal(await billing.settleSession(s, product, new Date(t0.getTime() + 2 * 60_000)), 0);
+    assert.equal(db.events.length, 0);
+    // Stop at 2m40s: one wallet line for all 3 minutes.
+    const charged = await billing.settleSession(s, product, new Date(t0.getTime() + 2 * 60_000 + 40_000), { final: true });
+    assert.equal(charged, 0.01);
+    assert.equal(row.billedMinutes, 3);
+    assert.equal(row.chargedMinutes, 3);
+    assert.equal(db.events.at(-1).rawUsage.minutes, 3);
+    assert.match(db.tx.at(-1).note, /\(3m\)$/);
+  });
+
   test('buyer short on funds: charge capped, wallet never negative, shortfall recorded', async () => {
     const s = session({ user: oid() });
     db.fund(s.user, 0.03);

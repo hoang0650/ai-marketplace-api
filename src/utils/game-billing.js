@@ -142,10 +142,15 @@ async function settleSession(session, product, now = new Date(), opts = {}) {
     const prev = session.billedUntil || null;
     const a = accrue({ from: cursorOf(session), carry: session.billingCarry }, rate, now, opts);
     if (!a.minutes && !a.charge) return 0;
+    // Sub-cent minutes produce no wallet line; the next charge's label covers them too.
+    const totalMinutes = (Number(session.billedMinutes) || 0) + a.minutes;
+    const coveredMinutes = Math.max(a.minutes, totalMinutes - (Number(session.chargedMinutes) || 0));
+    const $set = { billedUntil: a.to, billingCarry: a.carry };
+    if (a.charge > 0) $set.chargedMinutes = totalMinutes;
     const moved = await GameSession.findOneAndUpdate(
       { _id: session._id, billedUntil: prev },
       {
-        $set: { billedUntil: a.to, billingCarry: a.carry },
+        $set,
         $inc: { billedMinutes: a.minutes, billedCost: a.charge },
       },
       { new: true }
@@ -155,7 +160,8 @@ async function settleSession(session, product, now = new Date(), opts = {}) {
       session.billingCarry = moved.billingCarry;
       session.billedMinutes = moved.billedMinutes;
       session.billedCost = moved.billedCost;
-      if (a.charge > 0) await recordCharge(session, plain(product), a, rate);
+      if (a.charge > 0) session.chargedMinutes = totalMinutes;
+      if (a.charge > 0) await recordCharge(session, plain(product), { ...a, minutes: coveredMinutes }, rate);
       return a.charge;
     }
     if (i + 1 >= attempts) return 0;
@@ -165,6 +171,7 @@ async function settleSession(session, product, now = new Date(), opts = {}) {
     session.billingCarry = fresh.billingCarry;
     session.billedMinutes = fresh.billedMinutes;
     session.billedCost = fresh.billedCost;
+    session.chargedMinutes = fresh.chargedMinutes;
   }
   return 0;
 }

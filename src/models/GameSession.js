@@ -30,6 +30,8 @@ const gameSessionSchema = new mongoose.Schema(
     billingCarry: { type: Number, default: 0, min: 0 },
     billedCost: { type: Number, default: 0, min: 0 },
     billedMinutes: { type: Number, default: 0, min: 0 },
+    /** billedMinutes already covered by a wallet line (sub-cent minutes roll into the next charge's label). */
+    chargedMinutes: { type: Number, default: 0, min: 0 },
     /** Set once the client sends heartbeats; only then is the idle timeout enforced. */
     heartbeatAt: { type: Date, default: null },
     lowBalanceWarnedAt: { type: Date, default: null },
