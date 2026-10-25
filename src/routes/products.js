@@ -5,6 +5,7 @@ const User = require('../models/User');
 const { authenticate, requireRoles, invalidateAuthUserCache } = require('../middleware/auth');
 const { ROLE } = require('../utils/roles');
 const { mapProduct } = require('../utils/mappers');
+const { applyOnlineTerms } = require('../utils/online-terms');
 const { slugify } = require('../utils/serialize');
 const { productSlugQuery, isCatalogProductSlug } = require('../utils/product-slug');
 const { cached, deleteCachePattern } = require('../utils/cache');
@@ -266,6 +267,12 @@ router.post('/', authenticate, requireRoles('seller', 'talent', 'admin'), async 
 
     const infraProvider = String(body.infraProvider || body.provider || '');
 
+    // dataset / skill-pack / ai-film-series / story-book: AI Markets Online License by default;
+    // listing one records the seller's acceptance of distribution under these terms.
+    const terms = { category: body.category, license: body.license || '', termsSummary: body.termsSummary || '' };
+    const termsCheck = applyOnlineTerms(terms, body, user);
+    if (termsCheck.error) return res.status(400).json(termsCheck.error);
+
     const product = await Product.create({
       slug,
       name,
@@ -278,8 +285,9 @@ router.post('/', authenticate, requireRoles('seller', 'talent', 'admin'), async 
       ownershipType,
       infraProvider,
       provider: infraProvider,
-      license: body.license || '',
-      termsSummary: body.termsSummary || '',
+      license: terms.license,
+      termsSummary: terms.termsSummary,
+      ...(terms.onlineTerms ? { onlineTerms: terms.onlineTerms } : {}),
       complianceStatus: ownershipType === 'PLATFORM_DIRECT' ? 'approved' : 'pending',
       coverUrl: body.coverUrl || '',
       gallery: Array.isArray(body.gallery) ? body.gallery : [],
@@ -396,6 +404,11 @@ router.put('/:id', authenticate, requireRoles('seller', 'talent', 'admin'), asyn
     if (body.slug) {
       const next = slugify(body.slug);
       if (next && (req.user.role === 'admin' || !isCatalogProductSlug(next))) product.slug = next;
+    }
+    if (body.category !== undefined && !product.onlineTerms?.version) {
+      // Moving a listing into an online-only category puts it under the AI Markets Online License.
+      const termsCheck = applyOnlineTerms(product, { acceptOnlineTerms: body.acceptOnlineTerms }, req.user);
+      if (termsCheck.error) return res.status(400).json(termsCheck.error);
     }
     if (isVoiceCategory(product.category)) {
       applyVoiceProduct(product);

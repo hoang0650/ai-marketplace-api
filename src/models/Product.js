@@ -124,6 +124,13 @@ const productSchema = new mongoose.Schema(
     infraProvider: { type: String, default: '', trim: true, index: true },
     license: { type: String, default: '', maxlength: 500 },
     termsSummary: { type: String, default: '', maxlength: 2000 },
+    // Seller acceptance of the AI Markets Online License for online-only categories (see utils/online-terms).
+    onlineTerms: {
+      version: { type: String, default: '' },
+      acceptedAt: { type: Date, default: null },
+      acceptedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+      explicit: { type: Boolean, default: false },
+    },
     complianceStatus: {
       type: String,
       enum: ['pending', 'approved', 'rejected', 'restricted'],
