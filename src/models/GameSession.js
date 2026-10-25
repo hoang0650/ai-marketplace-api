@@ -34,6 +34,18 @@ const gameSessionSchema = new mongoose.Schema(
     heartbeatAt: { type: Date, default: null },
     lowBalanceWarnedAt: { type: Date, default: null },
     stopReason: { type: String, default: '' },
+    /** Dedicated game server: one pod per session, torn down on stop. */
+    dedicated: { type: Boolean, default: false, index: true },
+    /** Upstream pod cost and the buyer rate derived from it (USD/hour). */
+    podCostPerHour: { type: Number, default: 0, min: 0 },
+    ratePerHour: { type: Number, default: 0, min: 0 },
+    game: { type: String, default: '' },
+    connectHost: { type: String, default: '' },
+    connectPort: { type: Number, default: 0 },
+    privatePort: { type: Number, default: 0 },
+    readyAt: { type: Date, default: null },
+    podTerminatedAt: { type: Date, default: null },
+    launchError: { type: String, default: '' },
   },
   { timestamps: true }
 );

@@ -35,7 +35,29 @@ const {
   isSandboxLike,
 } = require('../terminal/sandbox-players');
 
+const {
+  isDedicatedProduct,
+  launchDedicatedServer,
+  refreshDedicated,
+} = require('../utils/game-hosting');
+
 const router = express.Router();
+
+function dedicatedInfo(doc) {
+  if (!doc.dedicated) return {};
+  const ready = doc.status === 'live' && doc.connectHost && doc.connectPort;
+  return {
+    dedicated: true,
+    game: doc.game || undefined,
+    ratePerHour: doc.ratePerHour || 0,
+    ratePerMinute: Math.round(((doc.ratePerHour || 0) / 60) * 1e6) / 1e6,
+    connect: ready
+      ? { host: doc.connectHost, port: doc.connectPort, address: `${doc.connectHost}:${doc.connectPort}` }
+      : null,
+    readyAt: doc.readyAt || undefined,
+    launchError: doc.launchError || undefined,
+  };
+}
 
 function publicGame(doc, req, extra = {}) {
   const base = `${req.protocol}://${req.get('host')}/v1/game-sessions/${doc.sessionId}`;
@@ -61,6 +83,7 @@ function publicGame(doc, req, extra = {}) {
     billedMinutes: doc.billedMinutes || 0,
     billedCost: Math.round((doc.billedCost || 0) * 100) / 100,
     createdAt: doc.createdAt,
+    ...dedicatedInfo(doc),
   };
 }
 
@@ -72,7 +95,9 @@ async function expireIdleGameSessions(userId) {
     heartbeatAt: { $ne: null },
     lastActivityAt: { $lt: cutoff },
   });
+  const dedicatedCutoff = Date.now() - gameBillingConfig().dedicatedIdleMs;
   for (const doc of idle) {
+    if (doc.dedicated && new Date(doc.lastActivityAt).getTime() > dedicatedCutoff) continue;
     await stopGameSession(doc, 'idle');
   }
 }
@@ -97,7 +122,8 @@ async function reuseLiveSession(userId, productId, serverId, device) {
   }
   if (!existing) return null;
   existing.lastActivityAt = new Date();
-  existing.status = 'live';
+  // A dedicated server only goes live once its port answers (refreshDedicated).
+  if (!existing.dedicated) existing.status = 'live';
   await existing.save();
   return existing;
 }
@@ -120,6 +146,40 @@ async function sessionPlayerMode(doc, product, server) {
   return doc.streamKind === 'sandbox' ? 'game' : 'terminal';
 }
 
+/** Dedicated game server: one pod per buyer session (see utils/game-hosting). */
+async function startDedicated(req, res, product, { client, device }) {
+  await expireIdleGameSessions(req.user._id);
+  const reused = await reuseLiveSession(req.user._id, product._id, null, device);
+  if (reused) {
+    const fresh = await refreshDedicated(reused, { stop: (d, r) => stopGameSession(d, r, { product }) });
+    return res.json(publicGame(fresh, req, { productSlug: product.slug, hosting: 'aimarkets', playerMode: 'game' }));
+  }
+  let open = await GameSession.countDocuments({ user: req.user._id, status: { $in: ['starting', 'live'] } });
+  if (open >= MAX_GAMES_PER_USER) {
+    await freeOldestGameSlot(req.user._id);
+    open = await GameSession.countDocuments({ user: req.user._id, status: { $in: ['starting', 'live'] } });
+  }
+  if (open >= MAX_GAMES_PER_USER) {
+    return res.status(429).json({ message: 'Too many live sessions. Stop another session and retry.', code: 'TOO_MANY_STREAMS' });
+  }
+  const sessionId = newSessionId('gs');
+  let doc;
+  try {
+    doc = await launchDedicatedServer({ product, user: req.user, sessionId, client, device });
+  } catch (err) {
+    const code = err.code === 'GPU_UNAVAILABLE' ? 'CAPACITY' : err.code || 'PROVIDER_ERROR';
+    return res.status(err.status === 409 ? 503 : 502).json({ message: 'Game server could not be launched right now, please retry.', code });
+  }
+  await audit({
+    sessionId,
+    user: req.user._id,
+    projectId: 'game-server',
+    serverId: String(doc.server),
+    event: 'game_server_launch',
+  });
+  return res.status(201).json(publicGame(doc, req, { productSlug: product.slug, hosting: 'aimarkets', playerMode: 'game' }));
+}
+
 router.post('/', authenticate, requireRoles('seller', 'admin', 'buyer'), async (req, res, next) => {
   try {
     const projectId = String(req.body?.projectId || 'default');
@@ -134,6 +194,7 @@ router.post('/', authenticate, requireRoles('seller', 'admin', 'buyer'), async (
       product = await resolveProduct(productSlug);
       assertDeviceSupported(product, device);
       await assertBuyerAccess(req.user, product);
+      if (isDedicatedProduct(product)) return startDedicated(req, res, product, { client, device, projectId });
       const resolved = await findComputeNode(product, { device });
       if (!resolved) {
         return res.status(503).json({
@@ -253,11 +314,11 @@ router.post('/:sessionId/heartbeat', authenticate, async (req, res, next) => {
     const now = new Date();
     await GameSession.updateOne(
       { _id: doc._id, status: { $in: ['starting', 'live'] } },
-      { $set: { lastActivityAt: now, heartbeatAt: now, status: 'live' } }
+      { $set: doc.dedicated ? { lastActivityAt: now, heartbeatAt: now } : { lastActivityAt: now, heartbeatAt: now, status: 'live' } }
     );
     res.json({
       ok: true,
-      status: 'live',
+      status: doc.dedicated ? doc.status : 'live',
       device: doc.device || 'pc',
       heartbeatMs: HEARTBEAT_MS,
       ...(await sessionBillingState(doc, product)),
@@ -269,8 +330,12 @@ router.post('/:sessionId/heartbeat', authenticate, async (req, res, next) => {
 
 router.get('/:sessionId', authenticate, async (req, res, next) => {
   try {
-    const doc = await GameSession.findOne({ sessionId: req.params.sessionId, user: req.user._id });
+    let doc = await GameSession.findOne({ sessionId: req.params.sessionId, user: req.user._id });
     if (!doc) return res.status(404).json({ message: 'SESSION_EXPIRED', code: 'SESSION_EXPIRED' });
+    if (doc.dedicated && doc.status === 'starting') {
+      const product = doc.product ? await Product.findById(doc.product).lean() : null;
+      doc = await refreshDedicated(doc, { stop: (d, r) => stopGameSession(d, r, { product }) });
+    }
     res.json(publicGame(doc, req));
   } catch (e) {
     next(e);
@@ -342,6 +407,54 @@ if(el.tagName==='VIDEO'){el.src=src;el.play&&el.play().catch(()=>{});} else el.s
   );
 }
 
+function esc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+}
+
+/** Status / address card for a dedicated game server (the buyer plays in their own game client). */
+function dedicatedServerHtml(product) {
+  const name = esc(product?.name || 'Game server');
+  const hint = esc(product?.gameServer?.connectHint || '');
+  return `<!DOCTYPE html>
+<html lang="vi"><head><meta charset="utf-8"/>${viewportMeta}<title>${name}</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b0f17;color:#e8edf5;font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  main{max-width:560px;margin:0 auto;padding:28px 20px}
+  h1{font-size:20px;margin:0 0 6px} .muted{color:#93a0b4;font-size:13px}
+  .card{background:#131a26;border:1px solid #24304a;border-radius:14px;padding:18px;margin-top:16px}
+  .addr{font:600 22px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-all}
+  button{margin-top:10px;background:#e8463a;color:#fff;border:0;border-radius:10px;padding:9px 14px;font-weight:600;cursor:pointer}
+  .dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#f5a524;margin-right:6px}
+  .live .dot{background:#22c55e}
+</style></head><body><main>
+<h1>${name}</h1>
+<div class="muted">Máy chủ riêng cho bạn · Dedicated server for you</div>
+<div class="card" id="st"><span class="dot"></span><span id="msg">Đang khởi động máy chủ (1–5 phút)… · Starting server (1–5 min)…</span></div>
+<div class="card" id="cn" hidden>
+  <div class="muted">Địa chỉ máy chủ · Server address</div>
+  <div class="addr" id="addr"></div>
+  <button type="button" id="cp">Sao chép · Copy</button>
+  ${hint ? `<p class="muted">${hint}</p>` : ''}
+  <p class="muted">Giữ tab này mở khi đang chơi; đóng tab hoặc bấm Dừng sẽ tắt máy chủ và ngừng tính phí. · Keep this tab open while playing; closing it or pressing Stop shuts the server down and stops billing.</p>
+</div>
+<div class="card muted" id="bill"></div>
+</main><script>
+const base=location.pathname.replace(/\/player$/,'')+location.search;
+const $=(id)=>document.getElementById(id);
+$('cp').onclick=()=>navigator.clipboard&&navigator.clipboard.writeText($('addr').textContent);
+async function poll(){
+  try{
+    const r=await fetch(base,{credentials:'include'});const s=await r.json();
+    if(s.connect){$('st').className='card live';$('msg').textContent='Máy chủ đang chạy · Server is live';$('cn').hidden=false;$('addr').textContent=s.connect.address;}
+    else if(s.status==='stopped'||s.status==='error'){$('msg').textContent=s.stopReason==='launch_failed'?'Không khởi động được máy chủ, không tính phí. Vui lòng thử lại. · Launch failed, not billed. Please retry.':'Máy chủ đã dừng · Server stopped';$('cn').hidden=true;return;}
+    if(s.ratePerMinute){$('bill').textContent='Phí · Rate: $'+s.ratePerMinute.toFixed(4)+'/phút · đã tính · billed: $'+(s.billedCost||0).toFixed(2)+' ('+(s.billedMinutes||0)+' phút)';}
+  }catch(e){}
+  setTimeout(poll,5000);
+}
+poll();
+</script></body></html>`;
+}
+
 router.get('/:sessionId/player', authenticate, async (req, res, next) => {
   try {
     const doc = await GameSession.findOne({ sessionId: req.params.sessionId, user: req.user._id });
@@ -356,6 +469,10 @@ router.get('/:sessionId/player', authenticate, async (req, res, next) => {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Cache-Control', 'no-store');
     setPlayerFrameHeaders(res);
+    if (doc.dedicated) {
+      const p = doc.product ? await Product.findById(doc.product).select('name gameServer').lean() : null;
+      return res.send(dedicatedServerHtml(p));
+    }
     const server = await GpuServer.findById(doc.server).select('kind name gpu').lean();
     const product = doc.product ? await Product.findById(doc.product).select('category').lean() : null;
     const playerMode = await sessionPlayerMode(doc, product, server);

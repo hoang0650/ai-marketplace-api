@@ -2,7 +2,8 @@ const { seedPasswordHash } = require('./seed-password');
 const User = require('../models/User');
 const Product = require('../models/Product');
 const GpuServer = require('../models/GpuServer');
-const { CREATOR, buildComputeTestProducts } = require('../data/compute-test-products');
+const { CREATOR, buildComputeTestProducts, RETIRED_GAME_SLUGS } = require('../data/compute-test-products');
+const { buildGameServerProducts } = require('../data/game-server-products');
 const { deleteCachePattern } = require('./cache');
 
 async function ensureCreator() {
@@ -110,9 +111,64 @@ async function ensureComputeTestProducts() {
     nodes += 1;
   }
 
+  // Retired sandbox game demos stay in the DB (past sessions reference them) but are hidden.
+  const retired = await Product.updateMany(
+    { slug: { $in: RETIRED_GAME_SLUGS }, published: true },
+    { $set: { published: false, featured: false } },
+  );
+  const games = await ensureGameServerProducts(creator);
+
   deleteCachePattern('products:*').catch(() => {});
-  console.log(`[compute-test] ensured ${products} listings, ${nodes} sandbox nodes`);
-  return { products, nodes };
+  console.log(
+    `[compute-test] ensured ${products} listings, ${nodes} sandbox nodes, ${games} game servers; unpublished ${retired.modifiedCount || 0} retired demos`,
+  );
+  return { products, nodes, games };
 }
 
-module.exports = { ensureComputeTestProducts };
+/** Dedicated game-server listings (no static node: each session launches its own pod). */
+async function ensureGameServerProducts(creator) {
+  let n = 0;
+  for (const listing of buildGameServerProducts()) {
+    await Product.findOneAndUpdate(
+      { slug: listing.slug },
+      {
+        $set: {
+          name: listing.name,
+          tagline: listing.tagline,
+          description: listing.description,
+          category: listing.category,
+          creator: creator._id,
+          creatorSlug: CREATOR.creatorSlug,
+          creatorName: CREATOR.name,
+          ownershipType: 'PLATFORM_DIRECT',
+          infraProvider: 'runpod',
+          provider: 'runpod',
+          complianceStatus: 'approved',
+          moderationStatus: 'active',
+          published: true,
+          license: 'Máy chủ do AI Markets vận hành; phần mềm game theo giấy phép của nhà phát hành',
+          termsSummary:
+            'Mỗi phiên là một máy chủ riêng, tính phí theo phút từ khi sẵn sàng (chi phí thực + 30%). Dừng phiên sẽ xoá máy chủ và dữ liệu thế giới.',
+          coverUrl: listing.coverUrl,
+          gallery: listing.gallery,
+          pricing: listing.pricing,
+          tags: listing.tags,
+          apiDocsMarkdown: listing.apiDocsMarkdown,
+          changelog: listing.changelog,
+          featured: listing.featured,
+          productType: listing.productType,
+          taxCategory: listing.taxCategory,
+          streaming: listing.streaming,
+          gameServer: listing.gameServer,
+          publishedAt: new Date('2026-10-25T00:00:00.000Z'),
+        },
+        $setOnInsert: { slug: listing.slug, rating: listing.rating, reviewCount: listing.reviewCount, salesCount: 0 },
+      },
+      { upsert: true, new: true },
+    );
+    n += 1;
+  }
+  return n;
+}
+
+module.exports = { ensureComputeTestProducts, ensureGameServerProducts };

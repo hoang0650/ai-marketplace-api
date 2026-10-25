@@ -142,75 +142,10 @@ function buildComputeTestProducts() {
         providerServerId: 'testnode-gpu-l40s-infer',
       },
     }),
-    row({
-      slug: 'game-sandbox-arcade',
-      name: 'Cloud Arcade (sandbox)',
-      tagline: 'Play on a weak phone — demo stream, D-pad, landscape.',
-      description:
-        'Game server test miễn phí. App/web Play xoay ngang, WebView player, D-pad cảm ứng. Không cần GPU local.',
-      category: 'game-server',
-      coverUrl: COVER.arcade,
-      gallery: [COVER.arcade, COVER.game],
-      pricing: { model: 'free', price: 0, currency: 'USD', usageUnit: 'minute', usageRate: 0 },
-      tags: ['game', 'sandbox', 'mobile', 'test', 'stream'],
-      featured: true,
-      rating: 4.9,
-      reviewCount: 41,
-      changelog: [{ version: '1.0.0', date: '2026-09-15', notes: 'Free arcade sandbox for mobile Play.' }],
-      apiDocsMarkdown: docs('game-sandbox-arcade', 'game'),
-      node: {
-        name: 'Sandbox arcade node',
-        kind: 'game',
-        gpu: 'NVIDIA RTX 4090 (sandbox)',
-        providerServerId: 'testnode-game-sandbox-arcade',
-      },
-    }),
-    row({
-      slug: 'game-cloud-desktop',
-      name: 'Cloud Game Desktop',
-      tagline: 'noVNC game box billed per minute — stream to phone or weak PC.',
-      description:
-        'Máy chơi game trên cloud. Listing test: sandbox stream. Gắn RunPod + noVNC :6080 để chơi game PC thật.',
-      category: 'game-server',
-      coverUrl: COVER.game,
-      gallery: [COVER.game],
-      pricing: { model: 'usage', price: 0, currency: 'USD', usageUnit: 'minute', usageRate: 0.08 },
-      tags: ['game', 'novnc', 'cloud', 'test'],
-      featured: true,
-      rating: 4.5,
-      reviewCount: 17,
-      changelog: [{ version: '1.0.0', date: '2026-09-15', notes: 'Per-minute cloud desktop SKU.' }],
-      apiDocsMarkdown: docs('game-cloud-desktop', 'game'),
-      node: {
-        name: 'Cloud desktop test node',
-        kind: 'game',
-        gpu: 'NVIDIA GeForce RTX 4090',
-        providerServerId: 'testnode-game-cloud-desktop',
-      },
-    }),
-    row({
-      slug: 'game-indie-box',
-      name: 'Indie Game Box',
-      tagline: 'Smaller GPU stream for indie / casual titles.',
-      description: 'Game server casual. Test Play trên điện thoại; billing theo phút khi có số dư ví.',
-      category: 'game-server',
-      coverUrl: COVER.indie,
-      gallery: [COVER.indie],
-      pricing: { model: 'usage', price: 0, currency: 'USD', usageUnit: 'minute', usageRate: 0.04 },
-      tags: ['game', 'indie', 'stream', 'test'],
-      featured: false,
-      rating: 4.3,
-      reviewCount: 8,
-      changelog: [{ version: '1.0.0', date: '2026-09-15', notes: 'Indie game box SKU.' }],
-      apiDocsMarkdown: docs('game-indie-box', 'game'),
-      node: {
-        name: 'Indie box test node',
-        kind: 'game',
-        gpu: 'NVIDIA RTX 4070',
-        providerServerId: 'testnode-game-indie-box',
-      },
-    }),
   ];
 }
 
-module.exports = { CREATOR, buildComputeTestProducts };
+/** Old sandbox game-stream demos: replaced by real dedicated servers (data/game-server-products.js). */
+const RETIRED_GAME_SLUGS = ['game-sandbox-arcade', 'game-cloud-desktop', 'game-indie-box'];
+
+module.exports = { CREATOR, buildComputeTestProducts, RETIRED_GAME_SLUGS };
