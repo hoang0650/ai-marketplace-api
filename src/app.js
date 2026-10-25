@@ -134,6 +134,8 @@ function createApp() {
   );
   app.use('/v1/studio/film', express.json({ limit: '4mb' }), require('./routes/studio-film'));
   app.use('/v1/studio', express.json({ limit: '12mb' }), require('./routes/studio'));
+  // Skill runs upload input files (≤20 MB, base64) — parsed here before the global 1 MB parser.
+  app.use('/v1/skills', express.json({ limit: '28mb' }));
   app.use(express.json({ limit: '1mb' }));
   app.use(cookieParser());
   // Strip Mongo operators ($, .) from user payloads to prevent operator injection.
@@ -276,6 +278,8 @@ function createApp() {
   app.use('/v1/licenses', licenseRoutes);
   app.use('/v1/content', contentRoutes);
   app.use('/v1/product-files', productFileRoutes);
+  app.use('/v1/datasets', require('./routes/datasets-online'));
+  app.use('/v1/skills', require('./routes/skills-online'));
   app.use('/v1/paypal', paypalRoutes);
   app.use('/v1/gpay', gpayRoutes);
   app.use('/v1/iap', iapRoutes);

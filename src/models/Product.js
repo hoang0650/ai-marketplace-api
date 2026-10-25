@@ -70,6 +70,8 @@ const streamingSchema = new mongoose.Schema(
 const contentMetaSchema = new mongoose.Schema(
   {
     kind: { type: String, enum: ['voice', 'series', 'story', 'skill', 'dataset', ''], default: '' },
+    /** Third-party skill packs: admin approval before their code runs server-side (online-only runs). */
+    onlineRunApproved: { type: Boolean, default: false },
     /** clone = seller MP3; preset = platform VieNeu voice */
     voiceSource: { type: String, enum: ['', 'clone', 'preset'], default: '' },
     voiceModes: { type: [String], default: [] },

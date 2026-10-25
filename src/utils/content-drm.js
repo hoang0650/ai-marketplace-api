@@ -69,13 +69,15 @@ function prunePlayTokens(now = Date.now()) {
   }
 }
 
-function issuePlayToken({ episodeId, productId, licenseId, mime }) {
+function issuePlayToken({ episodeId, productId, licenseId, mime, userId, trace }) {
   prunePlayTokens();
   const payload = Buffer.from(
     JSON.stringify({
       e: String(episodeId),
       p: String(productId),
       l: licenseId ? String(licenseId) : '',
+      u: userId ? String(userId) : '',
+      t: trace ? String(trace) : '',
       m: mime || 'application/octet-stream',
       exp: Date.now() + PLAY_TTL_MS,
     }),
@@ -87,6 +89,8 @@ function issuePlayToken({ episodeId, productId, licenseId, mime }) {
     episodeId: String(episodeId),
     productId: String(productId),
     licenseId: licenseId ? String(licenseId) : '',
+    userId: userId ? String(userId) : '',
+    trace: trace ? String(trace) : '',
     mime: mime || 'application/octet-stream',
     expires: Date.now() + PLAY_TTL_MS,
   });
@@ -122,6 +126,8 @@ function takePlayToken(token) {
     episodeId: String(row.e || ''),
     productId: String(row.p || ''),
     licenseId: String(row.l || ''),
+    userId: String(row.u || ''),
+    trace: String(row.t || ''),
     mime: row.m || 'application/octet-stream',
     expires: Number(row.exp),
   };
@@ -133,9 +139,10 @@ async function findActiveLicense({ buyerId, licenseKey, productId }) {
   const seen = new Set();
   const docs = [];
 
-  if (key) {
+  // A key only counts for the account it was issued to (online-only: keys are not bearer tokens).
+  if (key && buyerId) {
     const byKey = await LicenseKey.findOne({ licenseKey: key });
-    if (byKey) docs.push(byKey);
+    if (byKey && String(byKey.buyer?._id || byKey.buyer || '') === String(buyerId)) docs.push(byKey);
   }
   if (buyerId && pid) {
     const byBuyer = await LicenseKey.find({ buyer: buyerId, product: pid })
