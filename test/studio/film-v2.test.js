@@ -20,13 +20,16 @@ test('film pricing is RunPod cost x1.32 per second / per image, no free quota', 
   assert.equal(fp.filmPricing({ STUDIO_FILM_MARKUP: '0.5' }).perSecond, 0.09);
 });
 
-test('scene seconds split into Wan shot lengths up to 60 s', () => {
-  assert.deepEqual(fp.splitDuration(30), [15, 15]);
-  assert.deepEqual(fp.splitDuration(60), [15, 15, 15, 15]);
-  assert.deepEqual(fp.splitDuration(25), [15, 10]);
-  assert.deepEqual(fp.splitDuration(20), [15, 5]);
-  assert.deepEqual(fp.splitDuration(7), [5]);
-  assert.deepEqual(fp.splitDuration(400), [15, 15, 15, 15]);
+test('scene seconds split into the 8 s / 5 s clips the Wan endpoint accepts, up to 60 s', () => {
+  assert.deepEqual(fp.splitDuration(30), [8, 8, 8, 5]);
+  assert.deepEqual(fp.splitDuration(60), [8, 8, 8, 8, 8, 8, 5, 5]);
+  assert.deepEqual(fp.splitDuration(40), [8, 8, 8, 8, 8]);
+  assert.deepEqual(fp.splitDuration(5), [5]);
+  assert.deepEqual(fp.splitDuration(400), [8, 8, 8, 8, 8, 8, 5, 5]);
+  for (let t = 5; t <= 60; t += 5) {
+    const a = fp.splitDuration(t); const sum = a.reduce((x, y) => x + y, 0);
+    assert.ok(a.every((d) => fp.WAN_DURATIONS.includes(d)) && sum >= t - 2 && sum <= Math.min(t + 1, 60), `${t} -> ${a}`);
+  }
 });
 
 test('refund covers exactly the seconds/images that were not produced', () => {
@@ -45,30 +48,30 @@ test('film paths map to the AI service film router only', () => {
 
 test('scene edits replan shots until generated, then mark stale', () => {
   const s = sceneIn({ prompt: 'a hero walks', duration: 30, shots: [{ prompt: 'walks in' }] }, null);
-  assert.deepEqual(s.shots.map((x) => x.duration), [15, 15]);
+  assert.deepEqual(s.shots.map((x) => x.duration), [8, 8, 8, 5]);
   assert.equal(s.shots[0].prompt, 'walks in');
   const longer = sceneIn({ duration: 60 }, s);
-  assert.equal(longer.shots.length, 4);
+  assert.equal(longer.shots.length, 8);
   assert.equal(longer.shots[0].prompt, 'walks in');
   longer.shots[0].versions = [{ v: 1, videoKey: 'k' }];
   longer.shots[0].active = 0;
   longer.status = 'ready';
   const shorter = sceneIn({ duration: 20 }, longer);
   assert.equal(shorter.status, 'stale');
-  assert.equal(shorter.shots.length, 4);
+  assert.equal(shorter.shots.length, 8);
   assert.equal(sceneIn({ duration: 3 }, null).duration, 5);
 });
 
 test('scene plan: text-only scenes pay one first-frame image, chained scenes reuse the previous last frame', () => {
   const p = new FilmProject({ user: new mongoose.Types.ObjectId(), scenes: [
-    { sid: 'a', prompt: 'x', duration: 15, shots: [{ sid: 's1', duration: 15, active: 0, versions: [{ v: 1, videoKey: 'v', frameKey: 'f' }] }] },
+    { sid: 'a', prompt: 'x', duration: 15, shots: [{ sid: 's1', duration: 8, active: 0, versions: [{ v: 1, videoKey: 'v', frameKey: 'f' }] }] },
     { sid: 'b', prompt: 'y', duration: 30, chainPrev: true },
     { sid: 'c', prompt: 'z', duration: 60 },
   ] });
   const b = scenePlan(p, p.scenes[1], 1);
-  assert.deepEqual([b.seconds, b.images, b.price, b.start.key], [30, 0, 2.376, 'f']);
+  assert.deepEqual([b.seconds, b.images, b.price, b.start.key], [29, 0, 2.2968, 'f']);
   const c = scenePlan(p, p.scenes[2], 2);
-  assert.deepEqual([c.seconds, c.images, c.price], [60, 1, 4.7784]);
+  assert.deepEqual([c.seconds, c.images, c.price], [58, 1, 4.62]);
   assert.equal(renderPlan({ scenes: [{ narration: 'a'.repeat(2000) }] }).chars, 2000);
 });
 

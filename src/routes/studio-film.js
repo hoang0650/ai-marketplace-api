@@ -458,7 +458,7 @@ router.post('/projects/:id/scenes/:sid/generate', authenticate, async (req, res,
     let shots;
     try {
     const gen = (scene.generation || 0) + 1;
-    shots = planShots({ ...scene.toObject(), duration: plan.seconds });
+    shots = planShots(scene.toObject());
     const base = (n) => key(p, 'scenes', scene.sid, n);
     const kfKey = plan.start ? '' : base(`key-g${gen}.jpg`);
     const startKey = plan.start ? base(`start-g${gen}.jpg`) : '';
