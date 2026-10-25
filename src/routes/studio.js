@@ -11,6 +11,7 @@ const MAX_B64 = 11_000_000;
 const { gpuConfig, gpuFetch, promoInfo } = require('../utils/aimx-gpu');
 const { failMessage, transient } = require('../utils/studio-errors');
 const { voiceLang, voiceFx } = require('../utils/voice-params');
+const { charCount } = require('../utils/usage-pricing');
 
 const RETRY_MAX_BYTES = 200_000; // retry small jobs (text-only TTS) once on transient worker errors
 
@@ -22,6 +23,7 @@ const MESSAGES = {
   FREE_QUOTA_EXHAUSTED: 'Bạn đã dùng hết lượt miễn phí hôm nay.',
   JOB_ACTIVE: 'Bạn đang có một video đang tạo. Vui lòng đợi hoàn tất.',
   QUEUE_FULL: 'Hàng đợi GPU đang đầy, vui lòng thử lại sau ít phút.',
+  VOICES_UNAVAILABLE: 'Chưa tải được danh sách giọng, vui lòng tải lại trang.',
   BAD_INPUT: 'Dữ liệu không hợp lệ.',
 };
 function fail(res, status, code, extra = {}) {
@@ -49,12 +51,14 @@ async function submit(req, res, next, kind, payload, meta) {
     if (active > 0) return fail(res, 429, 'JOB_ACTIVE');
     const usedToday = await usage(userId, kind);
     const { available } = await getAvailableBalance(userId);
-    const d = decide({ kind, usedToday, available, promo: promoInfo().active });
+    const chars = kind === 'tts' ? charCount(payload.text) : undefined;
+    const d = decide({ kind, usedToday, available, promo: promoInfo().active, chars });
     if (!d.ok) return fail(res, d.status, d.code, { price: d.price });
 
     const path = { fast: '/v1/video/fast', talking: '/v1/video/talking', tts: '/v1/tts', film: '/v1/film' }[kind];
     const r = await gpuFetch(path, { method: 'POST', body: JSON.stringify(payload), timeout: 60000 });
     if (r.status === 429) return fail(res, 429, 'QUEUE_FULL');
+    if (r.status === 400) return fail(res, 400, 'BAD_INPUT');
     if (!r.ok) return fail(res, 502, 'STUDIO_UNAVAILABLE');
     const remote = await r.json();
 
@@ -63,7 +67,7 @@ async function submit(req, res, next, kind, payload, meta) {
       tx = await WalletTx.create({
         user: userId, type: 'debit', amount: d.charge, status: 'completed',
         note: `AI Studio ${{ fast: 'video nhanh', talking: 'avatar nói', tts: 'giọng nói', film: 'phim AI' }[kind]} (${remote.id.slice(0, 8)})`,
-        meta: { channel: 'studio', kind, remoteId: remote.id },
+        meta: { channel: 'studio', kind, remoteId: remote.id, ...(chars != null ? { unit: 'characters', quantity: chars } : {}) },
       });
     }
     const small = JSON.stringify(payload).length <= RETRY_MAX_BYTES;
@@ -71,7 +75,7 @@ async function submit(req, res, next, kind, payload, meta) {
       user: userId, kind, remoteId: remote.id, status: remote.status || 'queued', free: d.free, charged: d.charge,
       walletTx: tx?._id || null, retryPayload: small ? payload : null, ...meta,
     });
-    res.status(202).json({ id: String(job._id), status: job.status, free: d.free, charged: d.charge, remainingFree: d.remainingFree, position: remote.position });
+    res.status(202).json({ id: String(job._id), status: job.status, free: d.free, charged: d.charge, remainingFree: d.remainingFree, position: remote.position, ...(chars != null ? { characters: chars } : {}) });
   } catch (e) {
     if (e.code === 'STUDIO_UNAVAILABLE' || e.name === 'TimeoutError' || e.cause) return fail(res, 503, 'STUDIO_UNAVAILABLE');
     next(e);
@@ -88,7 +92,7 @@ router.get('/quota', authenticate, async (req, res, next) => {
       enabled: Boolean(gpu()),
       fast: { used: fast, free: cap('fast'), price: promo.active ? 0 : p.fast.price },
       talking: { used: talking, free: cap('talking'), price: promo.active ? 0 : p.talking.price },
-      tts: { used: tts, free: cap('tts'), price: promo.active ? 0 : p.tts.price },
+      tts: { used: tts, free: cap('tts'), price: promo.active ? 0 : p.tts.perKChars, unit: 'characters', per: 1000, minCharge: promo.active ? 0 : p.tts.minCharge },
       film: { used: film, free: cap('film'), price: promo.active ? 0 : p.film.price },
       available: bal.available,
       promo: promoInfo(),
@@ -144,14 +148,16 @@ router.get('/voice-options', async (req, res, next) => {
   }
 });
 
+/** Preset voices. The AI service serves a static catalog (Redis-cached) when the GPU is cold or offline. */
 router.get('/voices', authenticate, async (req, res, next) => {
   try {
-    if (!gpu()) return fail(res, 503, 'STUDIO_UNAVAILABLE');
-    const r = await gpuFetch('/v1/voices');
-    if (!r.ok) return fail(res, 502, 'STUDIO_UNAVAILABLE');
+    if (!gpu()) return fail(res, 503, 'VOICES_UNAVAILABLE');
+    const r = await gpuFetch('/v1/voices', { timeout: 15000 });
+    if (!r.ok) return fail(res, 502, 'VOICES_UNAVAILABLE');
+    res.set('cache-control', 'private, max-age=300');
     res.json(await r.json());
   } catch (e) {
-    if (e.code === 'STUDIO_UNAVAILABLE' || e.name === 'TimeoutError' || e.cause) return fail(res, 503, 'STUDIO_UNAVAILABLE');
+    if (e.code === 'STUDIO_UNAVAILABLE' || e.name === 'TimeoutError' || e.cause) return fail(res, 503, 'VOICES_UNAVAILABLE');
     next(e);
   }
 });
@@ -199,6 +205,7 @@ async function refreshJob(job) {
       if (j.expires_at) job.expiresAt = new Date(j.expires_at * 1000);
       job.$locals.position = j.position;
       job.$locals.progress = j.progress || null;
+      job.$locals.stage = j.stage || null;
     }
     if (job.status === 'failed' && job.retries < 1 && job.retryPayload && transient(job.error)) {
       // One automatic resubmit when the worker hiccups; the user keeps polling the same job.
@@ -251,7 +258,7 @@ router.get('/jobs/:id', authenticate, async (req, res, next) => {
     const ok = job.status === 'succeeded' && (!job.expiresAt || job.expiresAt > new Date());
     res.json({
       id: String(job._id), kind: job.kind, status: job.status, position: job.$locals.position ?? null,
-      progress: job.$locals.progress ?? null, timings: job.timings, error: job.status === 'failed' ? failMessage(job.kind, job.error, job.refunded) : '',
+      progress: job.$locals.progress ?? null, stage: job.$locals.stage ?? null, timings: job.timings, error: job.status === 'failed' ? failMessage(job.kind, job.error, job.refunded) : '',
       charged: job.charged, free: job.free, refunded: job.refunded, expiresAt: job.expiresAt,
       videoUrl: ok && job.kind !== 'tts' ? `/v1/studio/jobs/${job._id}/video` : null,
       audioUrl: ok && job.kind === 'tts' ? `/v1/studio/jobs/${job._id}/audio` : null,
