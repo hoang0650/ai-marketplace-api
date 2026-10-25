@@ -383,8 +383,11 @@ router.post('/run', authenticate, async (req, res, next) => {
 async function runGpuVoice(req, product, inferInput) {
   const text = voiceText(inferInput);
   if (!text) return { status: 400, body: { message: 'text is required', code: 'TEXT_REQUIRED' } };
-  const lang = aimxTts.langOf(inferInput);
   const meta = product.contentMeta || {};
+  // Listings declare the languages their voice serves (e.g. Chatterbox has no vi); fall back to the first one.
+  const served = Array.isArray(meta.voiceLanguages) ? meta.voiceLanguages.filter(Boolean) : [];
+  let lang = aimxTts.langOf(inferInput);
+  if (served.length && !served.includes(lang)) lang = served[0];
   let voice;
   let sampleBuffer;
   if (isVoicePresetCategory(product.category) || meta.voiceSource === 'preset') {
@@ -442,7 +445,7 @@ async function runGpuVoice(req, product, inferInput) {
       body: {
         ok: true, id: event._id.toString(), status: 'COMPLETED', provider: 'AI Markets GPU', model: audio.model, endpointId: '',
         delayTime: 0, executionTime: Date.now() - started,
-        output: { kind: 'audio', format: 'wav', text, audio_url: voiceAudioPublicUrl(req, event._id), timings: audio.timings, cost: charged },
+        output: { kind: 'audio', format: 'wav', text, language: lang, audio_url: voiceAudioPublicUrl(req, event._id), timings: audio.timings, cost: charged },
         usage, cost: charged, providerCost: 0, platformFee, sellerNet, currency: 'USD',
       },
     };

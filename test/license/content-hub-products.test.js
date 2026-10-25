@@ -13,7 +13,7 @@ describe('content hub seed products', () => {
   test('covers voice clone, watch films, and stories', () => {
     const cats = products.map((p) => p.category);
     assert.equal(cats.filter((c) => c === 'voice-clone').length, 4);
-    assert.ok(cats.filter((c) => c === 'voice-preset').length >= 20);
+    assert.equal(cats.filter((c) => c === 'voice-preset').length, 7);
     assert.equal(cats.filter((c) => c === 'ai-film-series').length, 4);
     assert.equal(cats.filter((c) => c === 'story-book').length, 4);
     assert.equal(cats.includes('text-to-video'), false);
@@ -36,11 +36,12 @@ describe('content hub seed products', () => {
 
   test('platform presets sell the same char + day/month/year license', () => {
     const presets = products.filter((p) => p.category === 'voice-preset').map(hubProductFields);
-    assert.ok(presets.length >= 20);
+    assert.equal(presets.length, 7);
     for (const p of presets) {
       assert.equal(p.contentMeta.voiceSource, 'preset');
       assert.ok(p.contentMeta.presetVoiceName);
-      assert.deepEqual(p.contentMeta.voiceModes, ['tts', 'stt']);
+      assert.deepEqual(p.contentMeta.voiceModes, ['tts']);
+      assert.ok(p.contentMeta.voiceLanguages.length >= 23);
       assert.ok(p.contentMeta.licensePrices.day > 0);
       assert.ok(p.contentMeta.licensePrices.month > 0);
       assert.ok(p.contentMeta.licensePrices.year > 0);

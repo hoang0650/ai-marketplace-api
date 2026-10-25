@@ -6,7 +6,7 @@ const { inferProductType } = require('./marketplace-types');
 const { taxCategoryFromProduct } = require('../finance/tax-category');
 const { normalizeContentMeta, isVoiceCategory, isVoiceCloneCategory, isVoicePresetCategory, isLicenseCategory } = require('../utils/license-keys');
 const { voiceCloneRuntime, voicePresetRuntime } = require('../utils/voice-clone');
-const { VIENEU_PRESET_VOICES } = require('./vieneu-voices');
+const { platformVoiceDefs, platformVoiceProduct } = require('./platform-voices');
 
 const SAMPLE_VOICE = {
   mai: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
@@ -71,86 +71,17 @@ function voiceProduct(partial) {
   };
 }
 
-function voicePresetProduct(partial) {
-  const month = Number(partial.licensePrices?.month) || 4.9;
-  return {
-    creatorId: partial.creatorId,
-    creatorSlug: partial.creatorSlug || 'ai-markets',
-    creatorName: partial.creatorName || 'AI Markets',
-    slug: partial.slug,
-    id: `p-voice-preset-${partial.slug}`,
-    name: partial.name,
-    tagline: partial.tagline,
-    description: partial.description,
-    category: 'voice-preset',
-    coverUrl: partial.coverUrl,
-    gallery: [partial.coverUrl],
-    pricing: {
-      model: 'subscription',
-      price: month,
-      currency: 'USD',
-      interval: 'month',
-      usageUnit: '1K characters',
-      usageRate: partial.usageRate ?? 0.015,
-    },
-    contentMeta: {
-      kind: 'voice',
-      voiceSource: 'preset',
-      voiceModes: ['tts', 'stt'],
-      presetVoiceId: partial.presetVoiceId,
-      presetVoiceName: partial.presetVoiceName,
-      creditUnit: 'character',
-      charactersPerCredit: 1000,
-      cloneStatus: 'ready',
-      licenseTerm: 'month',
-      licensePrices: {
-        day: Number(partial.licensePrices?.day) || 0.99,
-        month,
-        year: Number(partial.licensePrices?.year) || 39,
-      },
-    },
-    rating: partial.rating || 4.7,
-    reviewCount: partial.reviewCount || 12,
-    installCount: partial.installCount || 80,
-    salesCount: partial.installCount || 80,
-    tags: ['voice-preset', 'vieneu', partial.region, partial.gender].filter(Boolean),
-    apiDocsMarkdown:
-      partial.apiDocsMarkdown ||
-      `Platform preset **${partial.presetVoiceName}** (VieNeu-TTS-v3-Turbo TTS + vinai/PhoWhisper-large STT).\n\n- Pay per character without a license\n- Or buy day / month / year AIM-xxxx — TTS/STT included while active`,
-    changelog: [{ version: '1.0.0', date: '2026-09-15', notes: 'Platform VieNeu preset listing.' }],
-    featured: !!partial.featured,
-    publishedAt: partial.publishedAt || '2026-09-15T00:00:00.000Z',
-    ownershipType: 'PLATFORM_DIRECT',
-  };
-}
-
+/** Platform voices ("Giọng sàn") — same definitions the live listings are seeded from. */
 function buildPresetVoiceProducts() {
-  return VIENEU_PRESET_VOICES.map((v, i) =>
-    voicePresetProduct({
-      slug: `vieneu-${v.id}`,
-      name: `VieNeu · ${v.name}`,
-      tagline: `${v.region} · ${v.character} · ${v.gender}`,
-      description: `Giọng sàn AI Markets (VieNeu ${v.name}, ${v.region}, ${v.character}). Bán theo ký tự và/hoặc license ngày/tháng/năm. STT: vinai/PhoWhisper-large.`,
-      presetVoiceId: v.id,
-      presetVoiceName: v.name,
-      region: v.region,
-      gender: v.gender,
-      coverUrl: cover(
-        [
-          'photo-1511671782779-c97d3d27a1d4',
-          'photo-1478737270239-2f02b77fc618',
-          'photo-1516280440615-5ffb8f8d3b3e',
-          'photo-1493225457124-a3eb161ffa5f',
-        ][i % 4],
-      ),
-      usageRate: 0.012 + (i % 5) * 0.001,
-      licensePrices: { day: 0.79, month: 3.9 + (i % 4) * 0.5, year: 29 + (i % 4) * 5 },
-      featured: i < 4,
-      installCount: 40 + i * 7,
-    }),
-  );
+  return platformVoiceDefs().map((d) => ({
+    ...platformVoiceProduct(d),
+    creatorSlug: 'ai-markets',
+    creatorName: 'AI Markets',
+    id: `p-voice-preset-${d.slug}`,
+    changelog: [{ version: '1.0.0', date: '2026-10-26', notes: 'Platform voice listing (VieNeu-TTS / Chatterbox multilingual).' }],
+    publishedAt: '2026-10-26T00:00:00.000Z',
+  }));
 }
-
 
 function licenseProduct({ category, kind, ...partial }) {
   const month = Number(partial.licensePrices.month);
