@@ -21,6 +21,8 @@ const minioCfg = require('../config/minio');
 const { playableSourceUrl } = require('../data/content-hub-products');
 const { fetchSafeHttp } = require('../utils/safe-http-url');
 const online = require('../utils/online-access');
+const storyNarration = require('../utils/story-narration');
+const { gpuConfig, gpuFetch } = require('../utils/aimx-gpu');
 
 const router = express.Router();
 
@@ -259,6 +261,216 @@ router.delete('/episodes/:id', authenticate, requireRoles('seller', 'admin'), as
   }
 });
 
+/* ------------------------------------------------ story narration (TTS synced to text) -- */
+const NARRATION_LANGS = new Set(['vi', 'en', 'zh', 'ja', 'ko', 'fr', 'de', 'es', 'it', 'pt', 'ru', 'ar', 'hi', 'th', 'id', 'ms', 'nl', 'pl', 'tr', 'sv', 'da', 'fi', 'no', 'el', 'he', 'sw']);
+const NARRATION_DAILY = Number(process.env.STORY_NARRATION_DAILY || 40);
+const NARRATION_STALE_MS = 45 * 60e3;
+const narrationPolls = new Map();
+
+async function readChapterText(ep) {
+  const page = resolveEpisodePages(ep)[0] || {};
+  const objectName = page.objectName || ep.objectName;
+  if (!objectName) return null;
+  const stream = await getContentObjectStream(objectName);
+  const chunks = [];
+  let size = 0;
+  for await (const c of stream) {
+    size += c.length;
+    if (size > 2 * 1024 * 1024) throw Object.assign(new Error('Chapter text too large'), { status: 413 });
+    chunks.push(c);
+  }
+  return { text: Buffer.concat(chunks).toString('utf8'), type: page.contentType || ep.contentType || 'text/plain' };
+}
+
+function narrationView(ep) {
+  const n = ep.narration || {};
+  return {
+    id: String(ep._id),
+    title: ep.title,
+    forEpisode: n.forEpisode ? String(n.forEpisode) : null,
+    status: n.status || null,
+    lang: n.lang,
+    voice: n.voice,
+    model: n.model,
+    error: n.error || '',
+    published: ep.published !== false,
+    durationSec: ep.durationSec || 0,
+    segments: (n.segments || []).length,
+    ttsChars: n.ttsChars || 0,
+    finishedAt: n.finishedAt || null,
+  };
+}
+
+/** Pull the AI job into the narration episode; on success publish it and retire older narrations of the chapter. */
+async function refreshNarration(ep) {
+  const n = ep.narration;
+  if (!n || n.status !== 'generating' || !n.jobId) return ep;
+  const r = await gpuFetch(`/film/jobs/${n.jobId}`, { timeout: 15000 }).catch(() => null);
+  if (r && r.status === 404) {
+    n.status = 'failed';
+    n.error = 'lost';
+  } else if (r && r.ok) {
+    const j = await r.json();
+    if (j.status === 'succeeded') {
+      const byId = new Map((j.segments || []).map((t) => [String(t.id), t]));
+      const segs = (n.segments || []).map((sg, i) => {
+        const t = byId.get(String(i)) || {};
+        return { p: sg.p, c0: sg.c0, c1: sg.c1, start: Number(t.start) || 0, end: Number(t.end) || 0 };
+      });
+      const stat = await minioCfg.statContentObject(ep.objectName).catch(() => null);
+      if (!stat || segs.some((sg) => !(sg.end > sg.start))) {
+        n.status = 'failed';
+        n.error = stat ? 'bad timing' : 'audio missing';
+      } else {
+        n.segments = segs;
+        n.status = 'ready';
+        n.model = j.model || n.model;
+        n.ttsChars = Number(j.ttsChars) || n.ttsChars;
+        n.cost = Number(j.cost) || 0;
+        n.finishedAt = new Date();
+        ep.size = Number(stat.size) || 0;
+        ep.contentType = 'audio/mpeg';
+        ep.durationSec = Math.round(Number(j.duration) || 0);
+        ep.published = true;
+      }
+    } else if (j.status === 'failed') {
+      n.status = 'failed';
+      n.error = String(j.error || 'failed').slice(0, 500);
+    }
+  }
+  if (n.status === 'generating' && Date.now() - new Date(ep.updatedAt || ep.createdAt).getTime() > NARRATION_STALE_MS) {
+    n.status = 'failed';
+    n.error = 'timeout';
+  }
+  ep.markModified('narration');
+  await ep.save();
+  if (n.status === 'ready') {
+    // Older narrations of the same chapter stay in storage (reversible) but leave the reader.
+    await ContentEpisode.updateMany(
+      { product: ep.product, kind: 'audio', _id: { $ne: ep._id }, 'narration.forEpisode': n.forEpisode },
+      { $set: { published: false } },
+    );
+    await syncEpisodeCount(ep.product);
+  }
+  return ep;
+}
+
+function pollNarration(id) {
+  if (narrationPolls.has(String(id))) return;
+  const started = Date.now();
+  const tick = async () => {
+    try {
+      const ep = await ContentEpisode.findById(id);
+      if (ep) await refreshNarration(ep);
+      if (!ep || ep.narration?.status !== 'generating' || Date.now() - started > NARRATION_STALE_MS + 60e3) {
+        narrationPolls.delete(String(id));
+        return;
+      }
+    } catch {
+      /* next tick */
+    }
+    narrationPolls.set(String(id), setTimeout(tick, 6000).unref());
+  };
+  narrationPolls.set(String(id), setTimeout(tick, 6000).unref());
+}
+
+/**
+ * Seller / admin: narrate a text chapter. Each sentence is synthesized on its own (VieNeu for vi, Chatterbox for
+ * other languages) so the reader gets exact start/end times and highlights what is being read.
+ * Body: { lang?: 'vi', voice?: 'Binh'|'Ngoc'|…|'default' }. 202 + narration view; poll GET below.
+ */
+router.post('/episodes/:id/narration', authenticate, async (req, res, next) => {
+  try {
+    const chapter = await ContentEpisode.findById(req.params.id).catch(() => null);
+    if (!chapter || chapter.kind !== 'text') return res.status(404).json({ message: 'Text chapter not found' });
+    const product = await Product.findById(chapter.product).select('creator category').lean();
+    if (!product || !canManage(req, product)) return res.status(403).json({ message: 'Forbidden' });
+    if (!gpuConfig().enabled) return res.status(503).json({ message: 'Narration unavailable', code: 'STUDIO_UNAVAILABLE' });
+    const lang = String(req.body?.lang || 'vi').toLowerCase().slice(0, 8);
+    if (!NARRATION_LANGS.has(lang)) return res.status(400).json({ message: 'Unsupported language', code: 'BAD_LANG' });
+    const voice = String(req.body?.voice || '').replace(/[^\w-]+/g, '').slice(0, 40);
+    const busy = await ContentEpisode.findOne({
+      'narration.forEpisode': chapter._id,
+      'narration.status': 'generating',
+      updatedAt: { $gt: new Date(Date.now() - NARRATION_STALE_MS) },
+    }).lean();
+    if (busy) return res.status(409).json({ message: 'Narration already generating', code: 'BUSY', narration: narrationView(busy) });
+    if (req.user.role !== 'admin') {
+      const today = await ContentEpisode.countDocuments({ 'narration.requestedBy': req.user._id, createdAt: { $gt: new Date(Date.now() - 864e5) } });
+      if (today >= NARRATION_DAILY) return res.status(429).json({ message: 'Daily narration limit reached', code: 'RATE_LIMITED' });
+    }
+    const src = await readChapterText(chapter);
+    if (!src) return res.status(400).json({ message: 'Chapter has no stored text', code: 'NO_TEXT' });
+    const seg = storyNarration.segment(src.text, src.type);
+    if (!seg.segments.length) return res.status(400).json({ message: 'Nothing to read', code: 'NO_TEXT' });
+    if (seg.segments.length > 800 || src.text.length > 60000) return res.status(400).json({ message: 'Chapter too long to narrate', code: 'TOO_LONG' });
+
+    const put = await minioCfg.presignContentPut('mp3', 6 * 3600, `narration-${chapter._id}`);
+    const ep = await ContentEpisode.create({
+      product: chapter.product,
+      seller: chapter.seller,
+      index: chapter.index,
+      title: `Sách nói — ${chapter.title}`.slice(0, 200),
+      kind: 'audio',
+      objectName: put.objectName,
+      bucket: put.bucket,
+      contentType: 'audio/mpeg',
+      published: false,
+      free: chapter.free === true,
+      narration: {
+        forEpisode: chapter._id,
+        status: 'generating',
+        lang,
+        voice,
+        model: lang === 'vi' ? 'VieNeu-TTS' : 'Chatterbox-multilingual',
+        textHash: storyNarration.textHash(src.text),
+        paraCount: seg.paras.length,
+        paraSig: seg.paraSig,
+        segments: seg.segments.map(({ p, c0, c1 }) => ({ p, c0, c1, start: 0, end: 0 })),
+        ttsChars: seg.segments.reduce((a, x) => a + x.text.length, 0),
+        requestedBy: req.user._id,
+      },
+    });
+    const r = await gpuFetch('/film/narration', {
+      method: 'POST',
+      timeout: 60000,
+      body: JSON.stringify({ put: put.url, lang, voice, segments: seg.segments.map(({ id, p, text }) => ({ id, p, text })) }),
+    }).catch(() => null);
+    if (!r || !r.ok) {
+      ep.narration.status = 'failed';
+      ep.narration.error = r ? `submit HTTP ${r.status}` : 'submit failed';
+      ep.markModified('narration');
+      await ep.save();
+      return res.status(r && r.status === 400 ? 400 : 503).json({ message: 'Narration could not start', code: 'STUDIO_UNAVAILABLE' });
+    }
+    const job = await r.json();
+    ep.narration.jobId = String(job.id || '');
+    ep.narration.voice = String(job.voice || voice);
+    ep.markModified('narration');
+    await ep.save();
+    pollNarration(ep._id);
+    res.status(202).json({ narration: narrationView(ep) });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ message: err.message });
+    next(err);
+  }
+});
+
+/** Seller / admin: narrations of a chapter (newest first), refreshed from the AI job while generating. */
+router.get('/episodes/:id/narration', authenticate, async (req, res, next) => {
+  try {
+    const chapter = await ContentEpisode.findById(req.params.id).select('product kind').lean().catch(() => null);
+    if (!chapter) return res.status(404).json({ message: 'Not found' });
+    const product = await Product.findById(chapter.product).select('creator').lean();
+    if (!product || !canManage(req, product)) return res.status(403).json({ message: 'Forbidden' });
+    const rows = await ContentEpisode.find({ 'narration.forEpisode': chapter._id }).sort({ createdAt: -1 }).limit(10);
+    for (const row of rows) if (row.narration?.status === 'generating') await refreshNarration(row);
+    res.json({ narrations: rows.map(narrationView) });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.post('/unlock', authenticate, async (req, res, next) => {
   try {
     const episodeId = String(req.body?.episodeId || '').trim();
@@ -320,6 +532,19 @@ router.post('/unlock', authenticate, async (req, res, next) => {
       licenseExpiresAt: gate.license?.expiresAt || null,
       drm: 'aimc-v1',
       free: gate.free === true,
+      // Story narration: per-sentence timing into the reader's paragraphs (offsets + paragraph hashes, no text).
+      narration:
+        episode.kind === 'audio' && episode.narration?.status === 'ready'
+          ? {
+              forEpisode: String(episode.narration.forEpisode),
+              lang: episode.narration.lang,
+              voice: episode.narration.voice,
+              model: episode.narration.model,
+              paraCount: episode.narration.paraCount,
+              paraSig: episode.narration.paraSig,
+              segments: episode.narration.segments.map((g) => [g.p, g.c0, g.c1, g.start, g.end]),
+            }
+          : null,
     });
   } catch (err) {
     if (err.status === 429) return online.sendQuotaError(res, err);
@@ -489,7 +714,7 @@ router.get('/products/:slug/series', optionalAuth, async (req, res, next) => {
       genres: (meta.genres && meta.genres.length ? meta.genres : product.tags || []).slice(0, 12),
       episodeCount: rows.length,
       ...counts,
-      progress: progress ? { episodeId: String(progress.episode), positionSec: progress.positionSec || 0, fraction: progress.fraction || 0, page: progress.page || 0, updatedAt: progress.updatedAt } : null,
+      progress: progress ? { episodeId: String(progress.episode), positionSec: progress.positionSec || 0, fraction: progress.fraction || 0, page: progress.page || 0, updatedAt: progress.updatedAt, audio: progress.audioEpisode ? { episodeId: String(progress.audioEpisode), sec: progress.audioSec || 0 } : null } : null,
       bookmarks: progress ? (progress.bookmarks || []).map(publicBookmark) : [],
       episodes: rows.map(publicEpisode),
     });
@@ -524,11 +749,16 @@ router.put('/products/:slug/progress', authenticate, async (req, res, next) => {
     const positionSec = Math.max(0, Math.min(86400, Number(req.body?.positionSec) || 0));
     const fraction = Math.max(0, Math.min(1, Number(req.body?.fraction) || 0));
     const page = Math.max(0, Math.min(10000, Math.floor(Number(req.body?.page) || 0)));
-    await WatchProgress.updateOne(
-      { user: req.user._id, product: product._id },
-      { $set: { episode: episode._id, positionSec, fraction, page } },
-      { upsert: true },
-    );
+    const set = { episode: episode._id, positionSec, fraction, page };
+    // Story narration resume point (optional): audio episode of the same book + seconds.
+    if (req.body?.audioEpisodeId) {
+      const audio = await ContentEpisode.findOne({ _id: String(req.body.audioEpisodeId), product: product._id, kind: 'audio' }).select('_id').lean().catch(() => null);
+      if (audio) {
+        set.audioEpisode = audio._id;
+        set.audioSec = Math.max(0, Math.min(86400, Number(req.body?.audioSec) || 0));
+      }
+    }
+    await WatchProgress.updateOne({ user: req.user._id, product: product._id }, { $set: set }, { upsert: true });
     res.json({ ok: true });
   } catch (err) {
     next(err);

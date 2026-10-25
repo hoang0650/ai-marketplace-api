@@ -209,6 +209,10 @@ function publicEpisode(doc) {
     synopsis: o.synopsis || '',
     posterUrl: o.posterUrl || '',
     pageCount,
+    // Story narration made from a text chapter: which chapter it reads (timings only come with /unlock).
+    narrationFor: o.narration?.forEpisode ? String(o.narration.forEpisode) : null,
+    narrationStatus: o.narration?.status || null,
+    narrationModel: o.narration?.model || null,
   };
 }
 

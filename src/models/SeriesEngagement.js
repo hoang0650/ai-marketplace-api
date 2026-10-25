@@ -35,6 +35,9 @@ const watchProgressSchema = new mongoose.Schema(
     /** Reader: scroll / page position inside the chapter (0..1) and page index for paged chapters. */
     fraction: { type: Number, default: 0, min: 0, max: 1 },
     page: { type: Number, default: 0, min: 0 },
+    /** Story narration: where the listener stopped (audio episode + seconds), restored when the reader reopens. */
+    audioEpisode: { type: mongoose.Schema.Types.ObjectId, ref: 'ContentEpisode', default: null },
+    audioSec: { type: Number, default: 0, min: 0 },
     bookmarks: { type: [bookmarkSchema], default: [] },
   },
   { timestamps: true, collection: 'watch_progress' }

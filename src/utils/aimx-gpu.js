@@ -21,7 +21,7 @@ function providerPath(path) {
   if (p === '/v1/voice-options') return '/providers/aimx/voice-options';
   if (p === '/health') return '/providers/aimx/health';
   // AI Film on RunPod public endpoints (Wan 2.2 I2V / Qwen-Image-Edit) + ffmpeg joins in the AI service.
-  let f = p.match(/^\/film\/(health|plan|image|scene|render|probe)$/);
+  let f = p.match(/^\/film\/(health|plan|image|scene|render|probe|narration)$/);
   if (f) return `/providers/aimx/film/${f[1]}`;
   f = p.match(/^\/film\/jobs\/([a-f0-9]{32})$/);
   if (f) return `/providers/aimx/film/jobs/${f[1]}`;
