@@ -5,6 +5,7 @@ const GpuServer = require('../models/GpuServer');
 const { CREATOR, buildComputeTestProducts, RETIRED_GAME_SLUGS } = require('../data/compute-test-products');
 const { buildGameServerProducts } = require('../data/game-server-products');
 const { deleteCachePattern } = require('./cache');
+const { gpuRentalConfig } = require('./gpu-rental/config');
 
 async function ensureCreator() {
   let creator =
@@ -148,7 +149,7 @@ async function ensureGameServerProducts(creator) {
           published: true,
           license: 'Máy chủ do AI Markets vận hành; phần mềm game theo giấy phép của nhà phát hành',
           termsSummary:
-            'Mỗi phiên là một máy chủ riêng, tính phí theo phút từ khi sẵn sàng (chi phí thực + 30%). Dừng phiên sẽ xoá máy chủ và dữ liệu thế giới.',
+            `Mỗi phiên là một máy chủ riêng, tính phí theo phút từ khi sẵn sàng (chi phí thực gồm lưu trữ + ${Math.round(gpuRentalConfig().markup * 100)}%). Dừng phiên sẽ xoá máy chủ và dữ liệu thế giới.`,
           coverUrl: listing.coverUrl,
           gallery: listing.gallery,
           pricing: listing.pricing,

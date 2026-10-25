@@ -8,7 +8,7 @@ function gpuRentalConfig() {
   return {
     /** Upstream vendor adapter name inside denglish-api. */
     provider: (process.env.GPU_RENTAL_PROVIDER || 'runpod').trim().toLowerCase(),
-    markup: Math.max(0, num('GPU_RENTAL_MARKUP', 0.3)),
+    markup: Math.max(0, num('GPU_RENTAL_MARKUP', 0.32)),
     minPricePerHour: Math.max(0, num('GPU_RENTAL_MIN_PRICE', 0.2)),
     /** Upstream storage cost per GB-month while running (container + volume) and while stopped (volume). */
     storageRunningGbMonth: Math.max(0, num('GPU_RENTAL_STORAGE_RUNNING_GB_MONTH', 0.1)),

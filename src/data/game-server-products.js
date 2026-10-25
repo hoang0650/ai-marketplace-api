@@ -1,12 +1,13 @@
 /**
  * Dedicated game servers sold by AI Markets: each buyer session launches its own RunPod pod
  * (utils/game-hosting.js), exposes one TCP port on a public IP and is billed per minute at the
- * real pod cost × (1 + GPU_RENTAL_MARKUP). Only TCP games: RunPod pods cannot expose UDP.
+ * (real pod cost + running disk) × (1 + GPU_RENTAL_MARKUP). Only TCP games: RunPod pods cannot expose UDP.
  */
 const { inferProductType } = require('./marketplace-types');
 const { taxCategoryFromProduct } = require('../finance/tax-category');
 const { CREATOR } = require('./runpod-marketplace-products');
 const { dedicatedRatePerHour } = require('../utils/game-hosting');
+const { gpuRentalConfig } = require('../utils/gpu-rental/config');
 
 const CDN = 'https://cdn.aimarkets.vn/aimarkets/aimarkets/playground/game-servers';
 
@@ -25,6 +26,16 @@ function perMinute(costPerHour, diskGb = 10) {
   return Math.round((dedicatedRatePerHour(costPerHour, diskGb) / 60) * 1e6) / 1e6;
 }
 
+/** Markup shown in the copy, read from the same config the billing uses (0.32 → "32"). */
+function markupPct() {
+  return Math.round(gpuRentalConfig().markup * 100);
+}
+
+/** Vietnamese billing sentence shared by every game-server description. */
+function billingNote() {
+  return `Tính phí theo phút: chi phí máy chủ thực tế (gồm lưu trữ) + ${markupPct()}%`;
+}
+
 function docs(p) {
   return `## ${p.name}
 
@@ -36,7 +47,7 @@ Máy chủ riêng (dedicated) chạy trên hạ tầng AI Markets. Mỗi lần b
 3. ${p.gameServer.connectHint}
 4. Giữ tab mở khi chơi. Bấm **Dừng** (hoặc đóng tab hơn 10 phút) để tắt máy chủ và ngừng tính phí.
 
-**Tính phí**: theo phút kể từ khi máy chủ sẵn sàng = chi phí máy chủ thực tế × 1,3 (đã gồm lưu trữ). Khởi động lỗi thì không tính phí. Dữ liệu thế giới không được giữ lại sau khi dừng.
+**Tính phí**: theo phút kể từ khi máy chủ sẵn sàng = (chi phí máy chủ thực tế + lưu trữ) × ${(1 + markupPct() / 100).toFixed(2).replace('.', ',')}. Khởi động lỗi thì không tính phí. Dữ liệu thế giới không được giữ lại sau khi dừng.
 
 **API**
 \`\`\`
@@ -77,7 +88,7 @@ function buildGameServerProducts() {
       description:
         'Máy chủ Minecraft: Java Edition bản gốc (Vanilla, phiên bản mới nhất) chạy riêng cho bạn trên CPU 2 nhân, 8 GB RAM. ' +
         'Bấm Chơi để khởi tạo, nhận địa chỉ IP:port rồi vào Multiplayer → Direct Connection. Yêu cầu tài khoản Minecraft Java bản quyền (online-mode). ' +
-        'Tính phí theo phút theo chi phí máy chủ thực tế + 30%, tự tắt khi bạn dừng. Thế giới mới mỗi lần khởi tạo.',
+        `${billingNote()}, tự tắt khi bạn dừng. Thế giới mới mỗi lần khởi tạo.`,
       coverUrl: `${CDN}/minecraft-java.jpg`,
       gallery: [`${CDN}/minecraft-java.jpg`],
       pricing: { model: 'usage', price: 0, currency: 'USD', usageUnit: 'minute', usageRate: perMinute(TYPICAL_POD_COST_PER_HOUR.cpu3g2) },
@@ -114,7 +125,7 @@ function buildGameServerProducts() {
       description:
         'Máy chủ Minecraft: Java Edition chạy Paper (bản tối ưu hiệu năng, tương thích plugin Bukkit/Spigot) trên CPU 2 nhân, 8 GB RAM. ' +
         'Bấm Chơi để khởi tạo và nhận địa chỉ IP:port. Yêu cầu tài khoản Minecraft Java bản quyền. ' +
-        'Tính phí theo phút theo chi phí máy chủ thực tế + 30%, tự tắt khi bạn dừng.',
+        `${billingNote()}, tự tắt khi bạn dừng.`,
       coverUrl: `${CDN}/minecraft-paper.jpg`,
       gallery: [`${CDN}/minecraft-paper.jpg`],
       pricing: { model: 'usage', price: 0, currency: 'USD', usageUnit: 'minute', usageRate: perMinute(TYPICAL_POD_COST_PER_HOUR.cpu3g2) },
@@ -150,7 +161,7 @@ function buildGameServerProducts() {
       tagline: 'Server Terraria riêng cho tối đa 8 người — tạo thế giới mới, tính phí theo phút.',
       description:
         'Máy chủ Terraria chạy TShock (mã nguồn mở) trên CPU 2 nhân, 4 GB RAM. Bấm Chơi để tạo thế giới nhỏ mới và nhận địa chỉ IP:port, ' +
-        'sau đó vào Multiplayer → Join via IP. Tối đa 8 người chơi. Tính phí theo phút theo chi phí máy chủ thực tế + 30%, tự tắt khi bạn dừng.',
+        `sau đó vào Multiplayer → Join via IP. Tối đa 8 người chơi. ${billingNote()}, tự tắt khi bạn dừng.`,
       coverUrl: `${CDN}/terraria.jpg`,
       gallery: [`${CDN}/terraria.jpg`],
       pricing: { model: 'usage', price: 0, currency: 'USD', usageUnit: 'minute', usageRate: perMinute(TYPICAL_POD_COST_PER_HOUR.cpu3c2) },
