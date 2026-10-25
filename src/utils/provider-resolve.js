@@ -158,6 +158,7 @@ function applyAllowedOverrides(product, resolved, requested = {}) {
 const { toUsd, charCount, tokenUnitSize, charUnitSize, timeUnitSeconds } = require('./usage-pricing');
 
 const round6 = (value) => Math.round(Number(value) * 1e6) / 1e6;
+const { isUpstreamPriced, providerCostParts, sellPrice } = require('./runpod-public-pricing');
 
 /**
  * Compute the USD charge from product pricing + normalized usage.
@@ -174,6 +175,19 @@ function computeUsageCost(product, usage, input = {}, providerCost = 0) {
   if (pricing.model !== 'usage' && !voice) return 0;
   // Sandbox / echo responses never reach a real model — never bill them.
   if (usage?.sandbox) return 0;
+
+  const parts = providerCostParts(providerCost);
+
+  // Platform public-endpoint products: bill exactly what the provider charged for
+  // this call (or its documented formula) plus the platform markup. Resolution and
+  // duration tiers are already folded into that figure, so no unit maths here.
+  if (isUpstreamPriced(product)) {
+    if (parts.upstream > 0) return sellPrice(parts.upstream);
+    if (parts.cost > 0) return round6(parts.cost);
+    // Nothing known about the call: charge the listed "from" price for one unit.
+    const listed = toUsd(Number(pricing.usageRate) || 0, pricing.currency || 'USD');
+    return listed > 0 ? round6(listed) : 0;
+  }
 
   const currency = pricing.currency || 'USD';
   const productUnit = String(pricing.usageUnit || (voice ? 'characters' : 'tokens'));
@@ -216,7 +230,7 @@ function computeUsageCost(product, usage, input = {}, providerCost = 0) {
     return round6((totalTokens / size) * rate);
   }
 
-  const upstream = Number(providerCost);
+  const upstream = parts.cost;
   return Number.isFinite(upstream) && upstream > 0 ? round6(upstream) : 0;
 }
 

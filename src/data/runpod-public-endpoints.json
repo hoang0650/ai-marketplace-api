@@ -12,7 +12,12 @@
         "openaiBaseUrl": null,
         "openaiModel": null,
         "pricing": "$0.02/megapixel",
-        "docsUrl": "https://aimarkets.vn/docs/models/flux-dev"
+        "docsUrl": "https://aimarkets.vn/docs/models/flux-dev",
+        "price": {
+            "rate": 0.02,
+            "unit": "megapixel"
+        },
+        "status": "active"
     },
     {
         "slug": "flux-schnell",
@@ -27,7 +32,12 @@
         "openaiBaseUrl": null,
         "openaiModel": null,
         "pricing": "$0.0024/megapixel",
-        "docsUrl": "https://aimarkets.vn/docs/models/flux-schnell"
+        "docsUrl": "https://aimarkets.vn/docs/models/flux-schnell",
+        "price": {
+            "rate": 0.0024,
+            "unit": "megapixel"
+        },
+        "status": "active"
     },
     {
         "slug": "flux-kontext-dev",
@@ -42,7 +52,12 @@
         "openaiBaseUrl": null,
         "openaiModel": null,
         "pricing": "$0.025/image",
-        "docsUrl": "https://aimarkets.vn/docs/models/flux-kontext-dev"
+        "docsUrl": "https://aimarkets.vn/docs/models/flux-kontext-dev",
+        "price": {
+            "rate": 0.025,
+            "unit": "image"
+        },
+        "status": "active"
     },
     {
         "slug": "p-image-t2i",
@@ -57,7 +72,12 @@
         "openaiBaseUrl": null,
         "openaiModel": null,
         "pricing": "$0.005/image",
-        "docsUrl": "https://aimarkets.vn/docs/models/p-image-t2i"
+        "docsUrl": "https://aimarkets.vn/docs/models/p-image-t2i",
+        "price": {
+            "rate": 0.005,
+            "unit": "image"
+        },
+        "status": "active"
     },
     {
         "slug": "p-image-edit",
@@ -72,7 +92,12 @@
         "openaiBaseUrl": null,
         "openaiModel": null,
         "pricing": "$0.01/image",
-        "docsUrl": "https://aimarkets.vn/docs/models/p-image-edit"
+        "docsUrl": "https://aimarkets.vn/docs/models/p-image-edit",
+        "price": {
+            "rate": 0.01,
+            "unit": "image"
+        },
+        "status": "active"
     },
     {
         "slug": "qwen-image",
@@ -87,7 +112,12 @@
         "openaiBaseUrl": null,
         "openaiModel": null,
         "pricing": "$0.02/image",
-        "docsUrl": "https://aimarkets.vn/docs/models/qwen-image"
+        "docsUrl": "https://aimarkets.vn/docs/models/qwen-image",
+        "price": {
+            "rate": 0.02,
+            "unit": "image"
+        },
+        "status": "active"
     },
     {
         "slug": "qwen-image-lora",
@@ -102,7 +132,12 @@
         "openaiBaseUrl": null,
         "openaiModel": null,
         "pricing": "$0.025/image",
-        "docsUrl": "https://aimarkets.vn/docs/models/qwen-image-lora"
+        "docsUrl": "https://aimarkets.vn/docs/models/qwen-image-lora",
+        "price": {
+            "rate": 0.025,
+            "unit": "image"
+        },
+        "status": "active"
     },
     {
         "slug": "qwen-image-edit",
@@ -117,7 +152,12 @@
         "openaiBaseUrl": null,
         "openaiModel": null,
         "pricing": "$0.02/image",
-        "docsUrl": "https://aimarkets.vn/docs/models/qwen-image-edit"
+        "docsUrl": "https://aimarkets.vn/docs/models/qwen-image-edit",
+        "price": {
+            "rate": 0.02,
+            "unit": "image"
+        },
+        "status": "active"
     },
     {
         "slug": "qwen-image-edit-2511",
@@ -132,7 +172,12 @@
         "openaiBaseUrl": null,
         "openaiModel": null,
         "pricing": "$0.02/image",
-        "docsUrl": "https://aimarkets.vn/docs/models/qwen-image-edit-2511"
+        "docsUrl": "https://aimarkets.vn/docs/models/qwen-image-edit-2511",
+        "price": {
+            "rate": 0.02,
+            "unit": "image"
+        },
+        "status": "active"
     },
     {
         "slug": "qwen-image-edit-2511-lora",
@@ -147,7 +192,12 @@
         "openaiBaseUrl": null,
         "openaiModel": null,
         "pricing": "$0.025/image",
-        "docsUrl": "https://aimarkets.vn/docs/models/qwen-image-edit-2511-lora"
+        "docsUrl": "https://aimarkets.vn/docs/models/qwen-image-edit-2511-lora",
+        "price": {
+            "rate": 0.025,
+            "unit": "image"
+        },
+        "status": "active"
     },
     {
         "slug": "seedream-4-t2i",
@@ -162,7 +212,12 @@
         "openaiBaseUrl": null,
         "openaiModel": null,
         "pricing": "$0.027/image",
-        "docsUrl": "https://aimarkets.vn/docs/models/seedream-4-t2i"
+        "docsUrl": "https://aimarkets.vn/docs/models/seedream-4-t2i",
+        "price": {
+            "rate": 0.027,
+            "unit": "image"
+        },
+        "status": "active"
     },
     {
         "slug": "seedream-4-edit",
@@ -177,7 +232,12 @@
         "openaiBaseUrl": null,
         "openaiModel": null,
         "pricing": "$0.027/image",
-        "docsUrl": "https://aimarkets.vn/docs/models/seedream-4-edit"
+        "docsUrl": "https://aimarkets.vn/docs/models/seedream-4-edit",
+        "price": {
+            "rate": 0.027,
+            "unit": "image"
+        },
+        "status": "active"
     },
     {
         "slug": "wan-2-6-t2i",
@@ -192,7 +252,12 @@
         "openaiBaseUrl": null,
         "openaiModel": null,
         "pricing": "$0.03/image",
-        "docsUrl": "https://aimarkets.vn/docs/models/wan-2-6-t2i"
+        "docsUrl": "https://aimarkets.vn/docs/models/wan-2-6-t2i",
+        "price": {
+            "rate": 0.03,
+            "unit": "image"
+        },
+        "status": "active"
     },
     {
         "slug": "z-image-turbo",
@@ -207,7 +272,12 @@
         "openaiBaseUrl": null,
         "openaiModel": null,
         "pricing": "$0.005/image",
-        "docsUrl": "https://aimarkets.vn/docs/models/z-image-turbo"
+        "docsUrl": "https://aimarkets.vn/docs/models/z-image-turbo",
+        "price": {
+            "rate": 0.005,
+            "unit": "image"
+        },
+        "status": "active"
     },
     {
         "slug": "nano-banana-edit",
@@ -222,7 +292,12 @@
         "openaiBaseUrl": null,
         "openaiModel": null,
         "pricing": "$0.038/image",
-        "docsUrl": "https://aimarkets.vn/docs/models/nano-banana-edit"
+        "docsUrl": "https://aimarkets.vn/docs/models/nano-banana-edit",
+        "price": {
+            "rate": 0.038,
+            "unit": "image"
+        },
+        "status": "retired"
     },
     {
         "slug": "nano-banana-pro-edit",
@@ -236,8 +311,13 @@
         "statusUrlTemplate": "https://api.aimarkets.vn/v1/models/nano-banana-pro-edit/status/{JOB_ID}",
         "openaiBaseUrl": null,
         "openaiModel": null,
-        "pricing": "$0.14–$0.24/image",
-        "docsUrl": "https://aimarkets.vn/docs/models/nano-banana-pro-edit"
+        "pricing": "$0.14/image (1K, 2K), $0.24/image (4K)",
+        "docsUrl": "https://aimarkets.vn/docs/models/nano-banana-pro-edit",
+        "price": {
+            "rate": 0.14,
+            "unit": "image"
+        },
+        "status": "active"
     },
     {
         "slug": "nano-banana-2-edit",
@@ -251,8 +331,13 @@
         "statusUrlTemplate": "https://api.aimarkets.vn/v1/models/nano-banana-2-edit/status/{JOB_ID}",
         "openaiBaseUrl": null,
         "openaiModel": null,
-        "pricing": "$0.0875–$0.175/image",
-        "docsUrl": "https://aimarkets.vn/docs/models/nano-banana-2-edit"
+        "pricing": "$0.0875 (1K), $0.13 (2K), $0.175 (4K) per image",
+        "docsUrl": "https://aimarkets.vn/docs/models/nano-banana-2-edit",
+        "price": {
+            "rate": 0.0875,
+            "unit": "image"
+        },
+        "status": "active"
     },
     {
         "slug": "infinitetalk",
@@ -266,8 +351,13 @@
         "statusUrlTemplate": "https://api.aimarkets.vn/v1/models/infinitetalk/status/{JOB_ID}",
         "openaiBaseUrl": null,
         "openaiModel": null,
-        "pricing": "$0.25 (480p), $0.50 (720p)",
-        "docsUrl": "https://aimarkets.vn/docs/models/infinitetalk"
+        "pricing": "$0.25/video (480p), $0.50/video (720p)",
+        "docsUrl": "https://aimarkets.vn/docs/models/infinitetalk",
+        "price": {
+            "rate": 0.25,
+            "unit": "video"
+        },
+        "status": "active"
     },
     {
         "slug": "kling-v2-1",
@@ -282,7 +372,12 @@
         "openaiBaseUrl": null,
         "openaiModel": null,
         "pricing": "$0.45/5s, $0.90/10s",
-        "docsUrl": "https://aimarkets.vn/docs/models/kling-v2-1"
+        "docsUrl": "https://aimarkets.vn/docs/models/kling-v2-1",
+        "price": {
+            "rate": 0.45,
+            "unit": "video"
+        },
+        "status": "retired"
     },
     {
         "slug": "kling-v2-6-motion-control",
@@ -296,8 +391,13 @@
         "statusUrlTemplate": "https://api.aimarkets.vn/v1/models/kling-v2-6-motion-control/status/{JOB_ID}",
         "openaiBaseUrl": null,
         "openaiModel": null,
-        "pricing": "$0.21/3s, $0.63/10s",
-        "docsUrl": "https://aimarkets.vn/docs/models/kling-v2-6-motion-control"
+        "pricing": "$0.21 (1–3s), $0.42 (4–6s), $0.63 (7–9s) per video",
+        "docsUrl": "https://aimarkets.vn/docs/models/kling-v2-6-motion-control",
+        "price": {
+            "rate": 0.21,
+            "unit": "video"
+        },
+        "status": "active"
     },
     {
         "slug": "kling-video-o1-r2v",
@@ -312,7 +412,12 @@
         "openaiBaseUrl": null,
         "openaiModel": null,
         "pricing": "$0.112/second",
-        "docsUrl": "https://aimarkets.vn/docs/models/kling-video-o1-r2v"
+        "docsUrl": "https://aimarkets.vn/docs/models/kling-video-o1-r2v",
+        "price": {
+            "rate": 0.112,
+            "unit": "second"
+        },
+        "status": "active"
     },
     {
         "slug": "seedance-1-5-pro",
@@ -326,8 +431,53 @@
         "statusUrlTemplate": "https://api.aimarkets.vn/v1/models/seedance-1-5-pro/status/{JOB_ID}",
         "openaiBaseUrl": null,
         "openaiModel": null,
-        "pricing": "$0.024–$0.052/second",
-        "docsUrl": "https://aimarkets.vn/docs/models/seedance-1-5-pro"
+        "pricing": "$0.024/s (480p), $0.052/s (720p)",
+        "docsUrl": "https://aimarkets.vn/docs/models/seedance-1-5-pro",
+        "price": {
+            "rate": 0.024,
+            "unit": "second"
+        },
+        "status": "deprecated"
+    },
+    {
+        "slug": "seedance-2-5-i2v",
+        "name": "Seedance 2.5 I2V",
+        "description": "ByteDance Seedance 2.5 image-to-video with native audio, 4–30s up to 4K.",
+        "kind": "video",
+        "modality": "image-to-video",
+        "endpointId": "16jsvx5ncmm24x",
+        "runsyncUrl": "https://api.aimarkets.vn/v1/models/seedance-2-5-i2v/runsync",
+        "runUrl": "https://api.aimarkets.vn/v1/models/seedance-2-5-i2v/run",
+        "statusUrlTemplate": "https://api.aimarkets.vn/v1/models/seedance-2-5-i2v/status/{JOB_ID}",
+        "openaiBaseUrl": null,
+        "openaiModel": null,
+        "pricing": "$0.18/s (480p), $0.36/s (720p), $0.90/s (1080p), $1.80/s (4K)",
+        "docsUrl": "https://aimarkets.vn/docs/models/seedance-2-5-i2v",
+        "price": {
+            "rate": 0.18,
+            "unit": "second"
+        },
+        "status": "active"
+    },
+    {
+        "slug": "seedance-2-5-t2v",
+        "name": "Seedance 2.5 T2V",
+        "description": "ByteDance Seedance 2.5 text-to-video with native audio and optional reference images, video or audio.",
+        "kind": "video",
+        "modality": "text-to-video",
+        "endpointId": "tdq07exynr7zux",
+        "runsyncUrl": "https://api.aimarkets.vn/v1/models/seedance-2-5-t2v/runsync",
+        "runUrl": "https://api.aimarkets.vn/v1/models/seedance-2-5-t2v/run",
+        "statusUrlTemplate": "https://api.aimarkets.vn/v1/models/seedance-2-5-t2v/status/{JOB_ID}",
+        "openaiBaseUrl": null,
+        "openaiModel": null,
+        "pricing": "$0.18/s (480p), $0.36/s (720p), $0.90/s (1080p), $1.80/s (4K)",
+        "docsUrl": "https://aimarkets.vn/docs/models/seedance-2-5-t2v",
+        "price": {
+            "rate": 0.18,
+            "unit": "second"
+        },
+        "status": "active"
     },
     {
         "slug": "sora-2",
@@ -341,8 +491,13 @@
         "statusUrlTemplate": "https://api.aimarkets.vn/v1/models/sora-2/status/{JOB_ID}",
         "openaiBaseUrl": null,
         "openaiModel": null,
-        "pricing": "$0.40 (4s), $0.80 (8s), $1.20 (12s)",
-        "docsUrl": "https://aimarkets.vn/docs/models/sora-2"
+        "pricing": "$0.40 (4s), $0.80 (8s), $1.20 (12s) per video",
+        "docsUrl": "https://aimarkets.vn/docs/models/sora-2",
+        "price": {
+            "rate": 0.4,
+            "unit": "video"
+        },
+        "status": "active"
     },
     {
         "slug": "sora-2-pro",
@@ -356,8 +511,13 @@
         "statusUrlTemplate": "https://api.aimarkets.vn/v1/models/sora-2-pro/status/{JOB_ID}",
         "openaiBaseUrl": null,
         "openaiModel": null,
-        "pricing": "From $1.20 (720p/4s)",
-        "docsUrl": "https://aimarkets.vn/docs/models/sora-2-pro"
+        "pricing": "$1.20/$2.40/$3.60 (720p, 4/8/12s); $2.00/$4.00/$6.00 (1080p)",
+        "docsUrl": "https://aimarkets.vn/docs/models/sora-2-pro",
+        "price": {
+            "rate": 1.2,
+            "unit": "video"
+        },
+        "status": "active"
     },
     {
         "slug": "wan-2-6-t2v",
@@ -371,8 +531,13 @@
         "statusUrlTemplate": "https://api.aimarkets.vn/v1/models/wan-2-6-t2v/status/{JOB_ID}",
         "openaiBaseUrl": null,
         "openaiModel": null,
-        "pricing": "$0.50/5s (480p), $2.25/10s (720p)",
-        "docsUrl": "https://aimarkets.vn/docs/models/wan-2-6-t2v"
+        "pricing": "$0.50/5s, $1.00/10s, $1.50/15s (720p); $0.75/5s, $1.50/10s, $2.25/15s (1080p)",
+        "docsUrl": "https://aimarkets.vn/docs/models/wan-2-6-t2v",
+        "price": {
+            "rate": 0.5,
+            "unit": "video"
+        },
+        "status": "active"
     },
     {
         "slug": "wan-2-5",
@@ -386,8 +551,13 @@
         "statusUrlTemplate": "https://api.aimarkets.vn/v1/models/wan-2-5/status/{JOB_ID}",
         "openaiBaseUrl": null,
         "openaiModel": null,
-        "pricing": "From $0.25/5s",
-        "docsUrl": "https://aimarkets.vn/docs/models/wan-2-5"
+        "pricing": "$0.25/5s, $0.50/10s (480p); $0.50/$1.00 (720p); $0.75/$1.50 (1080p)",
+        "docsUrl": "https://aimarkets.vn/docs/models/wan-2-5",
+        "price": {
+            "rate": 0.25,
+            "unit": "video"
+        },
+        "status": "active"
     },
     {
         "slug": "wan-2-2-i2v-lora",
@@ -402,7 +572,12 @@
         "openaiBaseUrl": null,
         "openaiModel": null,
         "pricing": "$0.35/5s, $0.56/8s",
-        "docsUrl": "https://aimarkets.vn/docs/models/wan-2-2-i2v-lora"
+        "docsUrl": "https://aimarkets.vn/docs/models/wan-2-2-i2v-lora",
+        "price": {
+            "rate": 0.35,
+            "unit": "video"
+        },
+        "status": "active"
     },
     {
         "slug": "wan-2-2-i2v",
@@ -416,8 +591,13 @@
         "statusUrlTemplate": "https://api.aimarkets.vn/v1/models/wan-2-2-i2v/status/{JOB_ID}",
         "openaiBaseUrl": null,
         "openaiModel": null,
-        "pricing": "$0.30/5s",
-        "docsUrl": "https://aimarkets.vn/docs/models/wan-2-2-i2v"
+        "pricing": "$0.30/5s, $0.48/8s, $0.60/10s, $0.90/15s",
+        "docsUrl": "https://aimarkets.vn/docs/models/wan-2-2-i2v",
+        "price": {
+            "rate": 0.3,
+            "unit": "video"
+        },
+        "status": "active"
     },
     {
         "slug": "wan-2-1-i2v",
@@ -431,8 +611,13 @@
         "statusUrlTemplate": "https://api.aimarkets.vn/v1/models/wan-2-1-i2v/status/{JOB_ID}",
         "openaiBaseUrl": null,
         "openaiModel": null,
-        "pricing": "$0.30/5s",
-        "docsUrl": "https://aimarkets.vn/docs/models/wan-2-1-i2v"
+        "pricing": "$0.06/second ($0.30 per 5s)",
+        "docsUrl": "https://aimarkets.vn/docs/models/wan-2-1-i2v",
+        "price": {
+            "rate": 0.06,
+            "unit": "second"
+        },
+        "status": "active"
     },
     {
         "slug": "wan-2-6-i2v",
@@ -447,7 +632,12 @@
         "openaiBaseUrl": null,
         "openaiModel": null,
         "pricing": "$0.10/s (720p), $0.15/s (1080p)",
-        "docsUrl": "https://aimarkets.vn/docs/models/wan-2-6-i2v"
+        "docsUrl": "https://aimarkets.vn/docs/models/wan-2-6-i2v",
+        "price": {
+            "rate": 0.1,
+            "unit": "second"
+        },
+        "status": "active"
     },
     {
         "slug": "p-video",
@@ -461,8 +651,13 @@
         "statusUrlTemplate": "https://api.aimarkets.vn/v1/models/p-video/status/{JOB_ID}",
         "openaiBaseUrl": null,
         "openaiModel": null,
-        "pricing": "$0.02/s (720p), $0.04/s (1080p)",
-        "docsUrl": "https://aimarkets.vn/docs/models/p-video"
+        "pricing": "$0.02/s (720p), $0.04/s (1080p); draft mode −75%",
+        "docsUrl": "https://aimarkets.vn/docs/models/p-video",
+        "price": {
+            "rate": 0.02,
+            "unit": "second"
+        },
+        "status": "active"
     },
     {
         "slug": "vidu-q3-i2v",
@@ -477,7 +672,12 @@
         "openaiBaseUrl": null,
         "openaiModel": null,
         "pricing": "$0.15/second",
-        "docsUrl": "https://aimarkets.vn/docs/models/vidu-q3-i2v"
+        "docsUrl": "https://aimarkets.vn/docs/models/vidu-q3-i2v",
+        "price": {
+            "rate": 0.15,
+            "unit": "second"
+        },
+        "status": "active"
     },
     {
         "slug": "vidu-q3-t2v",
@@ -492,7 +692,12 @@
         "openaiBaseUrl": null,
         "openaiModel": null,
         "pricing": "$0.15/second",
-        "docsUrl": "https://aimarkets.vn/docs/models/vidu-q3-t2v"
+        "docsUrl": "https://aimarkets.vn/docs/models/vidu-q3-t2v",
+        "price": {
+            "rate": 0.15,
+            "unit": "second"
+        },
+        "status": "active"
     },
     {
         "slug": "hailuo-02-std",
@@ -507,7 +712,12 @@
         "openaiBaseUrl": null,
         "openaiModel": null,
         "pricing": "$0.0383/second",
-        "docsUrl": "https://aimarkets.vn/docs/models/hailuo-02-std"
+        "docsUrl": "https://aimarkets.vn/docs/models/hailuo-02-std",
+        "price": {
+            "rate": 0.0383,
+            "unit": "second"
+        },
+        "status": "active"
     },
     {
         "slug": "granite-4",
@@ -522,7 +732,12 @@
         "openaiBaseUrl": "https://ai.aimarkets.vn/v1",
         "openaiModel": "ibm-granite/granite-4.0-h-small",
         "pricing": "$10.00/1M tokens",
-        "docsUrl": "https://aimarkets.vn/docs/models/granite-4"
+        "docsUrl": "https://aimarkets.vn/docs/models/granite-4",
+        "price": {
+            "rate": 10.0,
+            "unit": "1M tokens"
+        },
+        "status": "active"
     },
     {
         "slug": "moonshot-kimi",
@@ -536,8 +751,15 @@
         "statusUrlTemplate": "https://api.aimarkets.vn/v1/models/moonshot-kimi/status/{JOB_ID}",
         "openaiBaseUrl": "https://ai.aimarkets.vn/v1",
         "openaiModel": "kimi-k2.6",
-        "pricing": "$4.00–$15.00/1M tokens",
-        "docsUrl": "https://aimarkets.vn/docs/models/moonshot-kimi"
+        "pricing": "$0.95/1M input tokens, $4.00/1M output tokens (K2.6, K2.7 Code); K3 $3.00/$15.00",
+        "docsUrl": "https://aimarkets.vn/docs/models/moonshot-kimi",
+        "price": {
+            "rate": 4.0,
+            "unit": "1M tokens",
+            "inputRate": 0.95,
+            "outputRate": 4.0
+        },
+        "status": "active"
     },
     {
         "slug": "qwen3-32b",
@@ -552,7 +774,12 @@
         "openaiBaseUrl": "https://ai.aimarkets.vn/v1",
         "openaiModel": "Qwen/Qwen3-32B-AWQ",
         "pricing": "$10.00/1M tokens",
-        "docsUrl": "https://aimarkets.vn/docs/models/qwen3-32b"
+        "docsUrl": "https://aimarkets.vn/docs/models/qwen3-32b",
+        "price": {
+            "rate": 10.0,
+            "unit": "1M tokens"
+        },
+        "status": "active"
     },
     {
         "slug": "chatterbox-turbo",
@@ -567,7 +794,12 @@
         "openaiBaseUrl": null,
         "openaiModel": null,
         "pricing": "$0.001/second",
-        "docsUrl": "https://aimarkets.vn/docs/models/chatterbox-turbo"
+        "docsUrl": "https://aimarkets.vn/docs/models/chatterbox-turbo",
+        "price": {
+            "rate": 0.001,
+            "unit": "second"
+        },
+        "status": "active"
     },
     {
         "slug": "minimax-speech",
@@ -582,7 +814,12 @@
         "openaiBaseUrl": null,
         "openaiModel": null,
         "pricing": "$0.05/1K chars",
-        "docsUrl": "https://aimarkets.vn/docs/models/minimax-speech"
+        "docsUrl": "https://aimarkets.vn/docs/models/minimax-speech",
+        "price": {
+            "rate": 0.05,
+            "unit": "1K chars"
+        },
+        "status": "active"
     },
     {
         "slug": "gpt-oss-120b",
@@ -597,7 +834,12 @@
         "openaiBaseUrl": "https://ai.aimarkets.vn/v1",
         "openaiModel": "gpt-oss-120b",
         "pricing": "$10.00/1M tokens",
-        "docsUrl": "https://aimarkets.vn/docs/models/gpt-oss-120b"
+        "docsUrl": "https://aimarkets.vn/docs/models/gpt-oss-120b",
+        "price": {
+            "rate": 10.0,
+            "unit": "1M tokens"
+        },
+        "status": "active"
     },
     {
         "slug": "cogito-671b",
@@ -612,6 +854,11 @@
         "openaiBaseUrl": "https://ai.aimarkets.vn/v1",
         "openaiModel": "cogito-671b-v2-1-fp8-dynamic",
         "pricing": "$0.50/1M tokens",
-        "docsUrl": "https://aimarkets.vn/docs/models/cogito-671b"
+        "docsUrl": "https://aimarkets.vn/docs/models/cogito-671b",
+        "price": {
+            "rate": 0.5,
+            "unit": "1M tokens"
+        },
+        "status": "retired"
     }
 ]

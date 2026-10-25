@@ -5,15 +5,24 @@
  */
 const catalog = require('./runpod-public-endpoints.json');
 const { publicCatalogUrls } = require('../utils/gateway-urls');
+const { sellPrice, sellPricingText } = require('../utils/runpod-public-pricing');
 
+/** Public view: our sell prices only; the provider's base price never leaves the API. */
 function withPublicUrls(entry) {
   const urls = publicCatalogUrls(entry.slug, { openai: !!entry.openaiModel });
-  return { ...entry, ...urls };
+  const { price, ...rest } = entry;
+  return {
+    ...rest,
+    ...urls,
+    pricing: sellPricingText(entry.pricing),
+    price: price ? { rate: sellPrice(price.rate), unit: price.unit, currency: 'USD' } : undefined,
+  };
 }
 
 function listRunpodPublicEndpoints({ kind, modality, q } = {}) {
   const query = (q || '').trim().toLowerCase();
   return catalog
+    .filter((e) => !e.status || e.status === 'active')
     .filter((e) => {
       if (kind && e.kind !== kind) return false;
       if (modality && e.modality !== modality) return false;

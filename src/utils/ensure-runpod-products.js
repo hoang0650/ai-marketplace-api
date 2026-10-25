@@ -98,6 +98,12 @@ async function ensureRunpodMarketplaceProducts() {
       temperature: 0.7,
       maxTokens: 1024,
     };
+    // Demos are curated separately (real outputs); keep them and surface their media in the gallery.
+    const existing = await Product.findOne({ slug: p.slug }).select('demos').lean();
+    const demoMedia = (existing?.demos || [])
+      .map((d) => (d.kind === 'image' ? d.url : d.kind === 'video' ? d.posterUrl : ''))
+      .filter(Boolean);
+    const gallery = [...new Set([...(p.gallery || []), ...demoMedia])];
     await Product.findOneAndUpdate(
       { slug: p.slug },
       {
@@ -114,17 +120,17 @@ async function ensureRunpodMarketplaceProducts() {
           provider: 'runpod',
           complianceStatus: 'approved',
           moderationStatus: 'active',
-          published: true,
+          published: p.published !== false,
           license: 'Platform managed GPU / endpoint access',
           termsSummary: 'Platform Direct. The GPU infrastructure provider is not a third-party seller.',
           coverUrl: p.coverUrl,
-          gallery: p.gallery,
+          gallery,
           pricing: p.pricing,
           runtime,
           tags: p.tags,
           apiDocsMarkdown: p.apiDocsMarkdown,
           changelog: p.changelog,
-          featured: p.featured,
+          featured: p.featured && p.published !== false,
           publishedAt: new Date(p.publishedAt),
         },
         $setOnInsert: {

@@ -25,8 +25,15 @@ async function callDenglishInfer(body) {
     headers['X-Idempotency-Key'] = String(body.idempotencyKey);
   }
 
+  // Public-endpoint video jobs can run for minutes; outlast denglish-api's own poll
+  // deadline (RUNPOD_PUBLIC_TIMEOUT, 300s) so a finished, provider-billed job is never
+  // dropped here and left unbilled.
+  const timeoutMs =
+    body.provider === 'runpod_public'
+      ? Math.max(config.denglishTimeoutMs, Number(process.env.RUNPOD_PUBLIC_CLIENT_TIMEOUT_MS) || 330_000)
+      : config.denglishTimeoutMs;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), config.denglishTimeoutMs);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(`${base}/v1/infer`, {
       method: 'POST',
