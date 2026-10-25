@@ -116,9 +116,14 @@ async function assertCanPlay(req, episode, { allowFree = false } = {}) {
     productId,
   });
   if (!license) {
-    const err = new Error('Active license required to watch or download');
+    const code = await online.missingLicenseReason({
+      userId: req.user?._id,
+      productId,
+      licenseKey: req.body?.licenseKey || req.query?.licenseKey || req.get('x-license-key'),
+    });
+    const err = new Error(code === 'LICENSE_EXPIRED' ? 'License expired. Renew it to keep watching or reading.' : 'Active license required to watch or read');
     err.status = 402;
-    err.code = 'LICENSE_REQUIRED';
+    err.code = code;
     throw err;
   }
   return { ok: true, license, seller: false, via: 'license' };

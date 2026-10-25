@@ -98,4 +98,13 @@ describe('quota windows', () => {
     await b.commit(50);
     await assert.rejects(online.takeQuota({ scope: 's', kind: 'dataset', limits, wantUnits: 1 }), (e) => e.status === 429 && e.code === 'QUOTA_EXCEEDED');
   });
+
+  test('films and stories report LICENSE_EXPIRED for a lapsed own license', async () => {
+    stubKeys([lic({ expiresAt: past() }), lic({ _id: 'L2', licenseKey: 'AIM-OTHER', buyer: OTHER, expiresAt: past() })]);
+    assert.equal(await online.missingLicenseReason({ userId: BUYER._id, productId: PRODUCT._id }), 'LICENSE_EXPIRED');
+    assert.equal(await online.missingLicenseReason({ userId: BUYER._id, productId: PRODUCT._id, licenseKey: 'AIM-OTHER' }), 'LICENSE_REQUIRED');
+    assert.equal(await online.missingLicenseReason({ userId: OTHER.replace('c2', 'd3'), productId: PRODUCT._id }), 'LICENSE_REQUIRED');
+    stubKeys([lic({ status: 'revoked', expiresAt: past() })]);
+    assert.equal(await online.missingLicenseReason({ userId: BUYER._id, productId: PRODUCT._id }), 'LICENSE_REQUIRED');
+  });
 });

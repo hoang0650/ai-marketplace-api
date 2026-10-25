@@ -78,6 +78,19 @@ async function findOwnActiveLicense({ userId, productId, licenseKey, requireKey 
   return null;
 }
 
+/** Why a caller has no active license: LICENSE_EXPIRED when their own license for this product lapsed, else LICENSE_REQUIRED. */
+async function missingLicenseReason({ userId, productId, licenseKey }) {
+  if (!userId || !productId) return 'LICENSE_REQUIRED';
+  const key = cleanKey(licenseKey);
+  const pid = String(productId);
+  const docs = key
+    ? [await LicenseKey.findOne({ licenseKey: key })].filter(Boolean)
+    : await LicenseKey.find({ buyer: userId, product: pid }).sort({ expiresAt: -1 }).limit(8);
+  const lapsed = docs.some((d) => licenseBelongsTo(d, userId) && licenseCoversProduct(d, pid)
+    && d.status !== 'revoked' && effectiveLicenseStatus(d) !== 'active');
+  return lapsed ? 'LICENSE_EXPIRED' : 'LICENSE_REQUIRED';
+}
+
 /**
  * { via: 'moderation' | 'owner' | 'license' | null, license, reason }
  * reason (when via is null): AUTH_REQUIRED | LICENSE_KEY_REQUIRED | LICENSE_NOT_YOURS | LICENSE_EXPIRED | LICENSE_REQUIRED
@@ -242,6 +255,7 @@ module.exports = {
   quotaDefaults,
   licenseBelongsTo,
   findOwnActiveLicense,
+  missingLicenseReason,
   resolveOnlineAccess,
   sendDenied,
   denyStatus,
