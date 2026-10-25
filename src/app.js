@@ -76,6 +76,7 @@ const chatRoutes = require('./routes/chat');
 const couponRoutes = require('./routes/coupons');
 const kycRoutes = require('./routes/kyc');
 const contentRoutes = require('./routes/content');
+const productFileRoutes = require('./routes/product-files');
 const paypalRoutes = require('./routes/paypal');
 const gpayRoutes = require('./routes/gpay');
 const communityAgentRoutes = require('./routes/community-agents');
@@ -273,6 +274,7 @@ function createApp() {
   app.use('/v1/legal', legalRoutes);
   app.use('/v1/licenses', licenseRoutes);
   app.use('/v1/content', contentRoutes);
+  app.use('/v1/product-files', productFileRoutes);
   app.use('/v1/paypal', paypalRoutes);
   app.use('/v1/gpay', gpayRoutes);
   app.use('/v1/iap', iapRoutes);
