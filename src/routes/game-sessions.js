@@ -78,6 +78,8 @@ function publicGame(doc, req, extra = {}) {
     profile: streamProfile(doc.device || 'pc'),
     streamKind: doc.streamKind,
     playerMode: extra.playerMode || (doc.streamKind === 'terminal' ? 'terminal' : undefined),
+    /** True when no real pod/stream backs the session (browser-simulated demo). */
+    sandbox: !doc.dedicated && isSandboxLike(doc),
     playerUrl: `${base}/player`,
     publicUrl: proxied || undefined,
     heartbeatMs: HEARTBEAT_MS,
@@ -492,8 +494,7 @@ router.get('/:sessionId/player', authenticate, async (req, res, next) => {
       if (playerMode === 'terminal') {
         return res.send(
           sandboxTerminalHtml({
-            title: 'GPU terminal',
-            gpu: server?.gpu,
+            title: 'GPU terminal (demo)',
             hostname: server?.name,
           }),
         );

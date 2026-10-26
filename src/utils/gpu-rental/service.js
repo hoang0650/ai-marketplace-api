@@ -68,6 +68,19 @@ function publicRental(doc) {
     createdAt: doc.createdAt,
     stoppedAt: doc.stoppedAt || null,
     terminatedAt: doc.terminatedAt || null,
+    ...(doc.$locals && doc.$locals.live ? { live: liveInfo(doc) } : {}),
+  };
+}
+
+/** Owner-only live pod facts for the terminal status bar (set by refreshRental). */
+function liveInfo(doc) {
+  const live = doc.$locals.live || {};
+  return {
+    podId: String(doc.providerServerId || ''),
+    dataCenterId: live.dataCenterId || '',
+    uptimeSeconds: live.uptimeSeconds || 0,
+    gpuUtilPercent: live.gpuUtilPercent ?? null,
+    memoryUtilPercent: live.memoryUtilPercent ?? null,
   };
 }
 
@@ -338,6 +351,7 @@ async function refreshRental(rental) {
   if (!rental.providerServerId || rental.status === 'terminated') return rental;
   try {
     const live = await provider.getServer(rental.providerServerId);
+    if (rental.$locals) rental.$locals.live = live;
     if (live.status === 'terminated') {
       await settle(rental, new Date(), { final: true });
       rental.status = 'terminated';

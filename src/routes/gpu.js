@@ -5,6 +5,7 @@ const { authenticate } = require('../middleware/auth');
 const { getAvailableBalance } = require('../utils/wallet');
 const { gpuRentalConfig } = require('../utils/gpu-rental/config');
 const svc = require('../utils/gpu-rental/service');
+const gpuProxy = require('../terminal/gpu-proxy');
 
 const router = express.Router();
 
@@ -137,6 +138,24 @@ router.post(
     const target = req.body?.target === 'terminal' ? 'lab/terminals/1' : 'lab';
     const path = `${svc.jupyterBasePath(String(rental._id))}${target}?ticket=${encodeURIComponent(ticket)}`;
     res.json({ path, expiresIn: TICKET_TTL_S });
+  })
+);
+
+/** Real shell on the rented pod for the in-app terminal (xterm). Owner only, running pods only. */
+router.post(
+  '/rentals/:id/terminal',
+  wrap(async (req, res) => {
+    const rental = await svc.findOwned(req.user, req.params.id);
+    if (rental.status === 'terminated') throw Object.assign(new Error('x'), { status: 409, code: 'RENTAL_TERMINATED' });
+    if (rental.status !== 'running') throw Object.assign(new Error('x'), { status: 409, code: 'SERVER_NOT_READY' });
+    if (String(rental.owner) !== String(req.user._id)) throw Object.assign(new Error('x'), { status: 404, code: 'RENTAL_NOT_FOUND' });
+    try {
+      const out = await gpuProxy.openTerminal(String(rental._id), String(req.user._id));
+      res.json(out);
+    } catch (err) {
+      const code = err.code === 'RENTAL_TERMINATED' ? 'RENTAL_TERMINATED' : 'SERVER_NOT_READY';
+      throw Object.assign(new Error('x'), { status: code === 'RENTAL_TERMINATED' ? 409 : 503, code });
+    }
   })
 );
 

@@ -57,3 +57,12 @@ test('sandbox players: inline scripts are valid JS', () => {
     for (const s of inlineScripts(html)) assert.doesNotThrow(() => new vm.Script(s));
   }
 });
+
+test('sandbox terminal is labelled as a demo and never fakes a GPU', () => {
+  const html = sandboxTerminalHtml({ title: 'GPU', gpu: 'NVIDIA RTX 4090 (sandbox)', hostname: 'h' });
+  assert.doesNotMatch(html, /RTX 4090/);
+  assert.doesNotMatch(html, /NVIDIA-SMI/);
+  assert.doesNotMatch(html, /D-pad/);
+  assert.match(html, /DEMO/);
+  assert.match(html, /no real GPU/);
+});
