@@ -10,12 +10,22 @@ const KNOWN_CODES = new Set([
   'PROVIDER_UNAVAILABLE',
   'SERVER_NOT_FOUND',
   'SERVER_NOT_READY',
+  'VOLUME_NOT_FOUND',
+  'VOLUME_FORBIDDEN',
+  'VOLUME_IN_USE',
 ]);
 
 function providerError(status, code) {
   const safe = KNOWN_CODES.has(code) ? code : 'PROVIDER_ERROR';
   const err = new Error(safe);
-  err.status = safe === 'SERVER_NOT_FOUND' ? 404 : safe === 'GPU_UNAVAILABLE' ? 409 : 502;
+  err.status =
+    safe === 'SERVER_NOT_FOUND' || safe === 'VOLUME_NOT_FOUND'
+      ? 404
+      : safe === 'GPU_UNAVAILABLE' || safe === 'VOLUME_IN_USE'
+        ? 409
+        : safe === 'VOLUME_FORBIDDEN'
+          ? 403
+          : 502;
   err.code = safe;
   err.upstreamStatus = status;
   return err;
@@ -69,8 +79,10 @@ function snapshot(server = {}) {
   };
 }
 
-// In-memory stand-in used when DENGLISH_SANDBOX is on and the gateway is unreachable (dev/tests).
+// In-memory stand-in used ONLY when DENGLISH_SANDBOX is on and the gateway is unreachable (dev/tests).
+// Production always lists live RunPod stock; these rows are never shown to real users.
 const sandboxPods = new Map();
+const sandboxVolumes = new Map();
 const SANDBOX_OFFERS = [
   { id: 'NVIDIA GeForce RTX 4090', name: 'RTX 4090', memoryGb: 24, costPerHour: 0.69, stock: 'High' },
   { id: 'NVIDIA L40S', name: 'L40S', memoryGb: 48, costPerHour: 0.86, stock: 'Medium' },
@@ -90,6 +102,73 @@ async function listGpuTypes() {
   return sandboxed(
     async () => (await call(`${prefix()}/gpu-types`)).gpuTypes || [],
     () => SANDBOX_OFFERS
+  );
+}
+
+function sandboxCatalog() {
+  return {
+    gpuTypes: SANDBOX_OFFERS.map((o) => ({
+      id: o.id,
+      name: o.name,
+      memoryGb: o.memoryGb,
+      clouds: { secure: { costPerHour: o.costPerHour, stock: o.stock.toLowerCase(), dataCenters: [{ id: 'SBX-1', stock: o.stock.toLowerCase() }] } },
+    })),
+    dataCenters: [{ id: 'SBX-1', name: 'SBX-1', location: 'Sandbox', storageSupport: true, gpus: {} }],
+  };
+}
+
+/** Live GPU catalog: per-cloud cost + stock and per-data-center secure stock (internal; costs never serialized). */
+async function gpuCatalog() {
+  return sandboxed(async () => {
+    const json = await call(`${prefix()}/gpu-catalog`);
+    return { gpuTypes: json.gpuTypes || [], dataCenters: json.dataCenters || [] };
+  }, sandboxCatalog);
+}
+
+function volumeSnapshot(v = {}) {
+  return { id: String(v.id || ''), name: String(v.name || ''), sizeGb: Number(v.sizeGb) || 0, dataCenterId: String(v.dataCenterId || '') };
+}
+
+async function createVolume({ name, sizeGb, dataCenterId }) {
+  return sandboxed(
+    async () =>
+      volumeSnapshot(
+        (await call(`${prefix()}/network-volumes`, { method: 'POST', body: { name, sizeGb, dataCenterId }, timeoutMs: 120_000 })).volume
+      ),
+    () => {
+      const v = { id: `sbxvol_${Date.now().toString(36)}`, name, sizeGb, dataCenterId };
+      sandboxVolumes.set(v.id, v);
+      return { ...v };
+    }
+  );
+}
+
+async function getVolume(id) {
+  return sandboxed(
+    async () => volumeSnapshot((await call(`${prefix()}/network-volumes/${sid(id)}`)).volume),
+    () => {
+      const v = sandboxVolumes.get(String(id));
+      if (!v) throw providerError(404, 'VOLUME_NOT_FOUND');
+      return { ...v };
+    }
+  );
+}
+
+/** Deletes a marketplace volume; an already-missing volume counts as deleted. */
+async function deleteVolume(id) {
+  return sandboxed(
+    async () => {
+      try {
+        await call(`${prefix()}/network-volumes/${sid(id)}`, { method: 'DELETE', timeoutMs: 120_000 });
+      } catch (err) {
+        if (err.code !== 'VOLUME_NOT_FOUND') throw err;
+      }
+      return true;
+    },
+    () => {
+      sandboxVolumes.delete(String(id));
+      return true;
+    }
   );
 }
 
@@ -172,6 +251,10 @@ async function tcpEndpoint(id, port) {
 module.exports = {
   tcpEndpoint,
   listGpuTypes,
+  gpuCatalog,
+  createVolume,
+  getVolume,
+  deleteVolume,
   createServer,
   getServer,
   startServer,
@@ -180,4 +263,5 @@ module.exports = {
   httpUpstream,
   providerError,
   _sandboxPods: sandboxPods,
+  _sandboxVolumes: sandboxVolumes,
 };

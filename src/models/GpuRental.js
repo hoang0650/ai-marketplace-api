@@ -12,6 +12,11 @@ const gpuRentalSchema = new mongoose.Schema(
     gpuCount: { type: Number, default: 1, min: 1, max: 8 },
     diskGb: { type: Number, default: 20 },
     volumeGb: { type: Number, default: 20 },
+    /** secure | community (RunPod cloud). Network volumes are secure-only. */
+    cloudType: { type: String, enum: ['secure', 'community'], default: 'secure' },
+    /** Attached network volume (mounted at /workspace); the pod is pinned to its data center. */
+    volume: { type: mongoose.Schema.Types.ObjectId, ref: 'GpuVolume', default: null, index: true },
+    dataCenterId: { type: String, default: '', trim: true, maxlength: 40 },
     /** Upstream pod id — internal only, never serialized to clients. */
     providerServerId: { type: String, default: '', index: true },
     status: { type: String, enum: STATUSES, default: 'creating', index: true },
