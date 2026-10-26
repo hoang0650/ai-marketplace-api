@@ -97,7 +97,7 @@ router.get('/quota', authenticate, async (req, res, next) => {
       enabled: Boolean(av.gpu || av.film || av.tts),
       kinds: { fast: Boolean(av.gpu || av.film), talking: av.gpu, tts: av.tts, film: av.film },
       fast: fastViaRunpod
-        ? { used: 0, free: 0, price: fp.perSecond * 5, unit: 'video', seconds: 5, imagePrice: fp.perImage, backend: 'runpod' }
+        ? { used: 0, free: 0, price: fp.perSecond * 5, unit: 'video', seconds: 5, imagePrice: fp.perImage, backend: 'aimarkets-gpu' }
         : { used: fast, free: cap('fast'), price: promo.active ? 0 : p.fast.price },
       talking: { used: talking, free: cap('talking'), price: promo.active ? 0 : p.talking.price },
       tts: { used: tts, free: cap('tts'), price: promo.active ? 0 : p.tts.perKChars, unit: 'characters', per: 1000, minCharge: promo.active ? 0 : p.tts.minCharge },

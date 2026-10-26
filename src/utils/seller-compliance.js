@@ -21,7 +21,7 @@ async function assertCanPublishProduct(user, { ownershipType = 'THIRD_PARTY_SELL
   if (ownershipType === 'PLATFORM_DIRECT') {
     if (!isPlatformOperator(user)) {
       const err = new Error(
-        'Only the platform operator may list PLATFORM_DIRECT products. Infra providers (RunPod, OpenRouter, …) are not sellers.',
+        'Only the platform operator may list PLATFORM_DIRECT products. Infrastructure providers are not sellers.',
       );
       err.status = 403;
       err.code = 'PLATFORM_DIRECT_FORBIDDEN';

@@ -37,7 +37,7 @@ const SEED = [
   },
   {
     title: 'Ưu đãi GPU inference',
-    subtitle: 'Giảm phí chạy model trên RunPod qua marketplace',
+    subtitle: 'Giảm phí chạy model trên hạ tầng GPU của AI Markets',
     imageUrl: 'https://images.unsplash.com/photo-1518770660439-4636190af475?w=800&q=80',
     linkType: 'category',
     linkValue: 'inference',
