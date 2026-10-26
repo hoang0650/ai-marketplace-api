@@ -2,7 +2,7 @@ const { seedPasswordHash } = require('./seed-password');
 const User = require('../models/User');
 const Product = require('../models/Product');
 const GpuServer = require('../models/GpuServer');
-const { CREATOR, buildComputeTestProducts, RETIRED_GAME_SLUGS } = require('../data/compute-test-products');
+const { CREATOR, buildComputeTestProducts, RETIRED_GAME_SLUGS, RETIRED_GPU_SLUGS } = require('../data/compute-test-products');
 const { buildGameServerProducts } = require('../data/game-server-products');
 const { deleteCachePattern } = require('./cache');
 const { gpuRentalConfig } = require('./gpu-rental/config');
@@ -117,11 +117,14 @@ async function ensureComputeTestProducts() {
     { slug: { $in: RETIRED_GAME_SLUGS }, published: true },
     { $set: { published: false, featured: false } },
   );
+  // Retired static GPU listings: delete outright so /product/<slug> 404s and they leave /marketplace.
+  const goneGpu = await Product.deleteMany({ slug: { $in: RETIRED_GPU_SLUGS }, creatorSlug: CREATOR.creatorSlug });
+  await GpuServer.deleteMany({ providerServerId: { $in: RETIRED_GPU_SLUGS.map((s) => `testnode-${s}`) } });
   const games = await ensureGameServerProducts(creator);
 
   deleteCachePattern('products:*').catch(() => {});
   console.log(
-    `[compute-test] ensured ${products} listings, ${nodes} sandbox nodes, ${games} game servers; unpublished ${retired.modifiedCount || 0} retired demos`,
+    `[compute-test] ensured ${products} listings, ${nodes} sandbox nodes, ${games} game servers; unpublished ${retired.modifiedCount || 0} retired demos, removed ${goneGpu.deletedCount || 0} retired GPU listings`,
   );
   return { products, nodes, games };
 }
