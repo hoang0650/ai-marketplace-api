@@ -12,6 +12,15 @@ const { deleteCachePattern } = require('../utils/cache');
 const { mapProduct, mapOrder } = require('../utils/mappers');
 const { resolveOrderDispute } = require('../utils/resolve-order-dispute');
 const { adminDailySeries, adminSeries } = require('../utils/admin-series');
+const {
+  USER_ROLES,
+  USER_STATUSES,
+  PRODUCT_STATUSES,
+  adminListParams,
+  pageResult,
+  userStatusFilter,
+  productStatusFilter,
+} = require('../utils/admin-list');
 
 const router = express.Router();
 
@@ -296,6 +305,123 @@ function adminUserDto(u, extra = {}) {
     ...extra,
   };
 }
+
+/**
+ * GET /v1/admin/users?page=1&limit=20&q=&role=&status=
+ * Every account, newest first. q matches name, email or username (creatorSlug), case-insensitive.
+ */
+router.get('/users', authenticate, requireRoles('admin'), async (req, res, next) => {
+  try {
+    const { page, limit, rx } = adminListParams(req.query);
+    const and = [];
+    if (rx) and.push({ $or: [{ name: rx }, { email: rx }, { creatorSlug: rx }] });
+    const role = String(req.query.role || '');
+    if (USER_ROLES.includes(role)) and.push({ role });
+    const status = String(req.query.status || '');
+    if (USER_STATUSES.includes(status)) and.push(userStatusFilter(status));
+    const filter = and.length ? { $and: and } : {};
+    const [rows, total] = await Promise.all([
+      User.find(filter)
+        .select('name email role creatorSlug avatarUrl accountStatus suspendedUntil createdAt')
+        .sort({ createdAt: -1, _id: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      User.countDocuments(filter),
+    ]);
+    const items = rows.map((u) => ({
+      id: String(u._id),
+      name: u.name,
+      email: u.email,
+      role: u.role,
+      creatorSlug: u.creatorSlug || '',
+      avatarUrl: u.avatarUrl || '',
+      accountStatus: effectiveStatus(u, 'accountStatus'),
+      createdAt: u.createdAt || null,
+    }));
+    res.json(pageResult(items, total, page, limit));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /v1/admin/products?page=1&limit=20&q=&category=&type=&status=&seller=&facets=1
+ * Every product (published or not), newest first. q matches title or slug.
+ * status: published | unpublished | suspended | blocked | inactive | pending_review.
+ * seller: creator user id. facets=1 adds the category / type / seller option lists.
+ */
+router.get('/products', authenticate, requireRoles('admin'), async (req, res, next) => {
+  try {
+    const { page, limit, rx } = adminListParams(req.query);
+    const and = [];
+    if (rx) and.push({ $or: [{ name: rx }, { slug: rx }] });
+    const category = String(req.query.category || '').slice(0, 60);
+    if (category) and.push({ category });
+    const type = String(req.query.type || '').slice(0, 60);
+    if (type) and.push({ productType: type });
+    const status = String(req.query.status || '');
+    if (PRODUCT_STATUSES.includes(status)) and.push(productStatusFilter(status));
+    const seller = String(req.query.seller || '');
+    if (seller) {
+      if (!/^[a-f0-9]{24}$/i.test(seller)) return res.status(400).json({ message: 'seller must be a user id' });
+      and.push({ creator: seller });
+    }
+    const filter = and.length ? { $and: and } : {};
+    const wantFacets = String(req.query.facets || '') === '1';
+    const [rows, total, facets] = await Promise.all([
+      Product.find(filter)
+        .select('name slug category productType creator creatorSlug creatorName published moderationStatus suspendedUntil salesCount createdAt')
+        .sort({ createdAt: -1, _id: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      Product.countDocuments(filter),
+      wantFacets
+        ? Product.aggregate([
+            {
+              $facet: {
+                categories: [{ $group: { _id: '$category', n: { $sum: 1 } } }, { $sort: { _id: 1 } }],
+                types: [{ $group: { _id: '$productType', n: { $sum: 1 } } }, { $sort: { _id: 1 } }],
+                sellers: [
+                  { $group: { _id: '$creator', name: { $first: '$creatorName' }, slug: { $first: '$creatorSlug' }, n: { $sum: 1 } } },
+                  { $sort: { name: 1 } },
+                ],
+              },
+            },
+          ])
+        : null,
+    ]);
+    const items = rows.map((p) => ({
+      id: String(p._id),
+      name: p.name,
+      slug: p.slug,
+      category: p.category,
+      productType: p.productType || '',
+      creatorId: p.creator ? String(p.creator) : '',
+      creatorSlug: p.creatorSlug || '',
+      creatorName: p.creatorName || '',
+      published: p.published !== false,
+      moderationStatus: effectiveStatus(p, 'moderationStatus'),
+      salesCount: Number(p.salesCount) || 0,
+      createdAt: p.createdAt || null,
+    }));
+    const out = pageResult(items, total, page, limit);
+    if (facets) {
+      const f = facets[0] || {};
+      out.facets = {
+        categories: (f.categories || []).filter((c) => c._id).map((c) => ({ id: c._id, count: c.n })),
+        types: (f.types || []).filter((c) => c._id).map((c) => ({ id: c._id, count: c.n })),
+        sellers: (f.sellers || [])
+          .filter((c) => c._id)
+          .map((c) => ({ id: String(c._id), name: c.name || c.slug || '', slug: c.slug || '', count: c.n })),
+      };
+    }
+    res.json(out);
+  } catch (err) {
+    next(err);
+  }
+});
 
 /** GET /v1/admin/revenue-series?granularity=day|week|month — revenue split by period. */
 router.get('/revenue-series', authenticate, requireRoles('admin'), async (req, res, next) => {
