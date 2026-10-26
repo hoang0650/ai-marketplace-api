@@ -151,7 +151,7 @@ function attachTerminalGateway(httpServer) {
 async function sandboxExec(cmd, server) {
   if (!cmd) return '';
   if (cmd === 'help') {
-    return 'sandbox shell: help, hostname, nvidia-smi, ls, date, echo …\nInteractive SSH to RunPod is opened by the Python provider when the pod is RUNNING.';
+    return 'sandbox shell: help, hostname, nvidia-smi, ls, date, echo …\nInteractive SSH to the AI Markets GPU cloud opens when the pod is RUNNING.';
   }
   if (cmd === 'hostname') return server.name || 'gpu-lab';
   if (cmd === 'nvidia-smi') {

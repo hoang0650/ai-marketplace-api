@@ -4,7 +4,7 @@ const GpuServer = require('../models/GpuServer');
 const { getAvailableBalance } = require('../utils/wallet');
 const provider = require('../utils/denglish-providers');
 const { assertSafeHttpUrl, assertSafeStreamHost } = require('./safe-http-url');
-const { publicProvider, internalProvider, publicNodeId } = require('./white-label');
+const { publicProvider, internalProvider, publicNodeId, PUBLIC_REGION } = require('./white-label');
 const { deviceNodeFilter, normalizeDevices, nodeDevices } = require('./stream-clients');
 const { ratePerHourUsd, toUsd } = require('./usage-pricing');
 
@@ -387,7 +387,7 @@ async function registerHostedNode(user, body) {
     product: product._id,
     external: false,
     devices: normalizeDevices(body?.devices),
-    region: String(body?.region || 'runpod').slice(0, 80),
+    region: String(body?.region || PUBLIC_REGION).slice(0, 80),
     maxConcurrent: Math.min(100, Math.max(1, Number(body?.maxConcurrent) || 5)),
   });
   await syncProductDevices(product._id);

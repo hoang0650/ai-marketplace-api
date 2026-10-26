@@ -2,6 +2,8 @@
  * Buyer-facing usage feed helpers (OpenClaw/Hermes WalletTx + product UsageEvent).
  */
 
+const { publicProvider } = require('./white-label');
+
 const AGENT_NOTE_RE =
   /^(OpenClaw|Hermes)\s+(\S+)\s+\(\+(\d+)%[^)]*\)\s+in=(\d+)\s+out=(\d+)/i;
 
@@ -84,7 +86,7 @@ function mapUsageEvent(ev) {
     createdAt: ev.createdAt ? new Date(ev.createdAt).toISOString() : new Date().toISOString(),
     source: String(ev.source || 'api'),
     channel: String(ev.source || 'api'),
-    model: String(ev.provider || ''),
+    model: String(publicProvider(ev.provider) || ''),
     productId: product ? String(product._id || product.id || '') : ev.product ? String(ev.product) : null,
     productName: product?.name || '',
     productSlug: product?.slug || '',

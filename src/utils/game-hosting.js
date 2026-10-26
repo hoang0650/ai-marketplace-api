@@ -10,6 +10,7 @@ const GpuServer = require('../models/GpuServer');
 const provider = require('./gpu-rental/provider');
 const { gpuRentalConfig } = require('./gpu-rental/config');
 const { HOURS_PER_MONTH } = require('./gpu-rental/pricing');
+const { PUBLIC_REGION } = require('./white-label');
 
 function num(name, fallback) {
   const v = Number(process.env[name]);
@@ -107,7 +108,7 @@ async function launchDedicatedServer({ product, user, sessionId, client, device 
       product: null,
       external: false,
       devices: ['pc', 'mobile'],
-      region: 'runpod',
+      region: PUBLIC_REGION,
       maxConcurrent: 1,
     });
     const now = new Date();

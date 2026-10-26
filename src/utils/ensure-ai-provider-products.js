@@ -9,7 +9,7 @@ const CREATOR = {
   email: 'providers@aimarkets.vn',
   name: 'PH AI Gateways',
   creatorSlug: 'phai-gateways',
-  bio: 'Platform Direct storefront for PH AI Markets. OpenRouter/Featherless/RunPod are infra providers — not third-party sellers.',
+  bio: 'Platform Direct storefront for PH AI Markets. Model and GPU infrastructure partners are not third-party sellers.',
   avatarUrl: '/assets/brand/ph-mark.svg',
   coverUrl: '/assets/brand/cover-ai.svg',
 };

@@ -2,7 +2,11 @@
 const PUBLIC_PROVIDER = {
   runpod: 'aimarkets-gpu',
   runpod_public: 'aimarkets-endpoints',
+  runpod_serverless: 'aimarkets-serverless',
 };
+
+/** Region label stored on hosted GPU/game nodes (shown to sellers in the node list). */
+const PUBLIC_REGION = 'AI Markets GPU cloud';
 
 function publicProvider(name) {
   if (!name) return undefined;
@@ -21,6 +25,7 @@ function internalProvider(name, fallback = 'runpod') {
 const PUBLIC_LABEL = {
   runpod: 'AI Markets GPU',
   runpod_public: 'AI Markets Public Endpoints',
+  runpod_serverless: 'AI Markets Serverless',
 };
 
 /** Registry row as shown to clients (alias key + neutral label). */
@@ -30,6 +35,7 @@ function publicRegistryRow(row) {
   return {
     ...row,
     provider: publicProvider(row.provider),
+    ...(row.adapter ? { adapter: publicProvider(row.adapter) } : {}),
     label: PUBLIC_LABEL[key] || scrubVendor(row.label),
     ...(row.description ? { description: scrubVendor(row.description) } : {}),
   };
@@ -68,6 +74,7 @@ function scrubVendorDeep(value) {
 }
 
 module.exports = {
+  PUBLIC_REGION,
   publicProvider,
   internalProvider,
   publicNodeId,
