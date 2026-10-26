@@ -61,6 +61,11 @@ function snapshot(server = {}) {
     status: String(server.status || 'unknown'),
     costPerHour: Number(server.costPerHour) || 0,
     ready: Boolean(server.ready),
+    uptimeSeconds: Number(server.uptimeSeconds) || 0,
+    dataCenterId: server.dataCenterId ? String(server.dataCenterId) : '',
+    gpuUtilPercent: Number.isFinite(Number(server.gpuUtilPercent)) && server.gpuUtilPercent !== null ? Number(server.gpuUtilPercent) : null,
+    memoryUtilPercent:
+      Number.isFinite(Number(server.memoryUtilPercent)) && server.memoryUtilPercent !== null ? Number(server.memoryUtilPercent) : null,
   };
 }
 

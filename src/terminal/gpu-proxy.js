@@ -13,6 +13,8 @@ const PATH_RE = /^\/v1\/gpu\/rentals\/([a-f0-9]{24})\/jupyter(?:\/.*)?$/i;
 const COOKIE = 'aim_gpu';
 const JUPYTER_PORT = 8888;
 const TARGET_TTL_MS = 30_000;
+const TERM_TICKET_TTL_S = 60;
+const TERM_WS_RE = /^\/v1\/gpu\/rentals\/[a-f0-9]{24}\/jupyter\/terminals\/websocket\/([A-Za-z0-9_-]{1,64})$/i;
 
 const DROP_REQ = new Set([
   'connection',
@@ -124,6 +126,107 @@ async function resolveTarget(rid, uid) {
 
 function forgetTarget(rid) {
   targets.delete(rid);
+}
+
+// Single-use terminal tickets: jti -> expiry (ms).
+const usedTermTickets = new Map();
+
+function consumeTermTicket(p) {
+  const now = Date.now();
+  for (const [k, exp] of usedTermTickets) if (exp < now) usedTermTickets.delete(k);
+  if (!p.jti || usedTermTickets.has(p.jti)) return false;
+  usedTermTickets.set(p.jti, (p.exp || 0) * 1000 || now + TERM_TICKET_TTL_S * 1000);
+  return true;
+}
+
+function termTicket(rid, uid, term) {
+  const jti = require('crypto').randomBytes(12).toString('hex');
+  return jwt.sign({ typ: 'gpu-term', rid, uid, term, jti }, config.jwtSecret, {
+    expiresIn: TERM_TICKET_TTL_S,
+    algorithm: 'HS256',
+  });
+}
+
+/** Auth for a terminal WebSocket: single-use ticket bound to rental, user and terminal name. */
+function termTicketAuth(rawUrl, rid) {
+  const url = new URL(rawUrl, 'http://local');
+  const ticket = url.searchParams.get('ticket');
+  if (!ticket) return null;
+  const m = url.pathname.match(TERM_WS_RE);
+  if (!m) return null;
+  const p = verify(ticket, 'gpu-term', rid);
+  if (!p || p.term !== m[1] || !consumeTermTicket(p)) return null;
+  return p;
+}
+
+function upstreamJson(target, method, path, body) {
+  const lib = target.tls ? https : http;
+  const payload = body ? Buffer.from(JSON.stringify(body)) : null;
+  return new Promise((resolve, reject) => {
+    const r = lib.request(
+      {
+        hostname: target.host,
+        port: target.port,
+        servername: target.tls ? target.host : undefined,
+        path,
+        method,
+        headers: {
+          host: target.port === 443 || target.port === 80 ? target.host : `${target.host}:${target.port}`,
+          authorization: `token ${target.token}`,
+          accept: 'application/json',
+          ...(payload ? { 'content-type': 'application/json', 'content-length': payload.length } : {}),
+        },
+      },
+      (up) => {
+        const chunks = [];
+        up.on('data', (c) => chunks.push(c));
+        up.on('end', () => {
+          const text = Buffer.concat(chunks).toString('utf8');
+          if ((up.statusCode || 500) >= 300) {
+            const err = new Error('UPSTREAM_STATUS');
+            err.code = up.statusCode >= 500 || up.statusCode === 404 ? 'SERVER_NOT_READY' : 'PROVIDER_ERROR';
+            return reject(err);
+          }
+          try {
+            resolve(text ? JSON.parse(text) : {});
+          } catch {
+            const err = new Error('UPSTREAM_JSON');
+            err.code = 'SERVER_NOT_READY';
+            reject(err);
+          }
+        });
+      }
+    );
+    r.setTimeout(20_000, () => r.destroy(Object.assign(new Error('timeout'), { code: 'SERVER_NOT_READY' })));
+    r.on('error', (e) => {
+      forgetTarget(target.rid);
+      reject(Object.assign(e, { code: e.code === 'SERVER_NOT_READY' ? e.code : 'SERVER_NOT_READY' }));
+    });
+    if (payload) r.write(payload);
+    r.end();
+  });
+}
+
+/**
+ * Open a real shell on the rented pod (Jupyter terminal) and return a short-lived WebSocket ticket.
+ * The browser connects to wsPath?ticket=… ; the proxy forwards to the pod with the rental token.
+ */
+async function openTerminal(rid, uid) {
+  const target = await resolveTarget(rid, uid);
+  target.rid = rid;
+  const created = await upstreamJson(target, 'POST', `${basePath(rid)}/api/terminals`, {});
+  const term = String(created && created.name ? created.name : '');
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(term)) {
+    const err = new Error('TERMINAL_CONNECTION_FAILED');
+    err.code = 'SERVER_NOT_READY';
+    throw err;
+  }
+  return {
+    term,
+    wsPath: `${basePath(rid)}/terminals/websocket/${term}`,
+    ticket: termTicket(rid, uid, term),
+    expiresIn: TERM_TICKET_TTL_S,
+  };
 }
 
 function upstreamHeaders(req, target) {
@@ -239,16 +342,17 @@ function attachGpuWorkspaceProxy(httpServer) {
     const rid = match[1].toLowerCase();
 
     (async () => {
-      const session = verify(readCookie(req, COOKIE), 'gpu-session', rid);
+      const session = termTicketAuth(req.url, rid) || verify(readCookie(req, COOKIE), 'gpu-session', rid);
       if (!session) throw new Error('UNAUTHORIZED');
       const target = await resolveTarget(rid, session.uid);
+      const upstreamPath = stripTicket(req.url);
       const offered = String(req.headers['sec-websocket-protocol'] || '')
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean);
       const proto = target.tls ? 'wss' : 'ws';
       const portPart = target.port === 443 || target.port === 80 ? '' : `:${target.port}`;
-      const upstream = new WebSocket(`${proto}://${target.host}${portPart}${req.url}`, offered, {
+      const upstream = new WebSocket(`${proto}://${target.host}${portPart}${upstreamPath}`, offered, {
         headers: upstreamHeaders(req, target),
         servername: target.tls ? target.host : undefined,
         perMessageDeflate: false,
@@ -312,6 +416,9 @@ module.exports = {
   attachGpuWorkspaceProxy,
   sessionCookie,
   stripTicket,
+  openTerminal,
+  termTicket,
+  termTicketAuth,
   rewriteLocation,
   dropResponseHeader,
   _targets: targets,

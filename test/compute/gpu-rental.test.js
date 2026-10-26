@@ -263,6 +263,24 @@ describe('gpu workspace proxy helpers', () => {
     assert.equal(p.typ, 'gpu-session');
     assert.equal(p.rid, rid);
   });
+
+  test('terminal ticket is single-use and bound to rental + terminal name', () => {
+    const rid = 'b'.repeat(24);
+    const ws = `/v1/gpu/rentals/${rid}/jupyter/terminals/websocket/3`;
+    const t1 = proxy.termTicket(rid, 'u1', '3');
+    assert.equal(proxy.termTicketAuth(`${ws}?ticket=${encodeURIComponent(t1)}`, 'c'.repeat(24)), null, 'other rental');
+    const t2 = proxy.termTicket(rid, 'u1', '3');
+    assert.equal(proxy.termTicketAuth(`/v1/gpu/rentals/${rid}/jupyter/terminals/websocket/4?ticket=${t2}`, rid), null, 'other terminal');
+    const t3 = proxy.termTicket(rid, 'u1', '3');
+    assert.equal(proxy.termTicketAuth(`/v1/gpu/rentals/${rid}/jupyter/api/kernels?ticket=${t3}`, rid), null, 'non-terminal path');
+    const ok = proxy.termTicket(rid, 'u1', '3');
+    const p = proxy.termTicketAuth(`${ws}?ticket=${encodeURIComponent(ok)}`, rid);
+    assert.equal(p && p.uid, 'u1');
+    assert.equal(proxy.termTicketAuth(`${ws}?ticket=${encodeURIComponent(ok)}`, rid), null, 'replay rejected');
+    const session = jwt.sign({ typ: 'gpu-ticket', rid, uid: 'u1', term: '3', jti: 'x' }, config.jwtSecret);
+    assert.equal(proxy.termTicketAuth(`${ws}?ticket=${session}`, rid), null, 'wrong typ');
+    assert.equal(proxy.stripTicket(`${ws}?ticket=abc`), ws);
+  });
 });
 
 describe('gpu provider errors', () => {

@@ -78,10 +78,12 @@ loop();
 </body></html>`;
 }
 
-/** GPU train / inference lab — shell only, no D-pad. */
-function sandboxTerminalHtml({ title, gpu, hostname } = {}) {
-  const t = escapeHtml(title || 'GPU terminal');
-  const gpuJ = JSON.stringify(String(gpu || 'NVIDIA GPU'));
+/**
+ * Demo shell for sandbox products. Simulated in the browser — no pod and no GPU are attached,
+ * so it must never print a fake GPU model or nvidia-smi table.
+ */
+function sandboxTerminalHtml({ title, hostname } = {}) {
+  const t = escapeHtml(title || 'GPU terminal (demo)');
   const hostJ = JSON.stringify(String(hostname || 'gpu-lab'));
   return `<!DOCTYPE html>
 <html lang="en"><head>
@@ -109,14 +111,13 @@ ${viewportMeta}
   </form>
 </div>
 <script>
-const gpu=${gpuJ};
 const host=${hostJ};
 const term=document.getElementById('term');
 const input=document.getElementById('cmd');
 const form=document.getElementById('cmdForm');
 const hist=[]; let hi=-1;
 function print(s){term.textContent+=s;term.scrollTop=term.scrollHeight;}
-print('AI Markets GPU lab  ·  '+host+'\\n'+gpu+'\\nSandbox shell — no D-pad. Type help.\\n\\n');
+print('AI Markets GPU lab  ·  '+host+'  ·  DEMO\\nSimulated shell — no real GPU or pod is attached.\\nRent a real GPU: https://aimarkets.vn/training/gpu\\nType help.\\n\\n');
 function run(raw){
   const cmd=String(raw||'').trim();
   print('$ '+cmd+'\\n');
@@ -135,16 +136,16 @@ function run(raw){
     print('checkpoints/  datasets/  models/  train.py  README.md\\n');return;
   }
   if(cmd==='nvidia-smi'||cmd==='nvidia-smi -L'){
-    print(gpu+'\\n+-----------------------------------------------------------------------------------------+\\n| NVIDIA-SMI 550.90    Driver Version: 550.90    CUDA Version: 12.4                       |\\n|-----------------------------------------+------------------------+----------------------+\\n| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |\\n| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |\\n|                                         |                        |               MIG M. |\\n|=========================================+========================+======================|\\n|   0  '+gpu.slice(0,22).padEnd(22)+'  On  | 00000000:01:00.0 Off |                    0 |\\n| 30%   41C    P2              48W / 450W |    1024MiB / 24564MiB |     12%      Default |\\n+-----------------------------------------------------------------------------------------+\\n');
+    print('demo: no GPU attached (simulated sandbox). Rent a real GPU at https://aimarkets.vn/training/gpu\\n');
     return;
   }
   if(cmd==='python --version'||cmd==='python3 --version'){print('Python 3.11.9\\n');return;}
   if(cmd==='python train.py'||cmd==='python3 train.py'||cmd==='train'){
-    print('Epoch 1/3  loss=2.41  gpu=0  mem=8.2GiB\\nEpoch 2/3  loss=1.88  gpu=0  mem=8.4GiB\\nEpoch 3/3  loss=1.52  gpu=0  mem=8.4GiB\\nSaved ./checkpoints/last.ckpt\\n');
+    print('[demo] simulated output — nothing is trained here\\nEpoch 1/3  loss=2.41\\nEpoch 2/3  loss=1.88\\nEpoch 3/3  loss=1.52\\n');
     return;
   }
   if(cmd.startsWith('echo ')){print(cmd.slice(5)+'\\n');return;}
-  print('sandbox: command not found: '+cmd+'\\n');
+  print('demo: command not available in the simulated shell: '+cmd+'\\n');
 }
 window.__gpuRun=function(raw){ run(raw); };
 function submitCmd(){
