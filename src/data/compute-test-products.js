@@ -67,79 +67,8 @@ function buildComputeTestProducts() {
       node: {
         name: 'Sandbox GPU Lab',
         kind: 'compute',
-        gpu: 'NVIDIA RTX 4090 (sandbox)',
+        gpu: 'Demo (no GPU)',
         providerServerId: 'testnode-gpu-sandbox-lab',
-      },
-    }),
-    row({
-      slug: 'gpu-rtx4090-hour',
-      name: 'RTX 4090 · GPU by the hour',
-      tagline: 'Cloud RTX 4090 for inference, fine-tune, and desktop apps.',
-      description:
-        'Thuê GPU theo giờ do AI Markets vận hành. Mở workspace JupyterLab + terminal trên GPU riêng; trừ ví theo phút, tự dừng khi hết số dư.',
-      category: 'gpu-compute',
-      coverUrl: COVER.gpu,
-      gallery: [COVER.gpu],
-      pricing: { model: 'usage', price: 0, currency: 'USD', usageUnit: 'hour', usageRate: 1.89 },
-      tags: ['gpu', 'rtx-4090', 'usage', 'test'],
-      streaming: { devices: ['pc', 'mobile'], rentalOfferId: 'NVIDIA GeForce RTX 4090' },
-      featured: true,
-      rating: 4.6,
-      reviewCount: 28,
-      changelog: [{ version: '1.0.0', date: '2026-09-15', notes: 'Hourly RTX 4090 test SKU.' }],
-      apiDocsMarkdown: docs('gpu-rtx4090-hour', 'compute'),
-      node: {
-        name: 'RTX 4090 test node',
-        kind: 'compute',
-        gpu: 'NVIDIA GeForce RTX 4090',
-        providerServerId: 'testnode-gpu-rtx4090-hour',
-      },
-    }),
-    row({
-      slug: 'gpu-a100-train',
-      name: 'A100 80GB · Train / fine-tune',
-      tagline: 'High-VRAM box for LoRA and full-parameter jobs.',
-      description:
-        'GPU train từ xa do AI Markets vận hành. Workspace JupyterLab + terminal (python train.py), dữ liệu giữ trong volume; trừ ví theo phút.',
-      category: 'gpu-compute',
-      coverUrl: COVER.train,
-      gallery: [COVER.train, COVER.infer],
-      pricing: { model: 'usage', price: 0, currency: 'USD', usageUnit: 'hour', usageRate: 2.49 },
-      tags: ['gpu', 'a100', 'training', 'test'],
-      streaming: { devices: ['pc', 'mobile'], rentalOfferId: 'NVIDIA A100 80GB PCIe' },
-      featured: false,
-      rating: 4.7,
-      reviewCount: 9,
-      changelog: [{ version: '1.0.0', date: '2026-09-15', notes: 'A100 training SKU.' }],
-      apiDocsMarkdown: docs('gpu-a100-train', 'compute'),
-      node: {
-        name: 'A100 train test node',
-        kind: 'compute',
-        gpu: 'NVIDIA A100 80GB',
-        providerServerId: 'testnode-gpu-a100-train',
-      },
-    }),
-    row({
-      slug: 'gpu-l40s-infer',
-      name: 'L40S · Inference box',
-      tagline: 'Cheaper GPU hour for batch image / LLM infer.',
-      description: 'GPU inference theo giờ do AI Markets vận hành. Workspace JupyterLab + terminal; trừ ví theo phút.',
-      category: 'gpu-compute',
-      coverUrl: COVER.infer,
-      gallery: [COVER.infer],
-      pricing: { model: 'usage', price: 0, currency: 'USD', usageUnit: 'hour', usageRate: 1.19 },
-      tags: ['gpu', 'l40s', 'inference', 'test'],
-      streaming: { devices: ['pc', 'mobile'], rentalOfferId: 'NVIDIA L40S' },
-      featured: false,
-      rating: 4.4,
-      reviewCount: 6,
-      changelog: [{ version: '1.0.0', date: '2026-09-15', notes: 'L40S inference SKU.' }],
-      apiDocsMarkdown: docs('gpu-l40s-infer', 'compute'),
-      node: {
-        name: 'L40S infer test node',
-        kind: 'compute',
-        gpu: 'NVIDIA L40S',
-        providerServerId: 'testnode-gpu-l40s-infer',
       },
     }),
   ];
@@ -148,4 +77,10 @@ function buildComputeTestProducts() {
 /** Old sandbox game-stream demos: replaced by real dedicated servers (data/game-server-products.js). */
 const RETIRED_GAME_SLUGS = ['game-sandbox-arcade', 'game-cloud-desktop', 'game-indie-box'];
 
-module.exports = { CREATOR, buildComputeTestProducts, RETIRED_GAME_SLUGS };
+/**
+ * Old static GPU listings, replaced by the live GPU list at /training/gpu.
+ * Removed on startup (product + its testnode); past sessions/usage keep their ids as history.
+ */
+const RETIRED_GPU_SLUGS = ['gpu-rtx4090-hour', 'gpu-a100-train', 'gpu-l40s-infer'];
+
+module.exports = { CREATOR, buildComputeTestProducts, RETIRED_GAME_SLUGS, RETIRED_GPU_SLUGS };
