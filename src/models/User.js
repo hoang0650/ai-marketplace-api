@@ -168,6 +168,10 @@ userSchema.virtual('id').get(function idVirtual() {
 userSchema.set('toJSON', { virtuals: true });
 userSchema.set('toObject', { virtuals: true });
 
+// Admin people tab: newest-first browsing, optionally by role.
+userSchema.index({ createdAt: -1 });
+userSchema.index({ role: 1, createdAt: -1 });
+
 const User = mongoose.model('User', userSchema);
 User.KYC_STATUSES = KYC_STATUSES;
 User.KYC_ID_TYPES = KYC_ID_TYPES;

@@ -215,6 +215,9 @@ const productSchema = new mongoose.Schema(
 );
 
 productSchema.index({ name: 'text', tagline: 'text', description: 'text', tags: 'text' });
+// Admin people tab: newest-first browsing, optionally by seller.
+productSchema.index({ createdAt: -1 });
+productSchema.index({ creator: 1, createdAt: -1 });
 
 productSchema.virtual('id').get(function idVirtual() {
   return this._id.toString();
