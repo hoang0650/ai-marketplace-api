@@ -87,8 +87,9 @@ describe('gpu pricing', () => {
 
   test('public offer hides upstream cost', () => {
     const o = toOffer({ id: 'X', name: 'RTX 4090', memoryGb: 24, costPerHour: 0.69, stock: 'High' }, cfg);
-    assert.deepEqual(Object.keys(o).sort(), ['availability', 'id', 'memoryGb', 'name', 'pricePerHour']);
+    assert.deepEqual(Object.keys(o).sort(), ['availability', 'clouds', 'id', 'memoryGb', 'name', 'pricePerHour', 'pricePerMinute']);
     assert.equal(o.availability, 'high');
+    assert.ok(!JSON.stringify(o).includes('0.69'));
   });
 });
 

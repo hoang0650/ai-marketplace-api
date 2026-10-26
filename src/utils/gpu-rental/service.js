@@ -1,12 +1,13 @@
 const crypto = require('crypto');
 const GpuRental = require('../../models/GpuRental');
+const GpuVolume = require('../../models/GpuVolume');
 const WalletTx = require('../../models/WalletTx');
 const { getAvailableBalance, getSpendableBalance } = require('../wallet');
 const { withWalletLock } = require('../wallet-lock');
 const { roundMoney } = require('../payout-hold');
 const { notifyUser } = require('../notify');
 const { gpuRentalConfig } = require('./config');
-const { quote, toOffer } = require('./pricing');
+const { quote, toOffer, isFitGpu, rowClouds, volumeQuote, availabilityOf } = require('./pricing');
 const provider = require('./provider');
 
 const ACTIVE = ['creating', 'running', 'stopped', 'error'];
@@ -22,24 +23,53 @@ function httpError(status, code, extra = {}) {
 
 // ---------- offers ----------
 
-let offersCache = { at: 0, rows: [] };
+// Live upstream catalog (GPU types × cloud × data center), cached for offersTtlMs. No static fallback.
+let catalogCache = { at: 0, rows: [], dataCenters: [] };
 
-async function listOffers({ fresh = false } = {}) {
+async function loadCatalog({ fresh = false } = {}) {
   const cfg = gpuRentalConfig();
-  if (!fresh && offersCache.rows.length && Date.now() - offersCache.at < cfg.offersTtlMs) return offersCache.rows;
-  const rows = await provider.listGpuTypes();
-  offersCache = { at: Date.now(), rows };
-  return rows;
+  if (!fresh && catalogCache.rows.length && Date.now() - catalogCache.at < cfg.offersTtlMs) return catalogCache;
+  const cat = await provider.gpuCatalog();
+  const rows = (cat.gpuTypes || []).filter((r) => isFitGpu(r, cfg));
+  catalogCache = { at: Date.now(), rows, dataCenters: cat.dataCenters || [] };
+  return catalogCache;
+}
+
+/** Internal rows (with upstream costs) of rentable GPUs. */
+async function listOffers(opts = {}) {
+  return (await loadCatalog(opts)).rows;
 }
 
 async function publicOffers() {
   const cfg = gpuRentalConfig();
   const rows = await listOffers();
-  return rows.map((r) => toOffer(r, cfg));
+  return rows.map((r) => toOffer(r, cfg)).filter(Boolean);
+}
+
+/** Data centers that support network volumes, with how many rentable GPU types are in stock there. */
+async function publicDataCenters() {
+  const cfg = gpuRentalConfig();
+  const { rows, dataCenters } = await loadCatalog();
+  const out = [];
+  for (const dc of dataCenters) {
+    if (!dc.storageSupport) continue;
+    const gpus = rows.filter((r) =>
+      (rowClouds(r).secure?.dataCenters || []).some((d) => d.id === dc.id && availabilityOf(d.stock) !== 'unknown')
+    );
+    out.push({
+      id: String(dc.id),
+      location: String(dc.location || ''),
+      gpuCount: gpus.length,
+      cheapestPricePerHour: gpus.length
+        ? Math.min(...gpus.map((r) => quote({ costPerHour: rowClouds(r).secure.costPerHour, volumeGb: 0 }, cfg).pricePerHour))
+        : null,
+    });
+  }
+  return out.sort((a, b) => b.gpuCount - a.gpuCount || a.id.localeCompare(b.id));
 }
 
 function resetOffersCache() {
-  offersCache = { at: 0, rows: [] };
+  catalogCache = { at: 0, rows: [], dataCenters: [] };
 }
 
 // ---------- serialization ----------
@@ -56,6 +86,14 @@ function publicRental(doc) {
     gpu: { id: doc.offerId, name: doc.gpuName, memoryGb: doc.gpuMemoryGb, count: doc.gpuCount },
     diskGb: doc.diskGb,
     volumeGb: doc.volumeGb,
+    cloudType: doc.cloudType || 'secure',
+    dataCenterId: doc.dataCenterId || '',
+    networkVolume:
+      doc.volume && doc.$locals && doc.$locals.volume
+        ? { id: String(doc.volume), name: doc.$locals.volume.name, sizeGb: doc.$locals.volume.sizeGb, mountPath: '/workspace' }
+        : doc.volume
+          ? { id: String(doc.volume), mountPath: '/workspace' }
+          : null,
     status: doc.status,
     ready: doc.status === 'running' && Boolean(doc.ready),
     pricePerHour: doc.pricePerHour,
@@ -285,15 +323,35 @@ async function createRental(user, body = {}, internal = {}) {
   const offers = await listOffers();
   const offer = offers.find((o) => String(o.id) === offerId);
   if (!offer) throw httpError(400, 'OFFER_NOT_FOUND');
+  const clouds = rowClouds(offer);
+  const sellable = (t) => clouds[t] && Number(clouds[t].costPerHour) > 0 && availabilityOf(clouds[t].stock) !== 'unknown';
+
+  // Optional network volume: secure cloud only, pod pinned to the volume's data center.
+  let volume = null;
+  if (body.volumeId) {
+    volume = await findOwnedVolume(user, body.volumeId);
+    if (volume.status !== 'active') throw httpError(409, 'VOLUME_NOT_READY');
+    const busy = await GpuRental.countDocuments({ volume: volume._id, status: { $in: ACTIVE } });
+    if (busy) throw httpError(409, 'VOLUME_IN_USE');
+    const inDc = (clouds.secure?.dataCenters || []).some(
+      (d) => d.id === volume.dataCenterId && availabilityOf(d.stock) !== 'unknown'
+    );
+    if (!sellable('secure') || !inDc) throw httpError(409, 'GPU_UNAVAILABLE_IN_DC', { body: { dataCenterId: volume.dataCenterId } });
+  }
+  const wanted = volume ? 'secure' : String(body.cloud || body.cloudType || '').toLowerCase();
+  const cloudType = sellable(wanted) ? wanted : ['secure', 'community'].find(sellable);
+  if (!cloudType || (wanted && wanted !== cloudType && body.cloud)) throw httpError(409, 'GPU_UNAVAILABLE');
+  const cost = Number(clouds[cloudType].costPerHour);
+
   const gpuCount = Math.min(cfg.maxGpuCount, Math.max(1, Math.round(Number(body.gpuCount) || 1)));
-  const volumeGb = Math.min(
-    cfg.volumeGbMax,
-    Math.max(cfg.volumeGbMin, Math.round(Number(body.volumeGb) || cfg.volumeGbDefault))
-  );
+  // With a network volume /workspace lives on the volume (billed separately), so no pod volume.
+  const volumeGb = volume
+    ? 0
+    : Math.min(cfg.volumeGbMax, Math.max(cfg.volumeGbMin, Math.round(Number(body.volumeGb) || cfg.volumeGbDefault)));
   const active = await GpuRental.countDocuments({ owner: user._id, status: { $in: ACTIVE } });
   if (active >= cfg.maxActivePerUser) throw httpError(409, 'RENTAL_LIMIT', { body: { limit: cfg.maxActivePerUser } });
 
-  const prices = quote({ costPerHour: offer.costPerHour, gpuCount, diskGb: cfg.diskGb, volumeGb }, cfg);
+  const prices = quote({ costPerHour: cost, gpuCount, diskGb: cfg.diskGb, volumeGb }, cfg);
   await assertPrepay(user._id, prices.pricePerHour);
 
   const now = new Date();
@@ -306,7 +364,10 @@ async function createRental(user, body = {}, internal = {}) {
     gpuCount,
     diskGb: cfg.diskGb,
     volumeGb,
-    costPerHour: offer.costPerHour * gpuCount,
+    cloudType,
+    volume: volume ? volume._id : null,
+    dataCenterId: volume ? volume.dataCenterId : '',
+    costPerHour: cost * gpuCount,
     ...prices,
     billedUntil: now,
     accessToken: crypto.randomBytes(24).toString('hex'),
@@ -322,6 +383,8 @@ async function createRental(user, body = {}, internal = {}) {
       diskGb: cfg.diskGb,
       volumeGb,
       volumeMountPath: '/workspace',
+      cloudType: cloudType.toUpperCase(),
+      ...(volume ? { networkVolumeId: volume.providerVolumeId, dataCenterIds: [volume.dataCenterId] } : {}),
       ports: `${JUPYTER_PORT}/http`,
       env: { ...trainingEnv(internal.trainingEnv), AIM_ACCESS_TOKEN: rental.accessToken },
       dockerArgs: buildDockerArgs(String(rental._id), { training: Boolean(internal.trainingEnv) }),
@@ -330,6 +393,7 @@ async function createRental(user, body = {}, internal = {}) {
     rental.providerServerId = server.id;
     rental.status = server.status === 'running' ? 'running' : 'creating';
     rental.ready = false;
+    if (server.dataCenterId) rental.dataCenterId = server.dataCenterId;
     if (server.costPerHour > 0 && Math.abs(server.costPerHour - rental.costPerHour) > 1e-6) {
       rental.costPerHour = server.costPerHour;
       Object.assign(rental, quote({ costPerHour: server.costPerHour / gpuCount, gpuCount, diskGb: cfg.diskGb, volumeGb }, cfg));
@@ -352,6 +416,7 @@ async function refreshRental(rental) {
   try {
     const live = await provider.getServer(rental.providerServerId);
     if (rental.$locals) rental.$locals.live = live;
+    if (live.dataCenterId && !rental.dataCenterId) rental.dataCenterId = live.dataCenterId;
     if (live.status === 'terminated') {
       await settle(rental, new Date(), { final: true });
       rental.status = 'terminated';
@@ -383,6 +448,7 @@ async function refreshRental(rental) {
 
 async function startRental(rental) {
   if (rental.status === 'terminated') throw httpError(409, 'RENTAL_TERMINATED');
+  if (rental.volume && rental.status !== 'running' && rental.status !== 'creating') throw httpError(409, 'RENTAL_TERMINATED');
   if (rental.status === 'running' || rental.status === 'creating') return rental;
   await settle(rental, new Date(), { final: true });
   await assertPrepay(rental.owner, rental.pricePerHour);
@@ -400,6 +466,12 @@ async function startRental(rental) {
 async function stopRental(rental, reason = 'user') {
   if (rental.status === 'terminated') throw httpError(409, 'RENTAL_TERMINATED');
   if (rental.status === 'stopped') return rental;
+  if (rental.volume) {
+    // Pods with a network volume cannot be stopped upstream: end the pod, the data stays on the volume.
+    rental.stoppedReason = reason;
+    rental.stoppedAt = new Date();
+    return terminateRental(rental);
+  }
   await settle(rental, new Date(), { final: true });
   await provider.stopServer(rental.providerServerId);
   rental.status = 'stopped';
@@ -429,6 +501,195 @@ async function terminateRental(rental) {
   rental.terminateAfter = null;
   await rental.save();
   return rental;
+}
+
+// ---------- network volumes ----------
+
+const VOLUME_LIVE = ['creating', 'active', 'error'];
+
+async function findOwnedVolume(user, id) {
+  if (!/^[a-f0-9]{24}$/i.test(String(id || ''))) throw httpError(404, 'VOLUME_NOT_FOUND');
+  const q = { _id: id, status: { $in: VOLUME_LIVE } };
+  if (user.role !== 'admin') q.owner = user._id;
+  const vol = await GpuVolume.findOne(q);
+  if (!vol) throw httpError(404, 'VOLUME_NOT_FOUND');
+  return vol;
+}
+
+function publicVolume(doc, attached = null) {
+  const q = volumeQuote(doc.sizeGb);
+  return {
+    id: String(doc._id || doc.id),
+    name: doc.name,
+    dataCenterId: doc.dataCenterId,
+    sizeGb: doc.sizeGb,
+    mountPath: '/workspace',
+    status: doc.status,
+    pricePerHour: doc.pricePerHour,
+    pricePerMonth: q.pricePerMonth,
+    pricePerGbMonth: doc.pricePerGbMonth || q.pricePerGbMonth,
+    currency: 'USD',
+    billedMinutes: doc.billedMinutes || 0,
+    billedTotal: roundMoney(doc.billedTotal || 0),
+    terminateAfter: doc.terminateAfter || null,
+    attachedRentalId: attached ? String(attached) : null,
+    createdAt: doc.createdAt,
+  };
+}
+
+/** Attach volume name/size to rentals for serialization (owner views only). */
+async function attachVolumes(rentals) {
+  const ids = [...new Set(rentals.filter((r) => r.volume).map((r) => String(r.volume)))];
+  if (!ids.length) return rentals;
+  const vols = await GpuVolume.find({ _id: { $in: ids } }, { name: 1, sizeGb: 1 }).lean();
+  const byId = new Map(vols.map((v) => [String(v._id), v]));
+  for (const r of rentals) if (r.volume && r.$locals) r.$locals.volume = byId.get(String(r.volume)) || null;
+  return rentals;
+}
+
+async function listVolumes(userId) {
+  const vols = await GpuVolume.find({ owner: userId, status: { $in: VOLUME_LIVE } }).sort({ createdAt: -1 });
+  const using = await GpuRental.find({ volume: { $in: vols.map((v) => v._id) }, status: { $in: ACTIVE } }, { volume: 1 }).lean();
+  const byVol = new Map(using.map((r) => [String(r.volume), r._id]));
+  return vols.map((v) => publicVolume(v, byVol.get(String(v._id))));
+}
+
+function volumeLimits() {
+  const cfg = gpuRentalConfig();
+  return {
+    sizeMin: cfg.volumeSizeMin,
+    sizeMax: cfg.volumeSizeMax,
+    sizeDefault: cfg.volumeSizeDefault,
+    maxPerUser: cfg.maxVolumesPerUser,
+    pricePerGbMonth: volumeQuote(1, cfg).pricePerGbMonth,
+    mountPath: '/workspace',
+  };
+}
+
+async function createVolume(user, body = {}) {
+  const cfg = gpuRentalConfig();
+  const sizeGb = Math.round(Number(body.sizeGb));
+  if (!Number.isFinite(sizeGb) || sizeGb < cfg.volumeSizeMin || sizeGb > cfg.volumeSizeMax) {
+    throw httpError(400, 'VOLUME_SIZE_INVALID', { body: { min: cfg.volumeSizeMin, max: cfg.volumeSizeMax } });
+  }
+  const dataCenterId = String(body.dataCenterId || '').trim();
+  const dcs = await publicDataCenters();
+  if (!dcs.some((d) => d.id === dataCenterId)) throw httpError(400, 'DATA_CENTER_INVALID');
+  const count = await GpuVolume.countDocuments({ owner: user._id, status: { $in: VOLUME_LIVE } });
+  if (count >= cfg.maxVolumesPerUser) throw httpError(409, 'VOLUME_LIMIT', { body: { limit: cfg.maxVolumesPerUser } });
+  const q = volumeQuote(sizeGb, cfg);
+  const need = Math.max(0.01, roundMoney(q.pricePerHour * cfg.volumePrepayHours));
+  const available = await availableFor(user._id);
+  if (available + 1e-9 < need) throw httpError(402, 'INSUFFICIENT_WALLET', { body: { available, amount: need, currency: 'USD' } });
+
+  const name = String(body.name || '').trim().replace(/[^\p{L}\p{N} _.-]/gu, '').slice(0, 40) || `Volume ${dataCenterId}`;
+  const vol = await GpuVolume.create({
+    owner: user._id,
+    name,
+    dataCenterId,
+    sizeGb,
+    costPerGbMonth: cfg.volumeGbMonth,
+    pricePerGbMonth: q.pricePerGbMonth,
+    pricePerHour: q.pricePerHour,
+    billedUntil: new Date(),
+  });
+  try {
+    const up = await provider.createVolume({ name: `aim-vol-${String(vol._id).slice(-12)}`, sizeGb, dataCenterId });
+    if (!up.id) throw provider.providerError(502, 'PROVIDER_ERROR');
+    vol.providerVolumeId = up.id;
+    vol.status = 'active';
+    vol.billedUntil = new Date();
+    await vol.save();
+    return vol;
+  } catch (err) {
+    vol.status = 'error';
+    vol.lastError = String(err.code || 'PROVIDER_ERROR').slice(0, 120);
+    vol.deletedAt = new Date();
+    vol.status = 'deleted';
+    await vol.save();
+    throw err.status ? err : httpError(502, 'PROVIDER_ERROR');
+  }
+}
+
+/** Per-minute storage billing with the same CAS cursor as rentals (WalletTx channel gpu-volume). */
+async function settleVolume(vol, now = new Date(), opts = {}) {
+  const rate = vol.status === 'active' ? vol.pricePerHour : 0;
+  const a = accrue(vol, rate, now, opts);
+  if (!a.minutes && !a.charge) return 0;
+  const moved = await GpuVolume.findOneAndUpdate(
+    { _id: vol._id, billedUntil: vol.billedUntil },
+    { $set: { billedUntil: a.to, carry: a.carry }, $inc: { billedMinutes: rate > 0 ? a.minutes : 0, billedTotal: a.charge } },
+    { new: true }
+  );
+  if (!moved) return 0;
+  vol.billedUntil = moved.billedUntil;
+  vol.carry = moved.carry;
+  vol.billedMinutes = moved.billedMinutes;
+  vol.billedTotal = moved.billedTotal;
+  if (!(a.charge > 0)) return 0;
+  return withWalletLock(vol.owner, async () => {
+    const spendable = await getSpendableBalance(vol.owner);
+    const amount = Math.min(a.charge, Math.floor(spendable * 100 + 1e-9) / 100);
+    if (!(amount > 0)) return 0;
+    await WalletTx.create({
+      user: vol.owner,
+      type: 'debit',
+      amount,
+      currency: 'USD',
+      status: 'completed',
+      note: `Network volume ${vol.name} · ${vol.sizeGb} GB ${vol.dataCenterId} (${a.minutes}m)`,
+      meta: {
+        channel: 'gpu-volume',
+        volumeId: String(vol._id),
+        minutes: a.minutes,
+        rate,
+        from: new Date(a.to.getTime() - a.minutes * 60_000),
+        to: a.to,
+      },
+    });
+    return amount;
+  });
+}
+
+async function deleteVolume(vol, { force = false } = {}) {
+  if (vol.status === 'deleted') return vol;
+  const busy = await GpuRental.countDocuments({ volume: vol._id, status: { $in: ACTIVE } });
+  if (busy && !force) throw httpError(409, 'VOLUME_IN_USE');
+  await settleVolume(vol, new Date(), { final: true });
+  if (vol.providerVolumeId) await provider.deleteVolume(vol.providerVolumeId);
+  vol.status = 'deleted';
+  vol.deletedAt = new Date();
+  vol.terminateAfter = null;
+  await vol.save();
+  return vol;
+}
+
+/** Storage keeps running while the wallet covers it; otherwise grace, then delete (pods on it end first). */
+async function tickVolume(vol, now = new Date()) {
+  const cfg = gpuRentalConfig();
+  await settleVolume(vol, now);
+  const available = await availableFor(vol.owner);
+  if (available > 0 && available >= vol.pricePerHour) {
+    if (vol.terminateAfter) {
+      vol.terminateAfter = null;
+      await vol.save();
+    }
+    return 'ok';
+  }
+  if (!vol.terminateAfter) {
+    vol.terminateAfter = new Date(now.getTime() + cfg.terminateGraceMs);
+    await vol.save();
+    await notifyUser(vol.owner, 'gpu.stoppedNoFunds', { name: vol.name, hours: Math.round(cfg.terminateGraceMs / 3_600_000) }, '/training/gpu');
+    return 'grace';
+  }
+  if (vol.terminateAfter <= now) {
+    const pods = await GpuRental.find({ volume: vol._id, status: { $in: ACTIVE } });
+    for (const r of pods) await terminateRental(r);
+    await deleteVolume(vol, { force: true });
+    await notifyUser(vol.owner, 'gpu.terminatedNoFunds', { name: vol.name }, '/training/gpu');
+    return 'deleted';
+  }
+  return 'grace';
 }
 
 // ---------- billing tick ----------
@@ -502,6 +763,16 @@ async function runBillingTick(now = new Date()) {
       console.error('[gpu-rental] tick failed', String(rental._id), err.code || err.message);
     }
   }
+  const vols = await GpuVolume.find({ status: 'active' });
+  out.volumes = vols.length;
+  for (const vol of vols) {
+    try {
+      if ((await tickVolume(vol, now)) === 'deleted') out.terminated += 1;
+    } catch (err) {
+      out.errors += 1;
+      console.error('[gpu-rental] volume tick failed', String(vol._id), err.code || err.message);
+    }
+  }
   return out;
 }
 
@@ -537,7 +808,17 @@ module.exports = {
   JUPYTER_PORT,
   jupyterBasePath,
   publicOffers,
+  publicDataCenters,
   listOffers,
+  findOwnedVolume,
+  publicVolume,
+  listVolumes,
+  attachVolumes,
+  volumeLimits,
+  createVolume,
+  settleVolume,
+  deleteVolume,
+  tickVolume,
   resetOffersCache,
   publicRental,
   buildDockerArgs,

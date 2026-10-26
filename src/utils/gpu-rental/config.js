@@ -26,6 +26,16 @@ function gpuRentalConfig() {
     tickMs: Math.max(10_000, num('GPU_RENTAL_TICK_MS', 60_000)),
     image: (process.env.GPU_RENTAL_IMAGE || 'runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404').trim(),
     offersTtlMs: Math.max(30_000, num('GPU_RENTAL_OFFERS_TTL_MS', 10 * 60_000)),
+    /** Hide GPUs that cannot run the CUDA workspace image or are too small to be useful. */
+    minVramGb: Math.max(0, num('GPU_RENTAL_MIN_VRAM_GB', 8)),
+    /** Network volumes: upstream USD per GB-month (billed per minute from the wallet with the same markup). */
+    volumeGbMonth: Math.max(0, num('GPU_VOLUME_GB_MONTH', 0.07)),
+    volumeSizeMin: 10,
+    volumeSizeMax: Math.max(10, Math.round(num('GPU_VOLUME_SIZE_MAX', 500))),
+    volumeSizeDefault: Math.max(10, Math.round(num('GPU_VOLUME_SIZE_DEFAULT', 20))),
+    maxVolumesPerUser: Math.max(1, Math.round(num('GPU_VOLUME_MAX_PER_USER', 3))),
+    /** Balance needed to create a volume: this many hours of its price (at least one cent). */
+    volumePrepayHours: Math.max(0, num('GPU_VOLUME_PREPAY_HOURS', 24)),
     /** Only proxy workspace traffic to hosts under this suffix (SSRF guard). */
     upstreamHostSuffix: (process.env.GPU_RENTAL_UPSTREAM_HOST_SUFFIX || '.proxy.runpod.net').trim().toLowerCase(),
     /** Browser session lifetime for the workspace proxy cookie. */

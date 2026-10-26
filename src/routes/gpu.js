@@ -25,6 +25,14 @@ const MESSAGES = {
   OFFER_NOT_FOUND: 'Loại GPU không hợp lệ.',
   INSUFFICIENT_WALLET: 'Số dư không đủ. Cần tối thiểu 1 giờ sử dụng để khởi động.',
   PAYOUT_HELD: 'Số dư khả dụng không đủ (một phần đang bị tạm giữ).',
+  GPU_UNAVAILABLE_IN_DC: 'GPU này không còn ở trung tâm dữ liệu của ổ mạng. Hãy chọn GPU khác.',
+  VOLUME_NOT_FOUND: 'Không tìm thấy ổ mạng.',
+  VOLUME_NOT_READY: 'Ổ mạng chưa sẵn sàng.',
+  VOLUME_IN_USE: 'Ổ mạng đang gắn với một máy GPU. Hãy dừng máy trước.',
+  VOLUME_FORBIDDEN: 'Không thể thao tác với ổ mạng này.',
+  VOLUME_LIMIT: 'Bạn đã đạt số ổ mạng tối đa.',
+  VOLUME_SIZE_INVALID: 'Dung lượng ổ mạng không hợp lệ.',
+  DATA_CENTER_INVALID: 'Trung tâm dữ liệu không hỗ trợ ổ mạng.',
 };
 
 function sendError(res, next, err) {
@@ -33,7 +41,9 @@ function sendError(res, next, err) {
   return res.status(status).json({
     message: MESSAGES[err.code] || MESSAGES.PROVIDER_ERROR,
     code: MESSAGES[err.code] ? err.code : 'PROVIDER_ERROR',
-    ...(err.status === 402 || err.code === 'RENTAL_LIMIT' ? err.body || {} : {}),
+    ...(err.status === 402 || ['RENTAL_LIMIT', 'VOLUME_LIMIT', 'VOLUME_SIZE_INVALID', 'GPU_UNAVAILABLE_IN_DC'].includes(err.code)
+      ? err.body || {}
+      : {}),
   });
 }
 
@@ -53,9 +63,14 @@ router.get(
   '/offers',
   wrap(async (req, res) => {
     const cfg = gpuRentalConfig();
-    const [offers, wallet] = await Promise.all([svc.publicOffers(), getAvailableBalance(req.user._id)]);
+    const [offers, dataCenters, wallet] = await Promise.all([
+      svc.publicOffers(),
+      svc.publicDataCenters(),
+      getAvailableBalance(req.user._id),
+    ]);
     res.json({
       offers,
+      dataCenters,
       currency: 'USD',
       wallet: { available: wallet.available },
       limits: {
@@ -66,15 +81,40 @@ router.get(
         diskGb: cfg.diskGb,
         warnMinutes: cfg.warnMinutes,
         terminateGraceHours: Math.round(cfg.terminateGraceMs / 3_600_000),
+        networkVolume: svc.volumeLimits(),
       },
     });
   })
 );
 
 router.get(
+  '/volumes',
+  wrap(async (req, res) => {
+    res.json({ volumes: await svc.listVolumes(req.user._id), limits: svc.volumeLimits() });
+  })
+);
+
+router.post(
+  '/volumes',
+  wrap(async (req, res) => {
+    const vol = await svc.createVolume(req.user, req.body || {});
+    res.status(201).json({ volume: svc.publicVolume(vol) });
+  })
+);
+
+router.delete(
+  '/volumes/:id',
+  wrap(async (req, res) => {
+    const vol = await svc.findOwnedVolume(req.user, req.params.id);
+    await svc.deleteVolume(vol);
+    res.json({ volume: svc.publicVolume(vol) });
+  })
+);
+
+router.get(
   '/rentals',
   wrap(async (req, res) => {
-    const rows = await svc.listForUser(req.user._id);
+    const rows = await svc.attachVolumes(await svc.listForUser(req.user._id));
     res.json({ rentals: rows.map(svc.publicRental) });
   })
 );
@@ -83,6 +123,7 @@ router.post(
   '/rentals',
   wrap(async (req, res) => {
     const rental = await svc.createRental(req.user, req.body || {});
+    await svc.attachVolumes([rental]);
     res.status(201).json({ rental: svc.publicRental(rental) });
   })
 );
@@ -92,6 +133,7 @@ router.get(
   wrap(async (req, res) => {
     const rental = await svc.findOwned(req.user, req.params.id);
     await svc.refreshRental(rental);
+    await svc.attachVolumes([rental]);
     res.json({ rental: svc.publicRental(rental) });
   })
 );
