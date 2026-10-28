@@ -5,7 +5,7 @@ const { filmPricing, round6 } = require('./film-pricing');
 function limits(env = process.env) {
   if (env.FILM_BACKEND !== 'own') return { videos: 0, images: 0, maxSeconds: 20 };
   const cap = (v, d) => Math.max(0, Math.floor(Number(v == null ? d : v) || 0));
-  return { videos: cap(env.FILM_FREE_VIDEOS_PER_DAY, 3), images: cap(env.FILM_FREE_IMAGES_PER_DAY, 5), maxSeconds: 20 };
+  return { videos: cap(env.FILM_FREE_VIDEOS_PER_DAY, 0), images: cap(env.FILM_FREE_IMAGES_PER_DAY, 0), maxSeconds: 20 };
 }
 function allocation(usage, plan, env = process.env) {
   const cap = limits(env);
