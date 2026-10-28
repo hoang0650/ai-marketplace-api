@@ -19,7 +19,7 @@ const versionSchema = new Schema({
 const shotSchema = new Schema({
   sid: { type: String, required: true },
   prompt: { type: String, default: '', maxlength: 400 },
-  duration: { type: Number, enum: [5, 8, 10, 15], default: 5 },
+  duration: { type: Number, min: 1, max: 60, default: 5 },
   seed: { type: Number, default: -1 },
   status: { type: String, enum: ['draft', 'generating', 'ready', 'failed'], default: 'draft' },
   error: { type: String, default: '' },
@@ -37,6 +37,8 @@ const sceneSchema = new Schema({
   camera: { type: String, default: 'push-in', maxlength: 20 },
   transition: { type: String, default: 'cut', maxlength: 20 },
   duration: { type: Number, default: 15, min: 5, max: 60 },
+  videoModel: { type: String, default: 'wan-2-2-i2v-720', maxlength: 100 },
+  imageModel: { type: String, default: 'qwen-image-edit-2511', maxlength: 100 },
   source: { type: String, enum: ['ai', 'upload'], default: 'ai' },
   uploadId: { type: String, default: '' },      // source=upload: the clip
   startUploadId: { type: String, default: '' }, // ai: optional image to start from
