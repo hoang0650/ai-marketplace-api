@@ -948,7 +948,7 @@ async function refreshFilmJob(job) {
   const error = lost ? 'lost' : String(remote.error || '').slice(0, 300);
   if (m.quota) await quota.release(m.quota, { video: okSeconds === 0, image: okImages === 0 });
   const upd = await StudioJob.updateOne({ _id: job._id, settled: { $ne: true } }, {
-    $set: { settled: true, status: final, error, refunded: refund > 0, refundedAmount: refund, ...(remote && remote.cost != null ? { 'meta.runpodCost': remote.cost } : {}), ...(remote && remote.duration ? { 'meta.duration': remote.duration } : {}) },
+    $set: { settled: true, status: final, error, refunded: refund > 0, refundedAmount: refund, ...(remote && remote.cost != null ? { 'meta.runpodCost': remote.cost } : {}), ...(remote ? { 'meta.runpodCostSource': remote.costSource || 'legacy_unspecified', 'meta.providerUsage': remote.providerUsage || [] } : {}), ...(remote && remote.duration ? { 'meta.duration': remote.duration } : {}) },
   });
   job.status = final; job.error = error; job.refunded = refund > 0; job.refundedAmount = refund; job.settled = true;
   if (!upd.modifiedCount) return job; // someone else settled it
