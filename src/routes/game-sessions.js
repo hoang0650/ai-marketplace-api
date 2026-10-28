@@ -466,9 +466,9 @@ function dedicatedServerHtml(product) {
 <div class="card" id="rdp" hidden>
   <strong>Remote Desktop - Linux XFCE</strong>
   <p class="muted" id="rdpaddr"></p>
-  <button type="button" id="rdpdetails">Show RDP login / Xem tai khoan RDP</button>
-  <button type="button" id="rdpfile">Download .rdp</button>
-  <div id="rdplogin" hidden><p>User: <b>player</b></p><label>Password <input id="rdppass" type="password" readonly autocomplete="off" /></label><button type="button" id="rdpshow">Show / hide</button><button type="button" id="rdpcopy">Copy password</button></div>
+  <button type="button" id="rdpdetails">Xem tài khoản RDP · Show login</button>
+  <button type="button" id="rdpfile">Tải file .rdp · Download</button>
+  <div id="rdplogin" hidden><p>Tài khoản · User: <b>player</b></p><label>Mật khẩu · Password <input id="rdppass" type="password" readonly autocomplete="off" /></label><button type="button" id="rdpshow">Hiện / ẩn · Show / hide</button><button type="button" id="rdpcopy">Sao chép mật khẩu · Copy password</button></div>
 </div>
 <div class="card muted" id="bill"></div>
 </main><script>

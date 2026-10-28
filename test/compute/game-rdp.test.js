@@ -70,6 +70,7 @@ test('RDP product price includes its 20 GB disk and preserves the game port', ()
   process.env.GAME_RDP_IMAGE = 'verified-image';
   const p = withDesktop({ name: 'Game', tagline: '', description: '', tags: [], pricing: {}, gameServer: { port: 7777 }, apiDocsMarkdown: '' }, 0.06);
   assert.equal(p.gameServer.port, 7777); assert.equal(p.gameServer.rdpPort, 3389);
+  assert.equal(p.gameServer.env.DOTNET_SYSTEM_GLOBALIZATION_INVARIANT, '0');
   assert.equal(p.pricing.usageRate, Math.round(hosting.dedicatedRatePerHour(0.06, 20) / 60 * 1e6) / 1e6);
   delete process.env.GAME_RDP_IMAGE;
 });
