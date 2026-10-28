@@ -20,9 +20,10 @@ import urllib.error
 import urllib.request
 from collections import deque
 
-AIM = '/workspace/aim'
-DATA = '/workspace/data'
-OUT = '/workspace/output'
+ROOT = os.environ.get('AIM_TRAINING_ROOT', '/workspace')
+AIM = os.path.join(ROOT, 'aim')
+DATA = os.path.join(ROOT, 'data')
+OUT = os.path.join(ROOT, 'output')
 STATE_FILE = os.path.join(AIM, 'state.json')
 MANIFEST_FILE = os.path.join(AIM, 'manifest.json')
 RECIPES = os.path.join(AIM, 'recipes')
@@ -46,7 +47,7 @@ def read_env():
     return env
 
 
-ENV = read_env()
+ENV = {**read_env(), **{k: os.environ[k] for k in ('AIM_JOB_TOKEN', 'AIM_TRAINING_MANIFEST_URL') if k in os.environ}}
 TOKEN = ENV.get('AIM_JOB_TOKEN', '')
 
 
@@ -204,7 +205,7 @@ def run_recipe(manifest, rep):
     )
     proc = subprocess.Popen(
         [sys.executable, entry, MANIFEST_FILE],
-        cwd='/workspace',
+        cwd=ROOT,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,

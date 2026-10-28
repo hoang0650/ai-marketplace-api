@@ -17,6 +17,8 @@ const schema = new mongoose.Schema(
     hfDataset: { type: String, default: '' },
     provider: { type: String, required: true, default: 'runpod' },
     gpuType: { type: String, default: '' },
+    reusedRental: { type: Boolean, default: false },
+    rentalBilledStart: { type: Number, default: 0 },
     status: {
       type: String,
       enum: ['queued', 'running', 'paused', 'succeeded', 'failed', 'cancelled'],

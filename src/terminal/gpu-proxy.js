@@ -229,6 +229,43 @@ async function openTerminal(rid, uid) {
   };
 }
 
+/** Start a server-built training bundle on an existing, owner-verified Jupyter workspace. */
+async function launchTraining(rid, uid, { jobId, bootstrapUrl, manifestUrl, token }) {
+  if (!/^tj_[a-f0-9]{16}$/.test(jobId)) throw new Error('Invalid training job');
+  const target = await resolveTarget(rid, uid);
+  const created = await upstreamJson(target, 'POST', `${basePath(rid)}/api/terminals`, {});
+  const term = String(created.name || '');
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(term)) throw new Error('Invalid terminal');
+  const data = Buffer.from(JSON.stringify({ jobId, bootstrapUrl, manifestUrl, token })).toString('base64');
+  const python = [
+    'import os,json,base64,urllib.request,subprocess',
+    `d=json.loads(base64.b64decode('${data}'))`,
+    "root='/workspace/training/'+d['jobId']; aim=root+'/aim'; os.makedirs(aim,exist_ok=True)",
+    "urllib.request.urlretrieve(d['bootstrapUrl'],aim+'/bootstrap.py')",
+    "env=dict(os.environ,AIM_TRAINING_ROOT=root,AIM_TRAINING_MANIFEST_URL=d['manifestUrl'],AIM_JOB_TOKEN=d['token'])",
+    "log=open(aim+'/bootstrap.log','ab')",
+    "subprocess.Popen(['python3',aim+'/bootstrap.py'],cwd=root,env=env,stdout=log,stderr=log,start_new_session=True)",
+    "print('AIM_STARTED',flush=True)",
+  ].join('\n');
+  const command = `python3 -c "import base64;exec(base64.b64decode('${Buffer.from(python).toString('base64')}'))"; exit\n`;
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(`${target.tls ? 'wss' : 'ws'}://${target.host}:${target.port}${basePath(rid)}/terminals/websocket/${term}`, {
+      headers: { Authorization: `token ${target.token}` }, handshakeTimeout: 20000,
+    });
+    let output = '', done = false;
+    const finish = (err) => { if (done) return; done = true; clearTimeout(timer); ws.close(); err ? reject(err) : resolve(); };
+    const timer = setTimeout(() => finish(Object.assign(new Error('Training launch timed out'), { status: 502, code: 'SERVER_NOT_READY' })), 45000);
+    ws.on('open', () => ws.send(JSON.stringify(['stdin', command])));
+    ws.on('message', raw => {
+      try { const msg = JSON.parse(raw.toString()); if (msg[0] === 'stdout') output = (output + msg[1]).slice(-8000); } catch {}
+      // Require a standalone output line: the shell also echoes the submitted command.
+      if (/(?:^|[\r\n])AIM_STARTED[\r\n]/.test(output)) finish();
+    });
+    ws.on('error', () => finish(Object.assign(new Error('Training connection failed'), { status: 502, code: 'SERVER_NOT_READY' })));
+    ws.on('close', () => { if (!done) finish(Object.assign(new Error('Training launch failed'), { status: 502, code: 'SERVER_NOT_READY' })); });
+  });
+}
+
 function upstreamHeaders(req, target) {
   const out = {};
   for (const [k, v] of Object.entries(req.headers || {})) {
@@ -417,6 +454,7 @@ module.exports = {
   sessionCookie,
   stripTicket,
   openTerminal,
+  launchTraining,
   termTicket,
   termTicketAuth,
   rewriteLocation,
