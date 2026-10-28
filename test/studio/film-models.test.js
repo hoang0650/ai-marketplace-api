@@ -49,3 +49,9 @@ test('film forwards selected models to shared provider quote; no fixed film tari
   assert.equal(q.rates.perImage, 0.0528);
   assert.equal(q.shots[1].price, 2.112);
 });
+
+test("shared model catalog and quote paths are allowed by the real service client", () => {
+  assert.equal(aimx.providerPath("/film/models"), "/providers/aimx/film/models");
+  assert.equal(aimx.providerPath("/film/quote"), "/providers/aimx/film/quote");
+  assert.equal(aimx.providerPath("/film/arbitrary"), null);
+});
