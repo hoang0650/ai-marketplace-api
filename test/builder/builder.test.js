@@ -123,6 +123,28 @@ describe('builder preview', () => {
 });
 
 describe('builder generation', () => {
+  test('retains a bounded display duration without changing generated files', () => {
+    for (const [input, expected] of [[14200, 14200], [-1, 0], [Infinity, 0], [9000000, 3600000]]) {
+      const doc = project('web');
+      applyGeneration(doc, { prompt: 'Explain', text: '**Done.**', provider: 'openai', model: 'test', durationMs: input });
+      assert.equal(doc.messages[1].durationMs, expected);
+      assert.equal(doc.messages[1].content, '**Done.**');
+      assert.equal(doc.version, 0);
+    }
+  });
+
+  test('provider errors cannot echo a buyer key into chat or logs', async () => {
+    const original = global.fetch;
+    const secret = 'sk-fake-private-key-never-render';
+    global.fetch = async () => new Response(JSON.stringify({ error: { message: `Authorization: Bearer ${secret}` } }), { status: 401 });
+    try {
+      await assert.rejects(llm.streamChat({ provider: 'openai', apiKey: secret, model: 'test', messages: [] }), (e) => {
+        assert.equal(e.code, 'PROVIDER_KEY_REJECTED');
+        assert.ok(!e.message.includes(secret));
+        return true;
+      });
+    } finally { global.fetch = original; }
+  });
   test('a model reply updates files, bumps the version and records the turn', () => {
     const doc = project('app');
     const r = applyGeneration(doc, {

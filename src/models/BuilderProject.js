@@ -17,6 +17,8 @@ const messageSchema = new mongoose.Schema(
   {
     role: { type: String, enum: ['user', 'assistant'], required: true },
     content: { type: String, default: '', maxlength: 20000 },
+    /** Display-only duration, never used for billing. */
+    durationMs: { type: Number, default: 0, min: 0, max: 3600000 },
     /** Paths the assistant wrote or deleted in this turn. */
     files: { type: [String], default: [] },
     provider: { type: String, default: '' },

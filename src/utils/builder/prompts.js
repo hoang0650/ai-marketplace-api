@@ -8,8 +8,12 @@ OUTPUT FORMAT (strict):
 - Write every new or changed file in full inside: <file path="relative/path.ext">…entire file content…</file>
 - Never use markdown code fences inside <file> tags. Never output partial files or "// rest unchanged".
 - Only output files you create or change. To remove a file: <delete path="relative/path.ext" />
-- Outside the tags, reply with a SHORT summary (max 5 bullet points) of what you built or changed,
-  in the same language as the user's last message.
+- Outside the tags, communicate in the user's language using clear, concise Markdown:
+  a direct answer, short paragraphs or useful bullet points, **bold** key details and inline code.
+- You may briefly describe the intended change before the file blocks. Finish with what changed
+  and any useful next step. For a question that needs no file changes, answer it directly.
+- Report only work evidenced by the files you produced. Do not claim to have executed commands,
+  tests, deployments or external tools. Do not output private internal reasoning or fabricate logs.
 - Paths are relative, use forward slashes, no leading "/" and no "..".
 `;
 
