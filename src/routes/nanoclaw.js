@@ -11,6 +11,7 @@ const AgentProviderSetting = require('../models/AgentProviderSetting');
 const { openSecret } = require('../utils/secret-box');
 const { getByokProvider } = require('../utils/byok-providers');
 const { toOpenAICompatibleConnection } = require('./runtime-byok-claim');
+const { issueRuntimeTicket } = require('../utils/runtime-sso-ticket');
 const { getAvailableBalance } = require('../utils/wallet');
 const {
   assertActiveSubscription,
@@ -52,35 +53,19 @@ function aimarketsPublicBase(userId) {
 }
 
 /**
- * Shared dashboard Bearer secret — same value as NanoClaw DASHBOARD_SECRET.
- * Prefer explicit NANOCLAW_DASHBOARD_SECRET; fall back to AIMARKETS_SERVICE_SECRET seed.
+ * Buyer-scoped, short-lived ticket. Never disclose the runtime's admin secret.
+ * The legacy single-dashboard runtime cannot consume these safely; buyer
+ * launch remains disabled until a tenant-aware runtime is explicitly enabled.
  */
-function resolveDashboardToken() {
-  const explicit = String(
-    process.env.NANOCLAW_DASHBOARD_SECRET || process.env.NANOCLAW_GATEWAY_TOKEN || '',
-  ).trim();
-  if (explicit) return explicit;
-
-  const seed = String(
-    process.env.NANOCLAW_DASHBOARD_TOKEN_SEED ||
-      process.env.AIMARKETS_SERVICE_SECRET ||
-      process.env.NEST_SERVICE_AUTH_SECRET ||
-      '',
-  ).trim();
-  if (!seed) return '';
-  return crypto
-    .createHash('sha256')
-    .update(`phhotel-nanoclaw-dashboard:${seed}`, 'utf8')
-    .digest('hex')
-    .slice(0, 48);
+function resolveDashboardToken(user) {
+  return issueRuntimeTicket({ runtime: 'nanoclaw', envPrefix: 'NANOCLAW', user });
 }
 
 /**
  * Launch URL on per-buyer host (https://{userId}.nanoclaw.aimarkets.vn).
  *
  * Default: /dashboard?session=market-{userId}… (same pattern as Hermes/OpenClaw).
- * Optional NANOCLAW_USE_LOGIN_PROXY=1: Hermes-style /login?token&autoLogin when
- * aimarkets-proxy is exposed on that host.
+ * The ticket stays in the fragment so proxies do not log it.
  */
 function buildLaunchUrl({ uiBaseUrl, userId, token }) {
   const base = String(uiBaseUrl || '')
@@ -95,15 +80,6 @@ function buildLaunchUrl({ uiBaseUrl, userId, token }) {
     session: `market-${userId}`,
     autoConnect: 'true',
   });
-
-  const useLoginProxy = String(process.env.NANOCLAW_USE_LOGIN_PROXY || '').trim() === '1';
-  if (useLoginProxy && token) {
-    const loginQs = new URLSearchParams();
-    loginQs.set('token', String(token));
-    loginQs.set('autoLogin', 'true');
-    loginQs.set('next', `/dashboard?${dashQs.toString()}`);
-    return `${base}/login?${loginQs.toString()}`;
-  }
 
   // Token in hash (not query) to avoid access logs.
   if (token) {
@@ -193,6 +169,9 @@ function readNanoclawUserId(req) {
 
 router.post('/launch', authenticate, async (req, res, next) => {
   try {
+    if (process.env.NANOCLAW_BUYER_RUNTIME_ENABLED !== '1') {
+      return res.status(503).json({ success: false, code: 'RUNTIME_ISOLATION_MAINTENANCE', message: 'NanoClaw đang bảo trì cơ chế xác thực và API key riêng cho từng người dùng. Vui lòng thử lại sau.' });
+    }
     const userId = String(req.user?._id || req.user?.id || '').trim();
     if (!isMongoUserId(userId)) {
       return res.status(400).json({
@@ -202,7 +181,8 @@ router.post('/launch', authenticate, async (req, res, next) => {
     }
     await assertActiveSubscription(req.user, 'nanoclaw');
 
-    const token = resolveDashboardToken();
+    const token = resolveDashboardToken(req.user);
+    if (!token) return res.status(503).json({ success: false, code: 'RUNTIME_SSO_UNAVAILABLE', message: 'NanoClaw buyer SSO is not configured.' });
     // Token optional when dashboard has no DASHBOARD_SECRET (open tunnel via ProxVN).
     const uiBase = aimarketsPublicBase(userId);
     const url = buildLaunchUrl({ uiBaseUrl: uiBase, userId, token });
