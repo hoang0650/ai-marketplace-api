@@ -22,6 +22,7 @@ const fm = require('../utils/film-models');
 const quota = require('../utils/film-quota');
 const minio = require('../config/minio');
 const FilmAsset = require('../models/FilmAsset');
+const filmVoices = require('../utils/film-voices');
 
 const router = express.Router();
 router.use(async (req, res, next) => { try { await fm.catalog(); next(); } catch (e) { next(e); } });
@@ -53,6 +54,10 @@ function fail(res, status, code, extra = {}) {
 const clean = (v, n) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f]+/g, ' ').trim().slice(0, n) : '');
 const newSid = () => crypto.randomBytes(5).toString('hex');
 const seedOf = () => crypto.randomInt(1, 2 ** 31 - 1);
+
+router.get('/voices', authenticate, async (req, res, next) => {
+  try { res.json({ items: await filmVoices.catalog(req.user) }); } catch (e) { next(e); }
+});
 
 /* ------------------------------------------------------------- availability -- */
 let avail = { at: 0, v: null };
@@ -122,6 +127,9 @@ function sceneIn(raw, prev) {
   if (raw.prompt !== undefined) s.prompt = clean(raw.prompt, 600);
   if (raw.narration !== undefined) s.narration = clean(raw.narration, 1500);
   if (raw.voice !== undefined) s.voice = clean(raw.voice, 80) || 'Binh';
+  if (raw.voiceSource !== undefined) s.voiceSource = ['preset', 'upload', 'marketplace'].includes(raw.voiceSource) ? raw.voiceSource : 'preset';
+  if (raw.voiceUploadId !== undefined) s.voiceUploadId = clean(raw.voiceUploadId, 40);
+  if (raw.voiceProductId !== undefined) s.voiceProductId = clean(raw.voiceProductId, 24);
   if (raw.lang !== undefined) s.lang = filmLangs.filmLang(raw.lang); // '' = use the project language
   if (raw.camera !== undefined) s.camera = CAMERAS.includes(raw.camera) ? raw.camera : 'push-in';
   if (raw.transition !== undefined) s.transition = clean(raw.transition, 20) || 'cut';
@@ -390,7 +398,7 @@ router.delete('/projects/:id/uploads/:uid', authenticate, async (req, res, next)
     await mutate(p0._id, (p) => {
       const u = p.uploads.find((x) => x.uid === req.params.uid);
       if (!u) return false;
-      used = p.scenes.some((s) => s.uploadId === u.uid || s.startUploadId === u.uid) || p.music.uploadId === u.uid;
+      used = p.scenes.some((s) => s.uploadId === u.uid || s.startUploadId === u.uid || (s.voiceSource === 'upload' && s.voiceUploadId === u.uid)) || p.music.uploadId === u.uid;
       if (used) return false;
       k = u.key;
       p.uploads = p.uploads.filter((x) => x.uid !== u.uid);
@@ -683,25 +691,26 @@ router.post('/projects/:id/render', authenticate, async (req, res, next) => {
     const rp = renderPlan(p);
     if (!priceGate(req, res, rp.price)) return;
 
-    const segments = [];
+    const segments = [], voiceReferences = {};
     for (const s of p.scenes) {
       const videos = s.source === 'upload'
         ? [await sign(p.uploads.find((u) => u.uid === s.uploadId).key)]
         : await Promise.all(s.shots.map((sh) => sign(sh.versions[sh.active].videoKey)));
-      segments.push({ kind: s.source, videos, narration: s.narration ? { text: s.narration, ...filmLangs.sceneVoice(p, s) } : null });
+      segments.push({ kind: s.source, videos, narration: await filmVoices.narration(p, s, req.user, voiceReferences) });
     }
     const music = p.music.uploadId ? p.uploads.find((u) => u.uid === p.music.uploadId && u.status === 'ready') : null;
     const rk = key(p, 'renders', `${Date.now().toString(36)}-${newSid()}.mp4`);
     const out = await billAndSubmit(req, {
       charge: { amount: rp.price, note: `Phim AI: lồng tiếng khi xuất phim (${rp.chars} ký tự)`, meta: { kind: 'film-render', unit: 'characters', quantity: rp.chars, project: String(p._id) } },
       path: '/film/render',
-      body: { segments, subtitles: filmLangs.subtitleMode(p.subtitles), music: music ? { get: await sign(music.key), volume: p.music.volume } : null, put: await putUrl(rk) },
+      body: { segments, voiceReferences, subtitles: filmLangs.subtitleMode(p.subtitles), music: music ? { get: await sign(music.key), volume: p.music.volume } : null, put: await putUrl(rk) },
       job: { kind: 'film-render', project: p._id, prompt: p.title, meta: { key: rk, chars: rp.chars } },
     });
     if (out.error) return fail(res, out.status, out.error, out.price == null ? {} : { price: out.price });
     const saved = await mutate(p._id, (doc) => { doc.renders.push({ job: out.job._id, key: rk, status: 'queued' }); doc.renders = doc.renders.slice(-20); });
     res.status(202).json({ job: jobView(out.job), price: out.job.charged, project: await view(saved) });
   } catch (e) {
+    if (String(e.code || "").startsWith("VOICE_")) return res.status(e.status || 400).json({ code: e.code, message: e.message });
     if (e.code === 'INSUFFICIENT_WALLET') return fail(res, 402, 'INSUFFICIENT_WALLET', { available: e.available });
     if (e.code === 'WALLET_BUSY') return fail(res, 503, 'STUDIO_UNAVAILABLE');
     next(e);

@@ -33,6 +33,9 @@ const sceneSchema = new Schema({
   prompt: { type: String, default: '', maxlength: 600 },
   narration: { type: String, default: '', maxlength: 1500 },
   voice: { type: String, default: 'Binh', maxlength: 80 },
+  voiceSource: { type: String, enum: ['preset', 'upload', 'marketplace'], default: 'preset' },
+  voiceUploadId: { type: String, default: '', maxlength: 40 },
+  voiceProductId: { type: String, default: '', maxlength: 24 },
   lang: { type: String, default: '', maxlength: 8 }, // '' = project language
   camera: { type: String, default: 'push-in', maxlength: 20 },
   transition: { type: String, default: 'cut', maxlength: 20 },

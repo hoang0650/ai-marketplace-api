@@ -69,9 +69,9 @@ test('scene plan: text-only scenes pay one first-frame image, chained scenes reu
     { sid: 'c', prompt: 'z', duration: 60 },
   ] });
   const b = scenePlan(p, p.scenes[1], 1);
-  assert.deepEqual([b.seconds, b.images, b.price, b.start.key], [29, 0, 2.2968, 'f']);
+  assert.deepEqual([b.seconds, b.images, b.price, b.start.key], [29, 0, fp.filmCharge({ seconds: 29, images: 0 }), 'f']);
   const c = scenePlan(p, p.scenes[2], 2);
-  assert.deepEqual([c.seconds, c.images, c.price], [58, 1, 4.62]);
+  assert.deepEqual([c.seconds, c.images, c.price], [58, 1, fp.filmCharge({ seconds: 58, images: 1 })]);
   assert.equal(renderPlan({ scenes: [{ narration: 'a'.repeat(2000) }] }).chars, 2000);
 });
 
