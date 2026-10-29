@@ -178,6 +178,9 @@ function readHermesUserId(req) {
 
 router.post('/launch', authenticate, async (req, res, next) => {
   try {
+    if (process.env.HERMES_BUYER_RUNTIME_ENABLED === '0') {
+      return res.status(503).json({ success: false, code: 'RUNTIME_ISOLATION_MAINTENANCE', message: 'Hermes đang bảo trì để tách biệt môi trường và API key giữa người dùng. Vui lòng thử lại sau.' });
+    }
     const userId = String(req.user?._id || req.user?.id || '').trim();
     if (!isMongoUserId(userId)) {
       return res.status(400).json({
