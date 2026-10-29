@@ -585,7 +585,10 @@ router.post('/logout', async (req, res) => {
   if (access) {
     try {
       const payload = jwt.verify(access, config.jwtSecret, JWT_VERIFY);
-      await invalidateAuthUserCache(userIdFromPayload(payload));
+      const uid = userIdFromPayload(payload);
+      const tv = Number(payload.tv) || 0;
+      await User.updateOne({ _id: uid, ...(tv === 0 ? { $or: [{ tokenVersion: 0 }, { tokenVersion: { $exists: false } }] } : { tokenVersion: tv }) }, { $inc: { tokenVersion: 1 } });
+      await invalidateAuthUserCache(uid);
     } catch {
       /* expired access is still a valid logout */
     }
@@ -594,7 +597,10 @@ router.post('/logout', async (req, res) => {
   if (refreshToken) {
     try {
       const payload = jwt.verify(refreshToken, config.refreshTokenSecret, JWT_VERIFY);
-      await invalidateAuthUserCache(userIdFromPayload(payload));
+      const uid = userIdFromPayload(payload);
+      const tv = Number(payload.tv) || 0;
+      await User.updateOne({ _id: uid, ...(tv === 0 ? { $or: [{ tokenVersion: 0 }, { tokenVersion: { $exists: false } }] } : { tokenVersion: tv }) }, { $inc: { tokenVersion: 1 } });
+      await invalidateAuthUserCache(uid);
     } catch {
       /* ignore */
     }

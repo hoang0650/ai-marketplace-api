@@ -1,0 +1,3 @@
+﻿const {test}=require('node:test'),assert=require('node:assert/strict'),http=require('node:http');
+process.env.RATE_LIMIT_MAX='3';process.env.RATE_LIMIT_WINDOW_MS='60000';const {createApp}=require('../../src/app');
+test('studio and crafted query strings cannot bypass the API rate limiter',async()=>{const server=http.createServer(createApp());await new Promise(r=>server.listen(0,'127.0.0.1',r));try{const root='http://127.0.0.1:'+server.address().port;let statuses=[];for(let i=0;i<5;i++){const r=await fetch(root+'/v1/studio/film/projects?ignore=/content/play');statuses.push(r.status);await r.text()}assert.ok(statuses.includes(429),JSON.stringify(statuses));assert.equal(statuses.at(-1),429)}finally{await new Promise(r=>server.close(r))}});
