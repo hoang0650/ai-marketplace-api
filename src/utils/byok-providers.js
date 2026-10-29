@@ -157,12 +157,11 @@ async function verifyProviderKey(provider, apiKey, baseUrl) {
   try {
     const res = await fetch(url, { headers, redirect: 'error', signal: controller.signal });
     if (res.ok) return { ok: true, status: res.status };
-    const body = await res.json().catch(() => ({}));
-    const detail = body?.error?.message || body?.message || body?.error || '';
+    // Provider-controlled errors may echo the buyer's secret. Do not forward them.
     const message =
       res.status === 401 || res.status === 403
         ? 'API key bị từ chối (sai key hoặc chưa được cấp quyền).'
-        : `Provider trả về HTTP ${res.status}${detail ? `: ${String(detail).slice(0, 200)}` : ''}`;
+        : `Provider trả về HTTP ${res.status}.`;
     return { ok: false, status: res.status, message };
   } catch (err) {
     const aborted = err?.name === 'AbortError';

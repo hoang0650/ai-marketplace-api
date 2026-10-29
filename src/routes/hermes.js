@@ -1,3 +1,5 @@
+const ByokOwner = require('../models/User');
+const { effectiveStatus: byokOwnerStatus } = require('../utils/moderation');
 const express = require('express');
 const crypto = require('crypto');
 const mongoose = require('mongoose');
@@ -596,6 +598,8 @@ router.get('/provider/resolve', async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'user_id required' });
     }
     res.set('Cache-Control', 'no-store');
+    const owner = await ByokOwner.findById(userId).select('accountStatus suspendedUntil').lean();
+    if (!owner || byokOwnerStatus(owner) !== 'active') return res.status(403).json({ success: false, message: 'Account unavailable' });
     const setting = await AgentProviderSetting.findOne({ user: userId, agent: 'hermes' }).lean();
     if (!setting) return res.json({ success: true, userId, connection: null });
     const key = await ProviderApiKey.findOne({

@@ -133,3 +133,14 @@ test('launch url is https on the buyer host with the ticket in the query', () =>
   assert.equal(buildSsoLaunchUrl({ base, ssoPath: '/x', ticket: '' }), null);
   assert.equal(applyTemplate('https://{userId}.x', 'bad'), '');
 });
+
+// Exercise the production database-backed replay guard without a live database.
+test.beforeEach(() => {
+  const used = new Set();
+  test.mock.method(require('../src/models/RuntimeByokClaim'), 'create', async row => {
+    if (used.has(row._id)) { const err = new Error('duplicate'); err.code = 11000; throw err; }
+    used.add(row._id); return row;
+  });
+  test.mock.method(require('../src/models/User'), 'findById', () => ({ select: () => ({ lean: async () => ({ accountStatus: 'active' }) }) }));
+});
+test.afterEach(() => test.mock.restoreAll());
