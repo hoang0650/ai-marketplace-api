@@ -14,8 +14,8 @@ function withPublicUrls(entry) {
   return {
     ...rest,
     ...urls,
-    pricing: sellPricingText(entry.pricing),
-    price: price ? { rate: sellPrice(price.rate), unit: price.unit, currency: 'USD' } : undefined,
+    pricing: sellPricingText(entry.pricing, entry.sellMarkup),
+    price: price ? { rate: sellPrice(price.rate, entry.sellMarkup), unit: price.unit, currency: 'USD' } : undefined,
   };
 }
 

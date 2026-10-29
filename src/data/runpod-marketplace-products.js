@@ -69,11 +69,13 @@ function sellPricing(ep) {
     price: 0,
     currency: 'USD',
     usageUnit: unit,
-    usageRate: sellPrice(rate),
+    usageRate: sellPrice(rate, ep.sellMarkup),
     costBasis: COST_BASIS,
   };
-  if (base.inputRate) pricing.inputRate = sellPrice(base.inputRate);
-  if (base.outputRate) pricing.outputRate = sellPrice(base.outputRate);
+  if (base.inputRate) pricing.inputRate = sellPrice(base.inputRate, ep.sellMarkup);
+  if (base.outputRate) pricing.outputRate = sellPrice(base.outputRate, ep.sellMarkup);
+  if (base.cachedInputRate) pricing.cachedInputRate = sellPrice(base.cachedInputRate, ep.sellMarkup);
+  if (ep.sellMarkup !== undefined) pricing.upstreamMarkup = ep.sellMarkup;
   return pricing;
 }
 
@@ -96,7 +98,7 @@ Hosted on **AI Markets** (\`api.aimarkets.vn\` / \`ai.aimarkets.vn\`).
 - **Sync:** \`POST ${g.publicEndpoint}\`
 - **Async:** \`POST ${g.serverlessEndpoint}\`
 - **Tokenize:** \`POST ${g.tokenizeEndpoint}\`
-- **Pricing:** ${sellPricingText(ep.pricing)}
+- **Pricing:** ${sellPricingText(ep.pricing, ep.sellMarkup)}
 
 Prefer marketplace playground / \`POST /api/playground/run\` with your JWT (recommended).
 
@@ -118,7 +120,7 @@ function buildRunpodMarketplaceProducts() {
       id: `p-${productSlug(ep.slug)}`,
       slug: productSlug(ep.slug),
       name: ep.name,
-      tagline: `${sellPricingText(ep.pricing)} · AI Markets endpoint`,
+      tagline: `${sellPricingText(ep.pricing, ep.sellMarkup)} · AI Markets endpoint`,
       description: `${ep.description} Available on AI Markets via \`api.aimarkets.vn\` (model \`${ep.slug}\`).`,
       category: ep.modality,
       creatorId: CREATOR.mockCreatorId,

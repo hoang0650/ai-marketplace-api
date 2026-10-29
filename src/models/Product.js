@@ -12,6 +12,8 @@ const pricingSchema = new mongoose.Schema(
     /** Optional separate per-unit prices for prompt (input) and completion (output) tokens. */
     inputRate: { type: Number },
     outputRate: { type: Number },
+    cachedInputRate: { type: Number },
+    upstreamMarkup: { type: Number, min: 0 },
     /** 'upstream': bill provider-reported cost × (1 + markup); usageRate is the listed "from" price. */
     costBasis: { type: String },
     /** List price before sale. When > price, listing shows as discounted. */

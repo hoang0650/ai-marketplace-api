@@ -56,7 +56,7 @@ router.get('/models', authStack, async (req, res, next) => {
   }
 });
 
-router.post('/chat/completions', authStack, async (req, res, next) => {
+router.post('/chat/completions', authStack, require('../utils/inference-history').recordRequest, async (req, res, next) => {
   try {
     const product = await resolveProduct(req);
     if (!product) return res.status(400).json({ message: 'model (product slug) required' });
@@ -68,6 +68,9 @@ router.post('/chat/completions', authStack, async (req, res, next) => {
       prompt: req.body?.prompt,
       max_tokens: req.body?.max_tokens,
       temperature: req.body?.temperature,
+      top_p: req.body?.top_p,
+      reasoning_effort: req.body?.reasoning_effort,
+      model: product.runtime?.baseModel,
     };
     const out = await meterAndInfer(req, product, input);
     const text =

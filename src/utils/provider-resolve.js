@@ -182,8 +182,13 @@ function computeUsageCost(product, usage, input = {}, providerCost = 0) {
   // this call (or its documented formula) plus the platform markup. Resolution and
   // duration tiers are already folded into that figure, so no unit maths here.
   if (isUpstreamPriced(product)) {
-    if (parts.upstream > 0) return sellPrice(parts.upstream);
+    if (parts.upstream > 0) return sellPrice(parts.upstream, pricing.upstreamMarkup);
     if (parts.cost > 0) return round6(parts.cost);
+    if (pricing.upstreamMarkup !== undefined) {
+      const input = Number(usage.input_tokens) || 0, output = Number(usage.output_tokens) || 0;
+      const cached = Math.min(input, Number(usage.cached_input_tokens) || 0);
+      return round6(((input - cached) * (pricing.inputRate || 0) + cached * (pricing.cachedInputRate ?? pricing.inputRate ?? 0) + output * (pricing.outputRate || 0)) / 1000000);
+    }
     // Nothing known about the call: charge the listed "from" price for one unit.
     const listed = toUsd(Number(pricing.usageRate) || 0, pricing.currency || 'USD');
     return listed > 0 ? round6(listed) : 0;
