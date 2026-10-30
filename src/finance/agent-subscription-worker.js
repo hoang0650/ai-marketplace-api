@@ -1,4 +1,5 @@
 const AgentSubscription = require('../models/AgentSubscription');
+const { runtimeAvailability } = require('../utils/agent-runtime-availability');
 const User = require('../models/User');
 const SshSession = require('../models/SshSession');
 const HermesAccount = require('../models/HermesAccount');
@@ -142,6 +143,8 @@ async function markPurged(doc, user, now, { by = null, note = '' } = {}) {
  */
 async function processSubscription(doc, now = new Date(), cfg = workerConfig()) {
   const agentId = doc.agentId;
+  // Do not bill, expire or purge a buyer's workspace during operator maintenance.
+  if (!runtimeAvailability(agentId).available) return 'maintenance';
   const fee = monthlyFee(agentId);
   if (fee.amount <= 0 || doc.purgedAt) return 'skip';
   const user = await User.findById(doc.user).select('role email name').lean();
