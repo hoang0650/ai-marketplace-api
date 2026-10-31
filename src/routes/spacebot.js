@@ -12,6 +12,8 @@ const {
 } = require('../finance/agent-subscription');
 const { generateSshKeyPair } = require('../utils/ssh-keys');
 const { dashboardTokenForUser } = require('../utils/spacebot-token');
+const { passwordStorage, publicSshSession, legacySecretUnset } = require('../services/ssh-session-public');
+const { spacebotUnlistedError } = require('../services/spacebot-listing');
 const {
   AIMARKETS_PROVIDER_MARKUP,
   computeOpenClawSellCost,
@@ -174,35 +176,8 @@ async function pushSshAccess({ apiBase, token, publicKey }) {
 
 router.post('/launch', authenticate, async (req, res, next) => {
   try {
-    const userId = String(req.user?._id || req.user?.id || '').trim();
-    if (!isMongoUserId(userId)) {
-      return res.status(400).json({
-        success: false,
-        message: 'SpaceBot AI Markets needs a signed-in marketplace user id.',
-      });
-    }
-    await assertActiveSubscription(req.user, 'spacebot');
-
-    const token = resolveDashboardToken(userId);
-    const uiBase = aimarketsPublicBase(userId);
-    const url = buildLaunchUrl({ uiBaseUrl: uiBase, userId, token });
-    if (!url) {
-      return res.status(503).json({
-        success: false,
-        message:
-          'SpaceBot AI Markets is not configured. Set SPACEBOT_AIMARKETS_PUBLIC_URL_TEMPLATE (default https://{userId}.spacebot.aimarkets.vn).',
-      });
-    }
-
-    return res.json({
-      success: true,
-      url,
-      audience: 'aimarkets',
-      userId,
-      autoLogin: !!token,
-      edge: 'proxvn',
-      ...(token ? { token, gatewayToken: token } : {}),
-    });
+    const blocked = spacebotUnlistedError();
+    return res.status(blocked.status).json({ success: false, code: blocked.code, message: blocked.message });
   } catch (err) {
     next(err);
   }
@@ -218,81 +193,8 @@ router.post('/device-pairings/approve', authenticate, async (_req, res) => {
 
 router.post('/ssh/generate', authenticate, async (req, res, next) => {
   try {
-    // SpaceBot sshd runs as root. Only hand out keys when each buyer has an isolated
-    // SpaceBot container; on a shared instance a key would be shared root for everyone.
-    if (process.env.SPACEBOT_SSH_PER_USER_ISOLATION !== '1') {
-      return res.status(403).json({
-        success: false,
-        code: 'ssh_not_isolated',
-        message: 'SSH is disabled for SpaceBot until each buyer runs an isolated instance.',
-      });
-    }
-    await assertActiveSubscription(req.user, 'spacebot');
-    const agentId = String(req.body?.agentId || 'spacebot');
-    const { host, port, username } = resolveSshTarget(req.user, req.body || {});
-
-    if (!host) {
-      return res.status(503).json({
-        success: false,
-        message:
-          'SSH host not configured. Set SPACEBOT_SSH_HOST (or SPACEBOT_SSH_HOST_TEMPLATE) or pass host in the request body.',
-      });
-    }
-
-    await SshSession.updateMany(
-      { user: req.user._id, agentId, revokedAt: null, expiresAt: { $gt: new Date() } },
-      { $set: { revokedAt: new Date() } },
-    );
-
-    const comment = `aimarkets-${String(req.user._id).slice(-6)}`;
-    const keyPair = generateSshKeyPair({ comment });
-    const token = resolveDashboardToken(req.user._id);
-    const apiBase = aimarketsApiBase(req.user._id);
-    const pushed = await pushSshAccess({ apiBase, token, publicKey: keyPair.publicKey });
-
-    const name = req.body?.keyName || 'spacebot_key';
-    const command = buildSshCommand({ username, host, port, keyPath: `./${name}` });
-    const expiresAt = new Date(Date.now() + SSH_TTL_MS);
-
-    const session = await SshSession.create({
-      user: req.user._id,
-      agentId,
-      host,
-      port,
-      username,
-      authMethod: 'key',
-      privateKey: keyPair.privateKey,
-      publicKey: keyPair.publicKey,
-      command,
-      expiresAt,
-    });
-
-    return res.status(201).json({
-      success: true,
-      id: session._id.toString(),
-      agentId,
-      authMethod: 'key',
-      host,
-      port,
-      username,
-      privateKey: keyPair.privateKey,
-      publicKey: keyPair.publicKey,
-      fingerprint: keyPair.fingerprint,
-      keyName: name,
-      command,
-      expiresAt: expiresAt.toISOString(),
-      expiresInMinutes: 60,
-      installed: pushed.ok,
-      note: pushed.ok
-        ? 'Key pushed to your SpaceBot instance. Valid for 60 minutes.'
-        : `Key generated but not installed on the instance: ${pushed.message}`,
-      howTo: [
-        'Download the private key (or paste it into a file).',
-        `Windows: save as ${name} next to your terminal and run: ssh -i .\\${name}${port !== 22 ? ` -p ${port}` : ''} ${username}@${host}`,
-        `macOS/Linux: save as ${name}, then: chmod 600 ${name} && ${command}`,
-        'If SSH refuses the key, its permissions are too open — chmod 600 fixes it.',
-      ],
-    });
+    const blocked = spacebotUnlistedError();
+    return res.status(blocked.status).json({ success: false, code: blocked.code, message: blocked.message });
   } catch (err) {
     next(err);
   }
@@ -314,33 +216,17 @@ router.get('/ssh/active', authenticate, async (req, res, next) => {
       return res.json({ success: true, active: false, session: null });
     }
 
-    const isKey = session.authMethod === 'key' || !!session.privateKey;
+    const unset = legacySecretUnset(session);
+    if (unset) {
+      const set = session.password ? passwordStorage(session.password) : {};
+      await SshSession.updateOne({ _id: session._id }, { $set: set, $unset: unset });
+    }
     return res.json({
       success: true,
       active: true,
       session: {
-        id: String(session._id),
-        agentId: session.agentId,
-        authMethod: isKey ? 'key' : 'password',
-        host: session.host,
-        port: session.port,
-        username: session.username,
-        ...(isKey
-          ? {
-              privateKey: session.privateKey,
-              publicKey: session.publicKey,
-              command: session.command,
-            }
-          : {
-              password: session.password,
-              command: session.command,
-            }),
-        expiresAt: new Date(session.expiresAt).toISOString(),
-        expiresInMinutes: Math.max(
-          0,
-          Math.round((new Date(session.expiresAt) - Date.now()) / 60000),
-        ),
-        note: 'Valid for 60 minutes. Existing connections stay open after expiry.',
+        ...publicSshSession(session),
+        note: 'Valid for 60 minutes. Secrets from this session are not returned again.',
       },
     });
   } catch (err) {

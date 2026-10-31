@@ -19,6 +19,7 @@ const {
 const { issueMarketTicket, tenantGatewayToken } = require('../utils/openclaw-ticket');
 const { serviceSecretOk } = require('../utils/service-secret');
 const { issueIsolatedSshSession } = require('../services/ssh-sandbox');
+const { passwordStorage, publicSshSession, legacySecretUnset } = require('../services/ssh-session-public');
 const byokRoutes = require('./openclaw-byok');
 const { approveOwnPairing, listOwnPairings, PairingError } = require('../services/openclaw-pairing');
 const { requestBootstrapToken, buildBootstrapUrl, issuerEnabled } = require('../services/openclaw-bootstrap');
@@ -356,24 +357,18 @@ router.get('/ssh/active', authenticate, async (req, res, next) => {
     if (!session) {
       return res.json({ success: true, active: false, session: null });
     }
+    const unset = legacySecretUnset(session);
+    if (unset) {
+      const set = session.password ? passwordStorage(session.password) : {};
+      await SshSession.updateOne({ _id: session._id }, { $set: set, $unset: unset });
+    }
 
     return res.json({
       success: true,
       active: true,
       session: {
-        id: String(session._id),
-        agentId: session.agentId,
-        host: session.host,
-        port: session.port,
-        username: session.username,
-        // Isolated sessions store only a hash; the password was shown once at generation.
-        ...(session.password
-          ? { password: session.password, commandWithPassword: buildSshCommand(session).withPasswordHint }
-          : { passwordShownOnce: true }),
-        command: session.command,
-        expiresAt: new Date(session.expiresAt).toISOString(),
-        expiresInMinutes: Math.max(0, Math.round((new Date(session.expiresAt) - Date.now()) / 60000)),
-        note: 'Valid for 60 minutes. Existing connections stay open after expiry.',
+        ...publicSshSession(session),
+        note: 'Valid for 60 minutes. The password was shown once when the session was created.',
       },
     });
   } catch (err) {

@@ -12,6 +12,7 @@ const {
   refundFailedRental,
 } = require('../finance/agent-subscription');
 const { AIMARKETS_PROVIDER_MARKUP } = require('../utils/openclaw-pricing');
+const { spacebotListingFields } = require('../services/spacebot-listing');
 
 const router = express.Router();
 
@@ -113,6 +114,7 @@ router.get('/pricing', (_req, res) => {
       fee: monthlyFee(agentId),
       tokenMarkup: AIMARKETS_PROVIDER_MARKUP,
       byokOnly: BYOK_ONLY_AGENTS.includes(agentId),
+      ...spacebotListingFields(agentId),
     })),
   );
 });

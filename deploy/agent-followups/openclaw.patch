@@ -1,0 +1,55 @@
+From 9a54bc2d083280048b1f46c9a5345faa0522acbe Mon Sep 17 00:00:00 2001
+From: Cursor Agent <cursoragent@cursor.com>
+Date: Sat, 31 Oct 2026 14:32:40 +0000
+Subject: [PATCH] Compare buyer ids case-insensitively and keep the session-id
+ boundary.
+
+A longer hex suffix no longer counts as the buyer's session, and a differently cased userId from the key store is still the same owner.
+---
+ extensions/aimarkets-usage/byok.ts | 9 +++++++--
+ src/gateway/aimarkets-ticket.ts    | 2 +-
+ 2 files changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/extensions/aimarkets-usage/byok.ts b/extensions/aimarkets-usage/byok.ts
+index 7c9e15a1..dfb1e0e3 100644
+--- a/extensions/aimarkets-usage/byok.ts
++++ b/extensions/aimarkets-usage/byok.ts
+@@ -96,7 +96,9 @@ async function fetchKeys(params: {
+         throw new Error(`BYOK key store responded HTTP ${res.status}`);
+       }
+       const data = (await res.json().catch(() => ({}))) as { userId?: string; keys?: unknown };
+-      if (data.userId !== params.userId) throw new Error("BYOK owner mismatch");
++      if (String(data.userId || "").toLowerCase() !== params.userId.toLowerCase()) {
++        throw new Error("BYOK owner mismatch");
++      }
+       return sanitizeKeys(data.keys);
+     } finally {
+       await release();
+@@ -124,7 +126,10 @@ export async function getUserKeys(params: {
+   const request = fetchKeys({ ...params, userId })
+     .then((keys) => {
+       for (const [id, item] of cache) if (Date.now() - item.at >= CACHE_TTL_MS) cache.delete(id);
+-      if (cache.size >= 500) cache.delete(cache.keys().next().value!);
++      if (cache.size >= 500) {
++        const oldest = cache.keys().next().value;
++        if (oldest) cache.delete(oldest);
++      }
+       cache.set(cacheKey, { at: Date.now(), keys });
+       return keys;
+     })
+diff --git a/src/gateway/aimarkets-ticket.ts b/src/gateway/aimarkets-ticket.ts
+index 1be0f47c..ed8cc061 100644
+--- a/src/gateway/aimarkets-ticket.ts
++++ b/src/gateway/aimarkets-ticket.ts
+@@ -14,7 +14,7 @@ import type { IncomingMessage } from "node:http";
+ export const AIMARKETS_TICKET_COOKIE = "aimt";
+ 
+ const USER_ID_RE = /^[a-f0-9]{24}$/;
+-const MARKET_SESSION_RE = /(?:^|[:/_-])market[:_-]([a-f0-9]{24})/gi;
++const MARKET_SESSION_RE = /(?:^|[:/_-])market[:_-]([a-f0-9]{24})(?![a-f0-9])/gi;
+ const MAX_SCAN_DEPTH = 6;
+ const MAX_SCAN_NODES = 2_000;
+ 
+-- 
+2.43.0
+

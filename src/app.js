@@ -69,6 +69,8 @@ const sellerRoutes = require('./routes/sellers');
 const legalRoutes = require('./routes/legal');
 const adminFinanceRoutes = require('./routes/admin-finance');
 const agentPurgesAdminRoutes = require('./routes/agent-purges-admin');
+const tenantAdminRoutes = require('./routes/tenant-admin');
+const tenantOpenaiRoutes = require('./routes/tenant-openai');
 const paymentRoutes = require('./routes/payments');
 const licenseRoutes = require('./routes/licenses');
 const complaintRoutes = require('./routes/complaints');
@@ -234,6 +236,8 @@ function createApp() {
   app.use('/v1/affiliate', affiliateRoutes);
   app.use('/v1/billing', billingRoutes);
   app.use('/v1/admin/agent-purges', agentPurgesAdminRoutes);
+  app.use('/v1/admin/tenant-runtime', tenantAdminRoutes);
+  app.use('/v1/tenant/openai', tenantOpenaiRoutes);
   app.use('/v1/admin', adminRoutes);
   app.use('/v1/admin', adminFinanceRoutes);
   app.use('/v1/payments', paymentRoutes);
