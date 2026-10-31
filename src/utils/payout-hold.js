@@ -37,7 +37,7 @@ function isPayoutHeld(order, now = new Date()) {
   const net = effectiveSellerNet(order);
   if (net <= 0) return false;
   const ds = order.disputeStatus || 'none';
-  if (ds === 'buyer_win' || ds === 'seller_win') return false;
+  if (ds === 'buyer_win' || ds === 'seller_win' || ds === 'split') return false;
   if (ds === 'open') return true;
   return now < holdUntil(order);
 }

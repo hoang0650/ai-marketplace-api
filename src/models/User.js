@@ -152,6 +152,8 @@ const userSchema = new mongoose.Schema(
     preferences: { type: preferencesSchema, default: () => ({}) },
     profileUpdatedAt: { type: Date, default: null },
     passwordChangedAt: { type: Date, default: null },
+    /** Set on password, Google, and registration sign-in. Not updated on token refresh. */
+    lastLoginAt: { type: Date, default: null },
     /** sha256 of the single-use forgot-password token; never the token itself. */
     passwordResetTokenHash: { type: String, default: '', select: false },
     passwordResetExpires: { type: Date, default: null, select: false },

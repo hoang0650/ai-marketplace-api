@@ -67,6 +67,13 @@ describe('48h seller payout hold', () => {
     assert.equal(canOpenDispute(order, t1), false);
   });
 
+  test('split releases the remainder of the seller net', () => {
+    const order = paidOrder({ disputeStatus: 'split' });
+    const t1 = new Date(order.completedAt.getTime() + HOUR);
+    assert.equal(isPayoutHeld(order, t1), false);
+    assert.equal(holdKind(order, t1), null);
+  });
+
   test('buyer_win / refunded order is not held', () => {
     const open = paidOrder({ disputeStatus: 'buyer_win' });
     const refunded = paidOrder({ status: 'refunded', disputeStatus: 'buyer_win' });

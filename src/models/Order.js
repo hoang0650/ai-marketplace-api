@@ -82,7 +82,7 @@ const orderSchema = new mongoose.Schema(
     idempotencyKey: { type: String, default: undefined, trim: true, maxlength: 120 },
     disputeStatus: {
       type: String,
-      enum: ['none', 'open', 'seller_win', 'buyer_win'],
+      enum: ['none', 'open', 'seller_win', 'buyer_win', 'split'],
       default: 'none',
       index: true,
     },
@@ -90,6 +90,63 @@ const orderSchema = new mongoose.Schema(
     disputeOpenedAt: { type: Date, default: null },
     disputeResolvedAt: { type: Date, default: null },
     disputeResolutionNote: { type: String, default: '', maxlength: 1000 },
+    /** buyer_full | buyer_partial | seller | split. Empty until an admin decides. */
+    disputeOutcome: {
+      type: String,
+      enum: ['', 'buyer_full', 'buyer_partial', 'seller', 'split'],
+      default: '',
+    },
+    disputeRefundAmount: { type: Number, default: 0, min: 0 },
+    /** Seller net left in the wallet after a proportional clawback (0 on a full refund). */
+    disputeSellerKeptAmount: { type: Number, default: 0, min: 0 },
+    disputeEvidenceUrls: { type: [String], default: [] },
+    disputeMessages: {
+      type: [
+        new mongoose.Schema(
+          {
+            author: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+            authorName: { type: String, default: '', maxlength: 200 },
+            role: { type: String, enum: ['buyer', 'seller', 'admin', 'system'], required: true },
+            kind: { type: String, enum: ['message', 'opened', 'decision'], default: 'message' },
+            outcome: { type: String, default: '', maxlength: 40 },
+            body: { type: String, default: '', maxlength: 4000 },
+            attachments: {
+              type: [
+                new mongoose.Schema(
+                  {
+                    attachment: { type: mongoose.Schema.Types.ObjectId, ref: 'Attachment', required: true },
+                    name: { type: String, default: '' },
+                    mime: { type: String, default: '' },
+                    size: { type: Number, default: 0 },
+                    kind: { type: String, enum: ['image', 'file'], default: 'file' },
+                  },
+                  { _id: false },
+                ),
+              ],
+              default: [],
+            },
+            at: { type: Date, default: Date.now },
+          },
+          { _id: true },
+        ),
+      ],
+      default: [],
+    },
+    disputeEvents: {
+      type: [
+        new mongoose.Schema(
+          {
+            at: { type: Date, default: Date.now },
+            actorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+            actorRole: { type: String, default: '' },
+            action: { type: String, required: true },
+            note: { type: String, default: '', maxlength: 2000 },
+          },
+          { _id: false },
+        ),
+      ],
+      default: [],
+    },
     status: { type: String, enum: ['pending', 'paid', 'refunded'], default: 'pending' },
     fulfillmentStatus: {
       type: String,
@@ -122,6 +179,7 @@ const orderSchema = new mongoose.Schema(
 orderSchema.index({ buyer: 1, createdAt: -1 });
 orderSchema.index({ seller: 1, createdAt: -1 });
 orderSchema.index({ seller: 1, status: 1, disputeStatus: 1 });
+orderSchema.index({ disputeStatus: 1, disputeOpenedAt: -1 });
 orderSchema.index({ product: 1, status: 1 });
 orderSchema.index(
   { buyer: 1, idempotencyKey: 1 },

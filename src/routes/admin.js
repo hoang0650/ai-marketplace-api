@@ -11,6 +11,13 @@ const { applyStatus, STATUSES, effectiveStatus } = require('../utils/moderation'
 const { deleteCachePattern } = require('../utils/cache');
 const { mapProduct, mapOrder } = require('../utils/mappers');
 const { resolveOrderDispute } = require('../utils/resolve-order-dispute');
+const { buildAdminUserDetail } = require('../utils/admin-user-detail');
+const { postDisputeMessage, mapDisputeDetail } = require('../utils/dispute-thread');
+const {
+  wantsPagedDisputes,
+  disputeListFilter,
+  assertCanResolveDispute,
+} = require('../utils/dispute-access');
 const { adminDailySeries, adminSeries } = require('../utils/admin-series');
 const {
   USER_ROLES,
@@ -436,21 +443,7 @@ router.get('/users/:id', authenticate, requireRoles('admin'), async (req, res, n
   try {
     const u = await User.findById(req.params.id);
     if (!u) return res.status(404).json({ message: 'User not found' });
-    const [productCount, orderCount, wallet] = await Promise.all([
-      Product.countDocuments({ creator: u._id }),
-      Order.countDocuments({ $or: [{ buyer: u._id }, { seller: u._id }] }),
-      WalletTx.aggregate([
-        { $match: { user: u._id, status: { $nin: ['pending', 'failed', 'cancelled'] } } },
-        { $group: { _id: '$type', total: { $sum: '$amount' } } },
-      ]),
-    ]);
-    res.json(
-      adminUserDto(u, {
-        productCount,
-        orderCount,
-        walletByType: Object.fromEntries((wallet || []).map((w) => [w._id, w.total])),
-      })
-    );
+    res.json(await buildAdminUserDetail(u, adminUserDto(u)));
   } catch (err) {
     next(err);
   }
@@ -470,7 +463,7 @@ router.patch('/users/:id/status', authenticate, requireRoles('admin'), async (re
     applyStatus(u, { status, days: req.body?.days, reason: req.body?.reason }, 'accountStatus');
     await u.save();
     await invalidateAuthUserCache(u._id);
-    res.json(adminUserDto(u));
+    res.json(await buildAdminUserDetail(u, adminUserDto(u)));
   } catch (err) {
     next(err);
   }
@@ -579,12 +572,85 @@ router.delete('/products/:id', authenticate, requireRoles('admin'), async (req, 
   }
 });
 
-router.get('/disputes', authenticate, requireRoles('admin'), async (_req, res, next) => {
+function disputeError(res, err) {
+  if (!err.status) return false;
+  res.status(err.status).json({ message: err.message, code: err.code });
+  return true;
+}
+
+router.get('/disputes', authenticate, requireRoles('admin'), async (req, res, next) => {
   try {
-    const orders = await Order.find({ disputeStatus: { $ne: 'none' } })
-      .sort({ disputeOpenedAt: -1, createdAt: -1 })
-      .lean();
-    res.json(orders.map((o) => mapOrder(o, { viewerRole: 'admin' })));
+    const sort = { disputeOpenedAt: -1, createdAt: -1 };
+    // No list params: the current admin tab expects a bare array.
+    if (!wantsPagedDisputes(req.query)) {
+      const orders = await Order.find({ disputeStatus: { $ne: 'none' } }).sort(sort).lean();
+      return res.json(orders.map((o) => mapOrder(o, { viewerRole: 'admin' })));
+    }
+    const status = String(req.query.status || '');
+    if (status && status !== 'open' && status !== 'resolved') {
+      return res.status(400).json({ message: 'status must be open or resolved', code: 'DISPUTE_STATUS' });
+    }
+    const { page, limit, q, rx } = adminListParams(req.query);
+    const filter = disputeListFilter({ status, q, rx });
+    const [rows, total, openCount] = await Promise.all([
+      Order.find(filter).sort(sort).skip((page - 1) * limit).limit(limit).lean(),
+      Order.countDocuments(filter),
+      Order.countDocuments({ disputeStatus: 'open' }),
+    ]);
+    res.json({
+      ...pageResult(rows.map((o) => mapOrder(o, { viewerRole: 'admin' })), total, page, limit),
+      openCount,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/disputes/:id', authenticate, requireRoles('admin'), async (req, res, next) => {
+  try {
+    const order = await Order.findById(req.params.id);
+    if (!order || (order.disputeStatus || 'none') === 'none') {
+      return res.status(404).json({ message: 'Dispute not found', code: 'DISPUTE_NOT_FOUND' });
+    }
+    res.json(await mapDisputeDetail(order, { viewerRole: 'admin' }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/disputes/:id/messages', authenticate, requireRoles('admin'), async (req, res, next) => {
+  try {
+    const order = await Order.findById(req.params.id);
+    if (!order) return res.status(404).json({ message: 'Dispute not found', code: 'DISPUTE_NOT_FOUND' });
+    try {
+      await postDisputeMessage(order, req.user, { body: req.body?.body, attachmentIds: req.body?.attachmentIds });
+    } catch (err) {
+      if (disputeError(res, err)) return;
+      throw err;
+    }
+    res.status(201).json(await mapDisputeDetail(order, { viewerRole: 'admin' }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/disputes/:id/decision', authenticate, requireRoles('admin'), async (req, res, next) => {
+  try {
+    const order = await Order.findById(req.params.id);
+    try {
+      assertCanResolveDispute(req.user, order);
+      const updated = await resolveOrderDispute(order, {
+        resolution: req.body?.resolution,
+        note: req.body?.note || req.body?.reason || '',
+        refundAmount: req.body?.refundAmount,
+        actorId: req.user._id,
+        requireNote: true,
+      });
+      res.json(await mapDisputeDetail(updated, { viewerRole: 'admin' }));
+    } catch (err) {
+      if (disputeError(res, err)) return;
+      throw err;
+    }
   } catch (err) {
     next(err);
   }
@@ -596,15 +662,20 @@ router.patch('/disputes/:id', authenticate, requireRoles('admin'), async (req, r
     if (!order) return res.status(404).json({ message: 'Order not found' });
     const resolution = String(req.body?.resolution || '');
     const note = String(req.body?.note || '').slice(0, 1000);
+    const partial = req.body?.refundAmount != null && req.body.refundAmount !== '';
     try {
-      await resolveOrderDispute(order, { resolution, note, actorId: req.user._id });
+      const updated = await resolveOrderDispute(order, {
+        resolution,
+        note,
+        refundAmount: req.body?.refundAmount,
+        actorId: req.user._id,
+        requireNote: resolution === 'split' || partial,
+      });
+      res.json(mapOrder(updated, { viewerRole: 'admin' }));
     } catch (err) {
-      if (err.status) {
-        return res.status(err.status).json({ message: err.message });
-      }
+      if (disputeError(res, err)) return;
       throw err;
     }
-    res.json(mapOrder(order, { viewerRole: 'admin' }));
   } catch (err) {
     next(err);
   }

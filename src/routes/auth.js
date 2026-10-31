@@ -201,7 +201,7 @@ router.post('/register', async (req, res, next) => {
       deleteCachePattern('creators:*').catch(() => {});
     }
 
-    const session = await attachAuthSession(res, user);
+    const session = await attachAuthSession(res, user, { recordLogin: true });
     sendTransactional(user, 'welcome', {});
     return res.status(201).json(session);
   } catch (err) {
@@ -235,7 +235,7 @@ router.post('/login', async (req, res, next) => {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
     await assertAccountActive(user);
-    const session = await attachAuthSession(res, user);
+    const session = await attachAuthSession(res, user, { recordLogin: true });
     loginNotice(req, user);
     return res.json(session);
   } catch (err) {
@@ -435,7 +435,7 @@ router.get('/google/callback', async (req, res, next) => {
 
     const user = await findOrCreateGoogleUser(profile);
     await assertAccountActive(user);
-    const session = await attachAuthSession(res, user);
+    const session = await attachAuthSession(res, user, { recordLogin: true });
     loginNotice(req, user);
     if (mobile) {
       const q = new URLSearchParams({
@@ -486,7 +486,7 @@ router.post('/google/login', async (req, res, next) => {
 
     const user = await findOrCreateGoogleUser(profile);
     await assertAccountActive(user);
-    const session = await attachAuthSession(res, user);
+    const session = await attachAuthSession(res, user, { recordLogin: true });
     loginNotice(req, user);
     return res.json(session);
   } catch (err) {

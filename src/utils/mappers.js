@@ -144,6 +144,10 @@ function mapOrder(doc, { viewerId, viewerRole } = {}) {
     disputeReason: o.disputeReason || '',
     disputeOpenedAt: o.disputeOpenedAt ? new Date(o.disputeOpenedAt).toISOString() : null,
     disputeResolvedAt: o.disputeResolvedAt ? new Date(o.disputeResolvedAt).toISOString() : null,
+    disputeResolutionNote: o.disputeResolutionNote || '',
+    disputeOutcome: o.disputeOutcome || '',
+    disputeRefundAmount: roundMoney(o.disputeRefundAmount || 0),
+    disputeSellerKeptAmount: roundMoney(o.disputeSellerKeptAmount || 0),
     canDispute: !!(viewerIsBuyer || viewerRole === 'admin') && canOpenDispute(o),
   };
 }
