@@ -4,6 +4,8 @@ const { authenticate } = require('../middleware/auth');
 const { hasCapability } = require('../utils/roles');
 const { mapOrder } = require('../utils/mappers');
 const { openOrderDispute } = require('../utils/open-order-dispute');
+const { postDisputeMessage, mapDisputeDetail } = require('../utils/dispute-thread');
+const { assertCanViewDispute } = require('../utils/dispute-access');
 
 const mongoose = require('mongoose');
 const User = require('../models/User');
@@ -136,11 +138,27 @@ router.post('/:id/dispute', authenticate, async (req, res, next) => {
       return res.status(403).json({ message: 'Only the buyer can open a dispute on this order' });
     }
     const reason = String(req.body?.reason || '').trim().slice(0, 1000);
+    let attachments = [];
+    if (Array.isArray(req.body?.attachmentIds) && req.body.attachmentIds.length) {
+      try {
+        const { resolveAttachments } = require('./attachments');
+        attachments = await resolveAttachments(req.body.attachmentIds, {
+          scope: 'dispute',
+          scopeId: order._id,
+          owner: req.user._id,
+        });
+      } catch (err) {
+        return res.status(err.status || 400).json({ message: err.message, code: err.code || 'ATTACHMENTS_INVALID' });
+      }
+    }
     try {
       await openOrderDispute(order, {
         reason,
         actorName: req.user.name,
+        actorId: req.user._id,
         href: '/sell/complaints',
+        evidenceUrls: req.body?.evidenceUrls,
+        attachments,
       });
     } catch (err) {
       if (err.status) {
@@ -150,6 +168,43 @@ router.post('/:id/dispute', authenticate, async (req, res, next) => {
     }
 
     res.json(mapOrder(order, { viewerId: req.user._id, viewerRole: req.user.role }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** GET /v1/orders/:id/dispute — buyer, seller, or admin. Other accounts get 404. */
+router.get('/:id/dispute', authenticate, async (req, res, next) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(404).json({ message: 'Dispute not found', code: 'DISPUTE_NOT_FOUND' });
+    }
+    const order = await Order.findById(req.params.id);
+    try {
+      assertCanViewDispute(req.user, order);
+    } catch (err) {
+      return res.status(err.status || 404).json({ message: err.message, code: err.code });
+    }
+    res.json(await mapDisputeDetail(order, { viewerRole: req.user.role }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** POST /v1/orders/:id/dispute/messages — reply in the buyer/seller/admin thread. */
+router.post('/:id/dispute/messages', authenticate, async (req, res, next) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(404).json({ message: 'Dispute not found', code: 'DISPUTE_NOT_FOUND' });
+    }
+    const order = await Order.findById(req.params.id);
+    try {
+      await postDisputeMessage(order, req.user, { body: req.body?.body, attachmentIds: req.body?.attachmentIds });
+    } catch (err) {
+      if (err.status) return res.status(err.status).json({ message: err.message, code: err.code });
+      throw err;
+    }
+    res.status(201).json(await mapDisputeDetail(order, { viewerRole: req.user.role }));
   } catch (err) {
     next(err);
   }

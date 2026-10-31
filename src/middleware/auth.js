@@ -253,6 +253,11 @@ function issueAuthTokens(user) {
 }
 
 async function attachAuthSession(res, user, meta = {}) {
+  if (meta.recordLogin && user && user._id) {
+    const now = new Date();
+    user.lastLoginAt = now;
+    await User.updateOne({ _id: user._id }, { $set: { lastLoginAt: now } }).catch(() => {});
+  }
   const tokens = issueAuthTokens(user);
   setRefreshCookie(res, tokens.refreshToken);
   await persistAuthCaches(user, meta);

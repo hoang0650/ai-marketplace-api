@@ -5,6 +5,8 @@ const Attachment = require('../models/Attachment');
 const Conversation = require('../models/Conversation');
 const HireProject = require('../models/HireProject');
 const Complaint = require('../models/Complaint');
+const Order = require('../models/Order');
+const { canOpenDispute } = require('../utils/payout-hold');
 const { authenticate } = require('../middleware/auth');
 const { isMinioEnabled, putAttachmentObject, getAttachmentStream } = require('../config/minio');
 const { MAX_BYTES, inspectFile, verifySig, publicAttachment } = require('../utils/attachments');
@@ -14,7 +16,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX
 const isId = (v) => mongoose.isValidObjectId(v);
 const fail = (res, status, code, message) => res.status(status).json({ code, error: code, message: message || code });
 
-/** Participant check for a scope. Admins may read (complaints) but not upload. */
+/** Participant check for a scope. Admins may attach files on complaints and disputes. */
 async function canAccess(scope, scopeId, user, { write = false } = {}) {
   if (!isId(scopeId)) return false;
   const me = String(user._id);
@@ -27,6 +29,16 @@ async function canAccess(scope, scopeId, user, { write = false } = {}) {
     if ([String(c.complainant), String(c.seller || '')].includes(me)) return !write || c.status !== 'closed';
     // Admins handle complaints, so they may also attach files to the case thread.
     return user.role === 'admin' && (!write || c.status !== 'closed');
+  } else if (scope === 'dispute') {
+    const order = await Order.findById(scopeId)
+      .select('buyer seller disputeStatus status payoutHoldUntil completedAt sellerNetAmount sellerNet amount ownershipType createdAt')
+      .lean();
+    if (!order) return false;
+    const party = [String(order.buyer), String(order.seller)].includes(me);
+    if (user.role !== 'admin' && !party) return false;
+    if ((order.disputeStatus || 'none') !== 'none') return true;
+    // Before the dispute exists the buyer can attach evidence only while the 48h window is open.
+    return write && me === String(order.buyer) && canOpenDispute(order);
   }
   if (!doc) return false;
   if ([String(doc.buyer), String(doc.seller)].includes(me)) return true;
@@ -42,7 +54,7 @@ router.post('/', authenticate, (req, res, next) => {
       if (!isMinioEnabled()) return fail(res, 503, 'MINIO_NOT_CONFIGURED');
       const scope = String(req.body?.scope || '');
       const scopeId = String(req.body?.scopeId || '');
-      if (!['chat', 'hire', 'complaint'].includes(scope)) return fail(res, 400, 'SCOPE_INVALID');
+      if (!['chat', 'hire', 'complaint', 'dispute'].includes(scope)) return fail(res, 400, 'SCOPE_INVALID');
       if (!(await canAccess(scope, scopeId, req.user, { write: true }))) return fail(res, 403, 'ATTACHMENT_FORBIDDEN');
       if (!req.file) return fail(res, 400, 'NO_FILE');
       const recent = await Attachment.countDocuments({ owner: req.user._id, createdAt: { $gte: new Date(Date.now() - 3600e3) } });
