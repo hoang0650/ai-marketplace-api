@@ -13,9 +13,11 @@ const {
   buildDisputeMessage,
   planDisputeResolution,
   wantsPagedDisputes,
+  disputePartyNames,
   disputeListFilter,
   applyDisputeOpen,
 } = require('../../src/utils/dispute-access');
+const { findDisputeSellerIds, mapAdminDisputeRows, mapDisputeDetail } = require('../../src/utils/dispute-thread');
 
 function id() {
   return new mongoose.Types.ObjectId();
@@ -134,6 +136,180 @@ test('dispute list stays an array until the caller asks to page, filter, or sear
   const filtered = disputeListFilter({ status: 'open', q, rx: /web/i });
   assert.equal(filtered.$and[0].disputeStatus, 'open');
   assert.equal(filtered.$and[1].$or.some((clause) => clause._id === q), true);
+});
+
+test('dispute party names prefer the live account, then the shop or the order snapshot', () => {
+  const order = { buyerName: 'On the order' };
+  assert.deepEqual(
+    disputePartyNames(order, {
+      buyer: { name: 'Mai' },
+      seller: { name: 'Hoa' },
+      profile: { displayName: 'Ignored Shop' },
+    }),
+    { buyerName: 'Mai', sellerName: 'Hoa' },
+  );
+  assert.deepEqual(
+    disputePartyNames(order, {
+      buyer: { name: '   ' },
+      seller: { name: '' },
+      profile: { displayName: ' Studio B ' },
+    }),
+    { buyerName: 'On the order', sellerName: 'Studio B' },
+  );
+  assert.deepEqual(disputePartyNames(order, {}), { buyerName: 'On the order', sellerName: '' });
+});
+
+function queryResult(value) {
+  return {
+    select() {
+      return this;
+    },
+    sort() {
+      return this;
+    },
+    limit() {
+      return this;
+    },
+    lean: async () => value,
+  };
+}
+
+test('admin dispute list rows include the current buyer and seller names', async () => {
+  const buyerA = id();
+  const sellerA = id();
+  const buyerB = id();
+  const sellerB = id();
+  const rows = await mapAdminDisputeRows(
+    [
+      openOrder({ buyer: buyerA, seller: sellerA, buyerName: 'Old A' }),
+      openOrder({ buyer: buyerB, seller: sellerB, buyerName: 'Old B' }),
+    ],
+    {
+      User: {
+        find() {
+          return queryResult([
+            { _id: buyerA, name: 'Mai' },
+            { _id: sellerA, name: 'Hoa' },
+            { _id: buyerB, name: '  ' },
+            { _id: sellerB, name: '' },
+          ]);
+        },
+      },
+      SellerProfile: {
+        find() {
+          return queryResult([
+            { user: sellerA, displayName: 'Ignored Shop' },
+            { user: sellerB, displayName: 'Studio B' },
+          ]);
+        },
+      },
+    },
+  );
+  assert.equal(rows[0].buyerName, 'Mai');
+  assert.equal(rows[0].sellerName, 'Hoa');
+  assert.equal(rows[1].buyerName, 'Old B');
+  assert.equal(rows[1].sellerName, 'Studio B');
+});
+
+test('dispute detail exposes sellerName, buyerName, seller.name, and buyer.name', async () => {
+  const buyer = id();
+  const seller = id();
+  const order = openOrder({ buyer, seller, buyerName: 'On the order' });
+  const detail = await mapDisputeDetail(
+    order,
+    { viewerRole: 'admin' },
+    {
+      User: {
+        find() {
+          return queryResult([
+            { _id: buyer, name: '   ', email: 'b@x.vn', role: 'buyer' },
+            { _id: seller, name: '', email: 's@x.vn', creatorSlug: 'hoa', role: 'seller' },
+          ]);
+        },
+      },
+      SellerProfile: {
+        findOne() {
+          return queryResult({ user: seller, displayName: 'Hoa Studio' });
+        },
+      },
+      Complaint: {
+        findOne() {
+          return queryResult(null);
+        },
+      },
+      AuditLog: {
+        find() {
+          return queryResult([]);
+        },
+      },
+    },
+  );
+  assert.equal(detail.buyerName, 'On the order');
+  assert.equal(detail.buyer.name, 'On the order');
+  assert.equal(detail.sellerName, 'Hoa Studio');
+  assert.equal(detail.seller.name, 'Hoa Studio');
+
+  const named = await mapDisputeDetail(
+    order,
+    { viewerRole: 'buyer' },
+    {
+      User: {
+        find() {
+          return queryResult([
+            { _id: buyer, name: 'Mai', role: 'buyer' },
+            { _id: seller, name: 'Hoa', creatorSlug: 'hoa', role: 'seller' },
+          ]);
+        },
+      },
+      SellerProfile: {
+        findOne() {
+          return queryResult({ user: seller, displayName: 'Ignored Shop' });
+        },
+      },
+      Complaint: {
+        findOne() {
+          return queryResult(null);
+        },
+      },
+    },
+  );
+  assert.equal(named.buyerName, 'Mai');
+  assert.equal(named.buyer.name, 'Mai');
+  assert.equal(named.sellerName, 'Hoa');
+  assert.equal(named.seller.name, 'Hoa');
+});
+
+test('admin dispute search also matches the seller account name and shop display name', async () => {
+  const seller = id();
+  const shop = id();
+  const rx = /lan/i;
+  const queries = [];
+  const sellerIds = await findDisputeSellerIds(rx, {
+    User: {
+      find(query) {
+        queries.push(query);
+        return queryResult([{ _id: seller }]);
+      },
+    },
+    SellerProfile: {
+      find(query) {
+        queries.push(query);
+        return queryResult([{ user: shop }, { user: seller }]);
+      },
+    },
+  });
+  assert.deepEqual(queries, [{ name: rx }, { displayName: rx }]);
+  const filtered = disputeListFilter({ status: 'open', q: 'lan', rx, sellerIds });
+  const or = filtered.$and[1].$or;
+  assert.equal(filtered.$and[0].disputeStatus, 'open');
+  assert.equal(or[0].productName, rx);
+  assert.equal(or[1].buyerName, rx);
+  assert.equal(or[2].disputeReason, rx);
+  assert.equal(or[3].disputeResolutionNote, rx);
+  assert.deepEqual(
+    or.find((clause) => clause.seller).seller.$in,
+    [String(seller), String(shop)],
+  );
 });
 
 test('opening a dispute stores the claim and drops non-http evidence', () => {

@@ -3,12 +3,15 @@ const User = require('../models/User');
 const Product = require('../models/Product');
 const Complaint = require('../models/Complaint');
 const AuditLog = require('../models/AuditLog');
+const SellerProfile = require('../models/SellerProfile');
 const { mapOrder } = require('./mappers');
 const { isPayoutHeld, effectiveSellerNet } = require('./payout-hold');
 const {
   ADMIN_DISPUTE_LABEL,
   assertCanViewDispute,
   buildDisputeMessage,
+  disputePartyNames,
+  disputeSellerSearchIds,
   ensureThread,
   idOf,
 } = require('./dispute-access');
@@ -71,33 +74,44 @@ async function postDisputeMessage(order, user, { body, attachmentIds } = {}) {
   return order;
 }
 
-async function mapDisputeDetail(order, { viewerRole = 'buyer' } = {}) {
+async function mapDisputeDetail(order, { viewerRole = 'buyer' } = {}, deps = {}) {
   const adminView = viewerRole === 'admin';
+  const UserModel = deps.User || User;
+  const ProductModel = deps.Product || Product;
+  const ComplaintModel = deps.Complaint || Complaint;
+  const AuditModel = deps.AuditLog || AuditLog;
+  const Profile = deps.SellerProfile || SellerProfile;
   const o = typeof order.toObject === 'function' ? order.toObject({ virtuals: true }) : order;
   const buyerId = idOf(o.buyer);
   const sellerId = idOf(o.seller);
   const productId = idOf(o.product);
-  const [people, product, complaint, audits] = await Promise.all([
-    User.find({ _id: { $in: [buyerId, sellerId].filter(Boolean) } })
+  const [people, product, complaint, audits, sellerProfile] = await Promise.all([
+    UserModel.find({ _id: { $in: [buyerId, sellerId].filter(Boolean) } })
       .select('name email avatarUrl creatorSlug role')
       .lean(),
-    productId ? Product.findById(productId).select('name slug').lean() : null,
-    Complaint.findOne({ order: o._id }).select('caseRef status').sort({ createdAt: -1 }).lean(),
+    productId ? ProductModel.findById(productId).select('name slug').lean() : null,
+    ComplaintModel.findOne({ order: o._id }).select('caseRef status').sort({ createdAt: -1 }).lean(),
     adminView
-      ? AuditLog.find({ resourceType: 'Order', resourceId: String(o._id || o.id), action: 'dispute.resolve' })
+      ? AuditModel.find({ resourceType: 'Order', resourceId: String(o._id || o.id), action: 'dispute.resolve' })
           .sort({ createdAt: -1 })
           .limit(20)
           .lean()
       : [],
+    sellerId ? Profile.findOne({ user: sellerId }).select('displayName').lean() : null,
   ]);
-  const byId = new Map(people.map((u) => [String(u._id), u]));
-  const person = (id) => {
+  const byId = new Map(people.map((u) => [idOf(u), u]));
+  const names = disputePartyNames(o, {
+    buyer: byId.get(buyerId),
+    seller: byId.get(sellerId),
+    profile: sellerProfile,
+  });
+  const person = (id, name) => {
     const u = byId.get(String(id));
     if (!u && !id) return null;
     const slug = u?.creatorSlug || '';
     return {
       id: String(id || ''),
-      name: u?.name || (id === buyerId ? o.buyerName || '' : ''),
+      name: name || '',
       email: adminView ? u?.email || '' : '',
       avatarUrl: u?.avatarUrl || '',
       role: u?.role || '',
@@ -111,8 +125,10 @@ async function mapDisputeDetail(order, { viewerRole = 'buyer' } = {}) {
   const slug = product?.slug || '';
   return {
     ...mapOrder(o, { viewerRole }),
-    buyer: person(buyerId),
-    seller: person(sellerId),
+    buyerName: names.buyerName,
+    sellerName: names.sellerName,
+    buyer: person(buyerId, names.buyerName),
+    seller: person(sellerId, names.sellerName),
     product: {
       id: productId,
       name: product?.name || o.productName || '',
@@ -166,4 +182,68 @@ async function reloadOrder(id) {
   return Order.findById(id);
 }
 
-module.exports = { mapThreadMessage, postDisputeMessage, mapDisputeDetail, reloadOrder };
+/** Seller ids whose account name or shop display name matches the admin dispute search. */
+async function findDisputeSellerIds(rx, deps = {}) {
+  if (!rx) return [];
+  const UserModel = deps.User || User;
+  const Profile = deps.SellerProfile || SellerProfile;
+  const [users, profiles] = await Promise.all([
+    UserModel.find({ name: rx }).select('_id').lean(),
+    Profile.find({ displayName: rx }).select('user').lean(),
+  ]);
+  return disputeSellerSearchIds({ users, profiles });
+}
+
+/** Admin dispute list rows, with the current buyer and seller names filled in. */
+async function mapAdminDisputeRows(orders, deps = {}) {
+  const list = Array.isArray(orders) ? orders : [];
+  const UserModel = deps.User || User;
+  const Profile = deps.SellerProfile || SellerProfile;
+  const userIds = [];
+  const sellerIds = [];
+  const seenUsers = new Set();
+  const seenSellers = new Set();
+  for (const order of list) {
+    const buyerId = idOf(order.buyer);
+    const sellerId = idOf(order.seller);
+    if (buyerId && !seenUsers.has(buyerId)) {
+      seenUsers.add(buyerId);
+      userIds.push(buyerId);
+    }
+    if (sellerId && !seenUsers.has(sellerId)) {
+      seenUsers.add(sellerId);
+      userIds.push(sellerId);
+    }
+    if (sellerId && !seenSellers.has(sellerId)) {
+      seenSellers.add(sellerId);
+      sellerIds.push(sellerId);
+    }
+  }
+  const [users, profiles] = await Promise.all([
+    userIds.length ? UserModel.find({ _id: { $in: userIds } }).select('name').lean() : [],
+    sellerIds.length ? Profile.find({ user: { $in: sellerIds } }).select('user displayName').lean() : [],
+  ]);
+  const usersById = new Map((users || []).map((user) => [idOf(user), user]));
+  const profilesByUser = new Map((profiles || []).map((profile) => [idOf(profile.user), profile]));
+  return list.map((order) => {
+    const names = disputePartyNames(order, {
+      buyer: usersById.get(idOf(order.buyer)),
+      seller: usersById.get(idOf(order.seller)),
+      profile: profilesByUser.get(idOf(order.seller)),
+    });
+    return {
+      ...mapOrder(order, { viewerRole: 'admin' }),
+      buyerName: names.buyerName,
+      sellerName: names.sellerName,
+    };
+  });
+}
+
+module.exports = {
+  mapThreadMessage,
+  postDisputeMessage,
+  mapDisputeDetail,
+  reloadOrder,
+  findDisputeSellerIds,
+  mapAdminDisputeRows,
+};
