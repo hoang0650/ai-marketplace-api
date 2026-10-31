@@ -2,6 +2,7 @@ const WalletTx = require('../models/WalletTx');
 const { bankTransferConfig } = require('../config/bank-transfer');
 const { buildVietQrPayload } = require('../utils/vietqr');
 const { KIND, makeTransferContent, convertAmount } = require('./bank-topup-core');
+const { getExchangeRates, fxAudit } = require('./exchange-rate');
 
 function httpError(status, message, code) {
   const err = new Error(message);
@@ -20,14 +21,17 @@ async function qrDataUrl(payload) {
   }
 }
 
-function publicBankInfo(cfg = bankTransferConfig()) {
+async function publicBankInfo(cfg = bankTransferConfig()) {
+  const fx = await getExchangeRates();
   return {
     enabled: cfg.enabled,
     bankName: cfg.bankName,
     accountNumber: cfg.enabled ? cfg.accountNumber : '',
     accountName: cfg.enabled ? cfg.accountName : '',
     bin: cfg.bin,
-    vndPerUsd: cfg.vndPerUsd,
+    vndPerUsd: fx.vndPerUsd,
+    exchangeRateSource: fx.source,
+    exchangeRateUpdatedAt: fx.updatedAt,
     minVnd: cfg.minVnd,
     maxVnd: cfg.maxVnd,
     expireHours: cfg.expireHours,
@@ -70,7 +74,8 @@ async function mapBankDeposit(tx, cfg = bankTransferConfig(), { withQr = true } 
 
 async function createBankDeposit(userId, { amount, currency }, cfg = bankTransferConfig()) {
   if (!cfg.enabled) throw httpError(503, 'Bank transfer top-up is not configured', 'BANK_TOPUP_DISABLED');
-  const conv = convertAmount({ amount, currency }, cfg.vndPerUsd);
+  const fx = await getExchangeRates();
+  const conv = convertAmount({ amount, currency }, fx.vndPerUsd);
   if (!conv) throw httpError(400, 'Invalid amount', 'INVALID_AMOUNT');
   if (conv.amountVnd < cfg.minVnd || conv.amountVnd > cfg.maxVnd) {
     throw httpError(400, `Amount must be between ${cfg.minVnd} and ${cfg.maxVnd} VND`, 'AMOUNT_OUT_OF_RANGE');
@@ -99,7 +104,7 @@ async function createBankDeposit(userId, { amount, currency }, cfg = bankTransfe
         channel: 'bank_transfer',
         content,
         amountVnd: conv.amountVnd,
-        vndPerUsd: conv.vndPerUsd,
+        ...fxAudit(fx),
         bankName: cfg.bankName,
         bin: cfg.bin,
         accountNumber: cfg.accountNumber,
