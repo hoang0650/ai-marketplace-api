@@ -1,7 +1,7 @@
-const config = require('../config/env');
 const TalentProfile = require('../models/TalentProfile');
 const SellerProfile = require('../models/SellerProfile');
-const { DEFAULT_VND_PER_USD } = require('../config/fx');
+const { fallbackVndPerUsd } = require('../config/fx');
+const { currentVndPerUsd } = require('./exchange-rate');
 
 /**
  * Withdrawal policy per marketplace persona.
@@ -51,14 +51,16 @@ const EMPLOYER_MIN_VND = Math.max(0, Number(process.env.WITHDRAW_EMPLOYER_MIN_VN
  */
 const SELLER_CHARGE_AT_WITHDRAW = String(process.env.WITHDRAW_SELLER_CHARGE_AT_WITHDRAW || '').toLowerCase() === 'true';
 
-const VND_PER_USD = Math.max(1, Number(process.env.PAYPAL_VND_PER_USD || config.paypalVndPerUsd || DEFAULT_VND_PER_USD) || DEFAULT_VND_PER_USD);
+/** Snapshot of the env fallback at load. Live conversion uses `currentVndPerUsd()`. */
+const VND_PER_USD = fallbackVndPerUsd();
 
 function roundMoney(n) {
   return Math.round((Number(n) || 0) * 100) / 100;
 }
 
 function vndToUsd(vnd) {
-  return roundMoney(Number(vnd || 0) / VND_PER_USD);
+  const rate = currentVndPerUsd();
+  return roundMoney(Number(vnd || 0) / (rate > 0 ? rate : VND_PER_USD));
 }
 
 function sellerTaxRate(sellerType) {

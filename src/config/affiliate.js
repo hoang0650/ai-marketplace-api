@@ -1,4 +1,5 @@
 const { DEFAULT_VND_PER_USD } = require('./fx');
+const { currentVndPerUsd } = require('../finance/exchange-rate');
 
 function num(raw, fallback) {
   const n = Number(raw);
@@ -34,9 +35,21 @@ function affiliateConfig(env = process.env) {
       thresholdVnd: minWithdrawVnd,
       /** An approved Mẫu 08/CK-TNCN commitment exempts the affiliate from withholding. */
       commitmentExempts: String(env.AFFILIATE_PIT_COMMITMENT_EXEMPTS ?? 'true').toLowerCase() !== 'false',
-      vndPerUsd: Math.max(1, num(env.AFFILIATE_VND_PER_USD, DEFAULT_VND_PER_USD)),
+      vndPerUsd: vndRate(env, 'AFFILIATE_VND_PER_USD'),
     },
   };
+}
+
+/**
+ * A custom env object (tests) may pin the rate. The process environment does not:
+ * production uses the live exchange-rate service.
+ */
+function vndRate(env, key) {
+  if (env && env !== process.env) {
+    const n = Number(env[key]);
+    return Number.isFinite(n) && n > 0 ? Math.max(1, n) : DEFAULT_VND_PER_USD;
+  }
+  return currentVndPerUsd();
 }
 
 module.exports = { AFFILIATE_MAX_RATE, affiliateConfig };

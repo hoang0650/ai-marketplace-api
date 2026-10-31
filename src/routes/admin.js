@@ -19,6 +19,7 @@ const {
   assertCanResolveDispute,
 } = require('../utils/dispute-access');
 const { adminDailySeries, adminSeries } = require('../utils/admin-series');
+const { getExchangeRates } = require('../finance/exchange-rate');
 const {
   USER_ROLES,
   USER_STATUSES,
@@ -236,6 +237,7 @@ router.get('/overview', authenticate, requireRoles('admin'), async (_req, res, n
       commissionAmount: row.commissionAmount || 0,
     }));
 
+    const exchangeRate = await getExchangeRates().catch(() => null);
     res.json({
       users,
       products,
@@ -260,6 +262,7 @@ router.get('/overview', authenticate, requireRoles('admin'), async (_req, res, n
       sellerNet,
       buyerDeposits,
       buyerDepositCount,
+      exchangeRate,
       shops,
       series,
       usersList: usersList.map((u) => ({

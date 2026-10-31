@@ -22,6 +22,7 @@ const {
   stopAgentSubscriptionWorker,
 } = require('./finance/agent-subscription-worker');
 const { startVoteCycleWorker, stopVoteCycleWorker } = require('./community/vote-cycle-worker');
+const { warmExchangeRates } = require('./finance/exchange-rate');
 
 connectDb()
   .then(() => ensureLegalDocuments())
@@ -48,6 +49,10 @@ connectDb()
   .then(() => ensureAiProviderProducts())
   .then(() => ensureComputeTestProducts())
   .then(() => ensureProductKinds().catch((err) => console.error('[catalog] productKind backfill failed:', err.message)))
+  .then(() => warmExchangeRates())
+  .then((fx) => {
+    if (fx) console.log(`[exchange-rate] ${fx.source} VND/USD=${fx.vndPerUsd} CNY/USD=${fx.cnyPerUsd}`);
+  })
   .then(() => syncSalesCountsFromOrders())
   .then((stats) => {
     if (stats) {

@@ -79,6 +79,7 @@ const contentRoutes = require('./routes/content');
 const productFileRoutes = require('./routes/product-files');
 const paypalRoutes = require('./routes/paypal');
 const gpayRoutes = require('./routes/gpay');
+const exchangeRateRoutes = require('./routes/exchange-rates');
 const communityAgentRoutes = require('./routes/community-agents');
 const iapRoutes = require('./routes/iap');
 const gpuRoutes = require('./routes/gpu');
@@ -234,6 +235,8 @@ function createApp() {
   app.use('/v1/affiliate', affiliateRoutes);
   app.use('/v1/billing', billingRoutes);
   app.use('/v1/admin/agent-purges', agentPurgesAdminRoutes);
+  app.use('/v1/admin/exchange-rates', exchangeRateRoutes.adminRouter);
+  app.use('/v1/exchange-rates', exchangeRateRoutes);
   app.use('/v1/admin', adminRoutes);
   app.use('/v1/admin', adminFinanceRoutes);
   app.use('/v1/payments', paymentRoutes);

@@ -209,6 +209,8 @@ describe('gpu network volumes', () => {
     const vol = volumeDoc();
     stub(GpuRental, 'countDocuments', async () => 1);
     await assert.rejects(svc.deleteVolume(vol), { code: 'VOLUME_IN_USE' });
+    // Final settle reloads the rental after a lost compare-and-set. No Mongo in unit tests.
+    stub(GpuRental, 'findById', () => ({ lean: async () => null }));
 
     const r = new GpuRental({
       owner: user._id, name: 'ws', offerId: 'x', gpuName: 'x', providerServerId: 'pod9', status: 'running', ready: true,

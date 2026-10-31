@@ -301,6 +301,8 @@ router.post('/withdraw', authenticate, async (req, res, next) => {
       ? { gross: affiliateQuote.gross, platformFee: 0, tax: affiliateQuote.pitAmount, net: affiliateQuote.net, totalFee: affiliateQuote.pitAmount, chargeAtWithdraw: true }
       : quoteWithdrawal(amount, policy);
     const { createPayout } = require('../finance/payout-engine');
+    const { getExchangeRates, fxAudit } = require('../finance/exchange-rate');
+    const fx = await getExchangeRates();
     const { payout } = await createPayout({
       sellerId: req.user._id,
       payableAmount: quote.net,
@@ -328,6 +330,7 @@ router.post('/withdraw', authenticate, async (req, res, next) => {
       payoutId: payout.payoutId,
       note: `Payout ${payout.payoutId} · ${persona} · gross ${quote.gross} − fee ${quote.platformFee} − tax ${quote.tax} = net ${quote.net}`,
       meta: {
+        ...fxAudit(fx),
         channel: 'payout',
         persona,
         grossAmount: quote.gross,

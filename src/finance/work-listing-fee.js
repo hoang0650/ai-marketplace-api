@@ -3,6 +3,7 @@ const LedgerEntry = require('../models/LedgerEntry');
 const { requireAvailableFunds } = require('../utils/wallet');
 const { newEntryId } = require('./ledger-service');
 const { vndToUsd } = require('./payout-policy');
+const { getExchangeRates, fxAudit, publicQuote } = require('./exchange-rate');
 const { isAdmin } = require('../utils/roles');
 
 /**
@@ -24,9 +25,10 @@ async function assertCanPayListingFee(user) {
 }
 
 async function chargeListingFee(user, { listingType, listingId, title }) {
+  await getExchangeRates();
   const fee = listingFee();
   if (isAdmin(user) || fee.amount <= 0) return { ...fee, charged: false };
-  const meta = { kind: 'work_listing_fee', listingType, listingId: String(listingId), feeVnd: fee.vnd };
+  const meta = { kind: 'work_listing_fee', listingType, listingId: String(listingId), feeVnd: fee.vnd, ...fxAudit(publicQuote()) };
   await WalletTx.create({
     user: user._id,
     type: 'debit',

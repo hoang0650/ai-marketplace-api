@@ -33,7 +33,13 @@ function sendErr(res, next, err) {
 
 const userRouter = express.Router();
 
-userRouter.get('/config', authenticate, (_req, res) => res.json(publicBankInfo()));
+userRouter.get('/config', authenticate, async (_req, res, next) => {
+  try {
+    res.json(await publicBankInfo());
+  } catch (err) {
+    sendErr(res, next, err);
+  }
+});
 
 userRouter.post('/', authenticate, async (req, res, next) => {
   try {

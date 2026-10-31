@@ -5,6 +5,7 @@ const LedgerEntry = require('../models/LedgerEntry');
 const { requireAvailableFunds } = require('../utils/wallet');
 const { newEntryId } = require('./ledger-service');
 const { vndToUsd } = require('./payout-policy');
+const { getExchangeRates, fxAudit, publicQuote } = require('./exchange-rate');
 const { isAdmin } = require('../utils/roles');
 const { notifyUser } = require('../utils/notify');
 
@@ -164,6 +165,7 @@ async function subscribeAgent(user, agentId, { now = new Date(), source = 'manua
     err.status = 400;
     throw err;
   }
+  await getExchangeRates();
   const fee = monthlyFee(id);
   if (isAdmin(user) || fee.amount <= 0) {
     return { ...(await getSubscriptionStatus(user, id)), charged: false };
@@ -225,7 +227,7 @@ async function subscribeAgent(user, agentId, { now = new Date(), source = 'manua
     await requireAvailableFunds(user._id, fee.amount, { currency: fee.currency });
 
     const label = AGENT_LABELS[id];
-    const meta = { kind: 'agent_subscription', agentId: id, feeVnd: fee.vnd, periodDays: fee.periodDays, source };
+    const meta = { kind: 'agent_subscription', agentId: id, feeVnd: fee.vnd, periodDays: fee.periodDays, source, ...fxAudit(publicQuote()) };
     if (key) meta.idempotencyKey = key;
     const tx = await WalletTx.create({
       user: user._id,
