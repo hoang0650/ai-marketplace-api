@@ -10,6 +10,7 @@ const {
   buildCheckoutOrder,
 } = require('../utils/paypal-client');
 const config = require('../config/env');
+const { getExchangeRates, fxAudit } = require('../finance/exchange-rate');
 
 const router = express.Router();
 
@@ -29,7 +30,8 @@ router.post('/create-order', authenticate, async (req, res, next) => {
       return res.status(503).json({ message: 'PayPal is not configured', code: 'PAYPAL_NOT_CONFIGURED' });
     }
     const currency = String(req.body?.currency || 'USD').toUpperCase();
-    const amountUsd = toPaypalUsd(req.body?.amount, currency);
+    const fx = await getExchangeRates();
+    const amountUsd = toPaypalUsd(req.body?.amount, currency, fx.vndPerUsd);
     if (!amountUsd) {
       return res.status(400).json({ message: 'Invalid amount for PayPal (USD or VND)' });
     }
@@ -44,6 +46,11 @@ router.post('/create-order', authenticate, async (req, res, next) => {
       status: 'pending',
       paymentMethod: 'paypal',
       note,
+      meta: {
+        ...fxAudit(fx),
+        inputAmount: Number(req.body?.amount) || 0,
+        inputCurrency: currency,
+      },
     });
 
     let order;

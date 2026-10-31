@@ -9,7 +9,7 @@ const { orderRequestId, resolveOrderEvent, settleOrderEvent, roundMoney } = requ
 const { isAdmin } = require('../utils/roles');
 const { publicApiBase } = require('../config/googleAuth');
 const config = require('../config/env');
-const { DEFAULT_VND_PER_USD } = require('../config/fx');
+const { getExchangeRates, fxAudit } = require('../finance/exchange-rate');
 const {
   gpayEnabled,
   gpayFeatureEnabled,
@@ -32,8 +32,8 @@ const router = express.Router();
 const MAX_TOPUP_VND = 500_000_000;
 const APP_SCHEME = 'aimarkets';
 
-function vndPerUsd() {
-  return Number(config.gpayVndPerUsd) > 0 ? Number(config.gpayVndPerUsd) : DEFAULT_VND_PER_USD;
+async function rateQuote() {
+  return getExchangeRates();
 }
 
 function publicAccount(doc) {
@@ -97,7 +97,8 @@ function readAmountVnd(req, res) {
 
 /** Pending deposit whose `_id` also names the GPay order (`AIM<id>`). */
 async function createPendingDeposit(user, amountVnd, channel) {
-  const rate = vndPerUsd();
+  const fx = await rateQuote();
+  const rate = fx.vndPerUsd;
   const amountUsd = roundMoney(amountVnd / rate);
   const _id = new mongoose.Types.ObjectId();
   return WalletTx.create({
@@ -110,7 +111,7 @@ async function createPendingDeposit(user, amountVnd, channel) {
     paymentMethod: 'gpay',
     gpayRequestId: orderRequestId(_id),
     note: `GPay ${channel === 'gpay_qr' ? 'QR' : 'gateway'} · ${amountVnd.toLocaleString('vi-VN')} VND`,
-    meta: { channel, amountVnd, vndPerUsd: rate },
+    meta: { channel, amountVnd, ...fxAudit(fx) },
   });
 }
 
@@ -122,25 +123,32 @@ async function cancelDeposit(tx, reason) {
  * Feature flag + display config for the deposit screens.
  * `available` keeps the method visible; `enabled` means merchant credentials are set.
  */
-router.get('/config', optionalAuth, (req, res) => {
-  const portalEnabled = gpayPortalEnabled();
-  const qrEnabled = gpayEnabled() && gpayVaEnabled();
-  const enabled = portalEnabled || qrEnabled;
-  res.json({
-    available: gpayFeatureEnabled(),
-    featureEnabled: gpayFeatureEnabled(),
-    enabled,
-    portalEnabled,
-    qrEnabled,
-    sandbox: gpaySandbox(),
-    canSimulate: enabled && canSimulate(req.user),
-    bankCode: config.gpayVaBankCode,
-    accountType: config.gpayAccountType,
-    minTopupVnd: Number(config.gpayMinTopupVnd) || 0,
-    vndPerUsd: vndPerUsd(),
-    merchantName: 'AI Markets',
-    webhookUrl: webhookUrl(),
-  });
+router.get('/config', optionalAuth, async (req, res, next) => {
+  try {
+    const portalEnabled = gpayPortalEnabled();
+    const qrEnabled = gpayEnabled() && gpayVaEnabled();
+    const enabled = portalEnabled || qrEnabled;
+    const fx = await rateQuote();
+    res.json({
+      available: gpayFeatureEnabled(),
+      featureEnabled: gpayFeatureEnabled(),
+      enabled,
+      portalEnabled,
+      qrEnabled,
+      sandbox: gpaySandbox(),
+      canSimulate: enabled && canSimulate(req.user),
+      bankCode: config.gpayVaBankCode,
+      accountType: config.gpayAccountType,
+      minTopupVnd: Number(config.gpayMinTopupVnd) || 0,
+      vndPerUsd: fx.vndPerUsd,
+      exchangeRateSource: fx.source,
+      exchangeRateUpdatedAt: fx.updatedAt,
+      merchantName: 'AI Markets',
+      webhookUrl: webhookUrl(),
+    });
+  } catch (err) {
+    next(err);
+  }
 });
 
 /**
@@ -242,7 +250,7 @@ router.get('/orders/:requestId', authenticate, async (req, res, next) => {
         const info = await getBillInfo({ merchantOrderId: tx.gpayRequestId, gpayBillId: tx.gpayBillId });
         const event = verifyWebhookSignature(info) ? resolveOrderEvent(info) : null;
         if (event && event.outcome !== 'pending') {
-          await settleOrderEvent(event, { WalletTx, vndPerUsd: vndPerUsd() });
+          await settleOrderEvent(event, { WalletTx, vndPerUsd: (await rateQuote()).vndPerUsd });
           tx = await WalletTx.findById(tx._id);
         }
       } catch {
@@ -392,7 +400,8 @@ async function handleVirtualAccountEvent(payload, res) {
     return res.json({ success: true, duplicate: true, wallet: existing ? mapWallet(existing) : null });
   }
 
-  const rate = vndPerUsd();
+  const fx = await rateQuote();
+  const rate = fx.vndPerUsd;
   const amountUsd = roundMoney(amountVnd / rate);
   if (amountUsd <= 0) {
     return res.status(400).json({ message: 'Deposit amount rounds to zero', code: 'GPAY_BAD_AMOUNT' });
@@ -415,7 +424,7 @@ async function handleVirtualAccountEvent(payload, res) {
       meta: {
         channel: 'gpay',
         amountVnd,
-        vndPerUsd: rate,
+        ...fxAudit(fx),
         bankTraceId: payload.bank_trace_id || '',
         bankTransactionId: payload.bank_transaction_id || '',
       },
@@ -453,7 +462,7 @@ router.post('/webhook', async (req, res, next) => {
     const event = resolveOrderEvent(payload);
     if (!event) return handleVirtualAccountEvent(payload, res);
 
-    const { status, body } = await settleOrderEvent(event, { WalletTx, vndPerUsd: vndPerUsd(), mapWallet });
+    const { status, body } = await settleOrderEvent(event, { WalletTx, vndPerUsd: (await rateQuote()).vndPerUsd, mapWallet });
     return res.status(status).json(body);
   } catch (err) {
     next(err);
@@ -472,7 +481,8 @@ router.post('/sandbox/credit', requireGpayEnabled, authenticate, async (req, res
     }
 
     const gpayTransId = `SIM${Date.now()}${new mongoose.Types.ObjectId().toString().slice(-6)}`;
-    const rate = vndPerUsd();
+    const fx = await rateQuote();
+    const rate = fx.vndPerUsd;
     const amountUsd = roundMoney(amountVnd / rate);
 
     const tx = await WalletTx.create({
@@ -484,7 +494,7 @@ router.post('/sandbox/credit', requireGpayEnabled, authenticate, async (req, res
       paymentMethod: 'gpay',
       gpayTransactionId: gpayTransId,
       note: `GPay sandbox credit · ${amountVnd.toLocaleString('vi-VN')} VND`,
-      meta: { channel: 'gpay', sandbox: true, amountVnd, vndPerUsd: rate },
+      meta: { channel: 'gpay', sandbox: true, amountVnd, ...fxAudit(fx) },
       reviewedAt: new Date(),
     });
 

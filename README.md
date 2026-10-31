@@ -81,6 +81,7 @@ useMockApi: false,
 | POST | `/auth/logout` | cookie (optional Bearer) | xóa refresh cookie |
 | GET | `/auth/me` | JWT | user hiện tại |
 | GET | `/auth/info` | JWT | alias `/me` (cùng phhotel `/users/info`) |
+| GET | `/exchange-rates` | — | live USD→VND and USD→CNY (`vndPerUsd`, `cnyPerUsd`, `source`, `updatedAt`) |
 | GET | `/products` | — |
 | GET | `/products/:slug` | — |
 | POST/PUT/DELETE | `/products` | creator/admin |

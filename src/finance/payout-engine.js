@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const SellerPayout = require('../models/SellerPayout');
 const SellerProfile = require('../models/SellerProfile');
 const { writeAuditLog } = require('../utils/audit');
+const { getExchangeRates, fxAudit } = require('./exchange-rate');
 
 function canPayoutSeller(profile) {
   if (!profile) {
@@ -42,6 +43,7 @@ async function createPayout({
     ? canPayoutSeller(await SellerProfile.findOne({ user: sellerId }).lean())
     : { ok: true, status: 'PENDING', holdReason: '' };
   const payoutId = `po_${crypto.randomBytes(8).toString('hex')}`;
+  const fx = await getExchangeRates();
   const payout = await SellerPayout.create({
     payoutId,
     sellerId,
@@ -55,6 +57,7 @@ async function createPayout({
     status: gate.ok ? 'PENDING' : 'ON_HOLD',
     holdReason: gate.holdReason,
     idempotencyKey: idempotencyKey || payoutId,
+    meta: fxAudit(fx),
   });
 
   await writeAuditLog({

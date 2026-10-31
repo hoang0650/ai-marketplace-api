@@ -72,8 +72,10 @@ async function settleOrderEvent(event, { WalletTx, vndPerUsd, mapWallet = (t) =>
     return { status: 200, body: { success: true, status: event.status } };
   }
 
-  // QR reports the amount actually transferred; the gateway charges exactly the bill amount.
-  const rate = Number(vndPerUsd) > 0 ? Number(vndPerUsd) : DEFAULT_VND_PER_USD;
+  // The rate locked on the deposit wins, so a later webhook cannot reprice the credit.
+  const locked = Number(tx.meta?.vndPerUsd);
+  const passed = Number(vndPerUsd);
+  const rate = locked > 0 ? locked : passed > 0 ? passed : DEFAULT_VND_PER_USD;
   const billedVnd = Number(tx.meta?.amountVnd) || 0;
   const paidVnd = event.paidVnd > 0 ? event.paidVnd : billedVnd;
   const amountUsd = paidVnd === billedVnd ? tx.amount : roundMoney(paidVnd / rate);

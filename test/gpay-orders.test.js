@@ -97,6 +97,14 @@ test('gateway failure marks the deposit failed; unknown orders 404', async () =>
   assert.equal(missing.status, 404);
 });
 
+test('settlement keeps the rate stored on the deposit', async () => {
+  const WalletTx = fakeWalletTx([pendingRow({ amount: 4, meta: { channel: 'gpay_qr', amountVnd: 100000, vndPerUsd: 25000 } })]);
+  const event = resolveOrderEvent({ qr_type: 'DYNAMIC', bill_id: 'AIMt1', amount: 50000, gpay_trans_id: 'Q2' });
+  await settleOrderEvent(event, { WalletTx, vndPerUsd: 26500 });
+  assert.equal(WalletTx.rows[0].amount, 2);
+  assert.equal(WalletTx.rows[0].meta.vndPerUsd, 25000);
+});
+
 test('QR credits the amount actually transferred', async () => {
   const WalletTx = fakeWalletTx([pendingRow({ meta: { channel: 'gpay_qr', amountVnd: 100000 } })]);
   const event = resolveOrderEvent({ qr_type: 'DYNAMIC', bill_id: 'AIMt1', amount: 53000, gpay_trans_id: 'Q1' });

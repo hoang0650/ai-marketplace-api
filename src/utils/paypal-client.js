@@ -1,5 +1,5 @@
 const config = require('../config/env');
-const { DEFAULT_VND_PER_USD } = require('../config/fx');
+const { currentVndPerUsd } = require('../finance/exchange-rate');
 
 const SANDBOX_BASE = 'https://api-m.sandbox.paypal.com';
 const LIVE_BASE = 'https://api-m.paypal.com';
@@ -12,13 +12,13 @@ function paypalBase() {
   return config.paypalSandbox ? SANDBOX_BASE : LIVE_BASE;
 }
 
-function toPaypalUsd(amount, currency = 'USD', vndPerUsd = config.paypalVndPerUsd) {
+function toPaypalUsd(amount, currency = 'USD', vndPerUsd = currentVndPerUsd()) {
   const n = Number(amount);
   if (!Number.isFinite(n) || n <= 0) return null;
   const code = String(currency || 'USD').toUpperCase();
   let usd = n;
   if (code === 'VND' || code === 'VNĐ') {
-    const rate = Number(vndPerUsd) > 0 ? Number(vndPerUsd) : DEFAULT_VND_PER_USD;
+    const rate = Number(vndPerUsd) > 0 ? Number(vndPerUsd) : currentVndPerUsd();
     usd = n / rate;
   } else if (code !== 'USD') {
     return null;

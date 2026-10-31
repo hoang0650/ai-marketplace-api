@@ -1,6 +1,7 @@
 'use strict';
 
 const { DEFAULT_VND_PER_USD } = require('../config/fx');
+const { currentVndPerUsd, currentCnyPerUsd } = require('../finance/exchange-rate');
 
 /**
  * Shared helpers for metered (usage) billing: currency → USD, token/character
@@ -8,15 +9,33 @@ const { DEFAULT_VND_PER_USD } = require('../config/fx');
  * Wallets are USD, so every rate must pass through `toUsd` before charging.
  */
 
-function vndPerUsd(env = process.env) {
-  const n = Number(env.VND_USD_RATE);
-  return Number.isFinite(n) && n > 0 ? n : DEFAULT_VND_PER_USD;
+/**
+ * VND per USD. An explicit env bag (unit tests) still reads `VND_USD_RATE`.
+ * The process environment does not pin the rate — that is only the fallback
+ * inside the exchange-rate service, after the live provider and its cache.
+ */
+function vndPerUsd(env) {
+  if (arguments.length && env !== process.env) {
+    const n = Number(env && env.VND_USD_RATE);
+    return Number.isFinite(n) && n > 0 ? n : DEFAULT_VND_PER_USD;
+  }
+  return currentVndPerUsd();
 }
 
-/** Convert an amount in `currency` (USD|VND) to USD. Unknown currencies are treated as USD. */
+/**
+ * Convert an amount in `currency` to USD.
+ * USD amounts are unchanged. VND uses the shared rate (3rd arg or the live rate).
+ * CNY uses the live CNY rate. Anything else is treated as already USD.
+ */
 function toUsd(amount, currency = 'USD', rate = vndPerUsd()) {
   const n = Number(amount) || 0;
-  return String(currency || 'USD').trim().toUpperCase() === 'VND' ? n / rate : n;
+  const code = String(currency || 'USD').trim().toUpperCase();
+  if (code === 'VND' || code === 'VNĐ') return rate > 0 ? n / rate : n;
+  if (code === 'CNY' || code === 'RMB') {
+    const cny = currentCnyPerUsd();
+    return cny > 0 ? n / cny : n;
+  }
+  return n;
 }
 
 /** Count user-visible characters: NFC code points (emoji = 1, precomposed Vietnamese = 1). */

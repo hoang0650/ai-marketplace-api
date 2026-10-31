@@ -1,4 +1,5 @@
 const { DEFAULT_VND_PER_USD } = require('./fx');
+const { currentVndPerUsd } = require('../finance/exchange-rate');
 
 function num(raw, fallback) {
   if (raw === undefined || raw === null || String(raw).trim() === '') return fallback;
@@ -29,9 +30,20 @@ function taxConfig(env = process.env) {
       annualThresholdVnd: Math.max(0, num(env.TAX_INDIVIDUAL_ANNUAL_THRESHOLD_VND, 100_000_000)),
     },
     platformFeeVatRate: rate(env.TAX_PLATFORM_FEE_VAT_RATE, 0.1),
-    vndPerUsd: Math.max(1, num(env.TAX_VND_PER_USD, num(env.AFFILIATE_VND_PER_USD, DEFAULT_VND_PER_USD))),
+    vndPerUsd: taxVndRate(env),
     legalReview: true,
   };
+}
+
+function taxVndRate(env) {
+  if (env && env !== process.env) {
+    const raw = env.TAX_VND_PER_USD != null && String(env.TAX_VND_PER_USD).trim() !== ''
+      ? env.TAX_VND_PER_USD
+      : env.AFFILIATE_VND_PER_USD;
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? Math.max(1, n) : DEFAULT_VND_PER_USD;
+  }
+  return currentVndPerUsd();
 }
 
 module.exports = { taxConfig };
