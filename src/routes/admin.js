@@ -12,7 +12,7 @@ const { deleteCachePattern } = require('../utils/cache');
 const { mapProduct, mapOrder } = require('../utils/mappers');
 const { resolveOrderDispute } = require('../utils/resolve-order-dispute');
 const { buildAdminUserDetail } = require('../utils/admin-user-detail');
-const { postDisputeMessage, mapDisputeDetail } = require('../utils/dispute-thread');
+const { postDisputeMessage, mapDisputeDetail, mapAdminDisputeRows, findDisputeSellerIds } = require('../utils/dispute-thread');
 const {
   wantsPagedDisputes,
   disputeListFilter,
@@ -584,21 +584,22 @@ router.get('/disputes', authenticate, requireRoles('admin'), async (req, res, ne
     // No list params: the current admin tab expects a bare array.
     if (!wantsPagedDisputes(req.query)) {
       const orders = await Order.find({ disputeStatus: { $ne: 'none' } }).sort(sort).lean();
-      return res.json(orders.map((o) => mapOrder(o, { viewerRole: 'admin' })));
+      return res.json(await mapAdminDisputeRows(orders));
     }
     const status = String(req.query.status || '');
     if (status && status !== 'open' && status !== 'resolved') {
       return res.status(400).json({ message: 'status must be open or resolved', code: 'DISPUTE_STATUS' });
     }
     const { page, limit, q, rx } = adminListParams(req.query);
-    const filter = disputeListFilter({ status, q, rx });
+    const sellerIds = await findDisputeSellerIds(rx);
+    const filter = disputeListFilter({ status, q, rx, sellerIds });
     const [rows, total, openCount] = await Promise.all([
       Order.find(filter).sort(sort).skip((page - 1) * limit).limit(limit).lean(),
       Order.countDocuments(filter),
       Order.countDocuments({ disputeStatus: 'open' }),
     ]);
     res.json({
-      ...pageResult(rows.map((o) => mapOrder(o, { viewerRole: 'admin' })), total, page, limit),
+      ...pageResult(await mapAdminDisputeRows(rows), total, page, limit),
       openCount,
     });
   } catch (err) {

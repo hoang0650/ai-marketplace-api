@@ -147,7 +147,38 @@ function wantsPagedDisputes(query = {}) {
   return ['page', 'limit', 'q', 'status'].some((k) => String(query[k] ?? '').trim() !== '');
 }
 
-function disputeListFilter({ status, q, rx } = {}) {
+function cleanName(value) {
+  return String(value ?? '').trim();
+}
+
+/**
+ * Names shown on admin dispute rows and dispute detail.
+ * Buyer: current account name, otherwise the name stored on the order.
+ * Seller: current account name, otherwise SellerProfile.displayName.
+ */
+function disputePartyNames(order, { buyer, seller, profile } = {}) {
+  return {
+    buyerName: cleanName(buyer?.name) || cleanName(order?.buyerName),
+    sellerName: cleanName(seller?.name) || cleanName(profile?.displayName),
+  };
+}
+
+/** User ids whose account name or shop display name matched a dispute search. */
+function disputeSellerSearchIds({ users = [], profiles = [] } = {}) {
+  const ids = [];
+  const seen = new Set();
+  const add = (value) => {
+    const id = idOf(value);
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    ids.push(id);
+  };
+  for (const user of users) add(user);
+  for (const profile of profiles) add(profile?.user);
+  return ids;
+}
+
+function disputeListFilter({ status, q, rx, sellerIds } = {}) {
   const base =
     status === 'open'
       ? { disputeStatus: 'open' }
@@ -162,6 +193,15 @@ function disputeListFilter({ status, q, rx } = {}) {
     { disputeResolutionNote: rx },
   ];
   if (/^[a-f0-9]{24}$/i.test(String(q || '').trim())) or.push({ _id: String(q).trim() });
+  const matchedSellers = [];
+  const seenSellers = new Set();
+  for (const sellerId of Array.isArray(sellerIds) ? sellerIds : []) {
+    const id = idOf(sellerId);
+    if (!id || seenSellers.has(id)) continue;
+    seenSellers.add(id);
+    matchedSellers.push(id);
+  }
+  if (matchedSellers.length) or.push({ seller: { $in: matchedSellers } });
   return { $and: [base, { $or: or }] };
 }
 
@@ -222,6 +262,8 @@ module.exports = {
   buildDisputeMessage,
   planDisputeResolution,
   wantsPagedDisputes,
+  disputePartyNames,
+  disputeSellerSearchIds,
   disputeListFilter,
   ensureThread,
   applyDisputeOpen,
