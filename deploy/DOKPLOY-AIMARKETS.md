@@ -154,6 +154,12 @@ Traefik: `open-webui/deploy/dokploy-dynamic-openwebui-aimarkets-wildcard.yml`. G
 
 Hire products cần có trong DB: `openwebui-ops-agent`, `paperclip-ops-agent` (web/app map theo `hireProductSlug`).
 
+### Per-user Hermes / NanoClaw
+
+One container per buyer (`aim-agent-<agent>-<userId>`), started through `docker-proxy` on this same Hostinger host. Flags stay off until migration and egress are in place. Exact env vars, the volume migration (backup first, shared volume is never deleted), and the enable order: [TENANT-RUNTIME.md](./TENANT-RUNTIME.md).
+
+SpaceBot is not listed (`FSL-1.1-ALv2`). New launches and new subscriptions return `403 SPACEBOT_UNLISTED`. Existing data is not deleted.
+
 ### Launch → 404 + “Không bảo mật”
 
 Launch client đã đúng (mở URL). Lỗi nằm ở Traefik/TLS/upstream:

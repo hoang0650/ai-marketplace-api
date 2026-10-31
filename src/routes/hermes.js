@@ -29,6 +29,10 @@ const { openSecret } = require('../utils/secret-box');
 const { getByokProvider } = require('../utils/byok-providers');
 const { toOpenAICompatibleConnection } = require('./runtime-byok-claim');
 const { serviceSecretOk } = require('../utils/service-secret');
+const { passwordStorage, publicSshSession, legacySecretUnset } = require('../services/ssh-session-public');
+const { byokUsageDecision, resolveKeySource, publicKeySource } = require('../services/byok-billing');
+const { launchTenantRuntime, touchTenantActivity } = require('../services/tenant-launch');
+const { buyerRuntimeEnabled, runtimeMaintenanceBody } = require('../services/tenant-runtime');
 
 const router = express.Router();
 const SSH_TTL_MS = 60 * 60 * 1000;
@@ -183,7 +187,12 @@ router.post('/launch', authenticate, async (req, res, next) => {
         message: 'Hermes AI Markets needs a signed-in marketplace user id.',
       });
     }
+    if (!buyerRuntimeEnabled('hermes')) {
+      return res.status(503).json(runtimeMaintenanceBody('hermes'));
+    }
     await assertActiveSubscription(req.user, 'hermes');
+    const runtime = await launchTenantRuntime({ userId, agentId: 'hermes' });
+    if (!runtime.ok) return res.status(runtime.status).json(runtime.body);
 
     const account = await ensureHermesAccount(req.user);
     const uiBase = aimarketsPublicBase(userId);
@@ -212,6 +221,7 @@ router.post('/launch', authenticate, async (req, res, next) => {
       username: account.username,
       password: revealPassword(account.password),
       profile: account.profile,
+      runtime: runtime.runtime,
     });
   } catch (err) {
     next(err);
@@ -321,7 +331,8 @@ router.post('/ssh/generate', authenticate, async (req, res, next) => {
       host,
       port,
       username,
-      password,
+      authMethod: 'password',
+      ...passwordStorage(password),
       command,
       expiresAt,
     });
@@ -366,22 +377,18 @@ router.get('/ssh/active', authenticate, async (req, res, next) => {
     if (!session) {
       return res.json({ success: true, active: false, session: null });
     }
+    const unset = legacySecretUnset(session);
+    if (unset) {
+      const set = session.password ? passwordStorage(session.password) : {};
+      await SshSession.updateOne({ _id: session._id }, { $set: set, $unset: unset });
+    }
 
     return res.json({
       success: true,
       active: true,
       session: {
-        id: String(session._id),
-        agentId: session.agentId,
-        host: session.host,
-        port: session.port,
-        username: session.username,
-        password: session.password,
-        command: session.command,
-        commandWithPassword: buildSshCommand(session).withPasswordHint,
-        expiresAt: new Date(session.expiresAt).toISOString(),
-        expiresInMinutes: Math.max(0, Math.round((new Date(session.expiresAt) - Date.now()) / 60000)),
-        note: 'Valid for 60 minutes. Existing connections stay open after expiry.',
+        ...publicSshSession(session),
+        note: 'Valid for 60 minutes. The password was shown once when the session was created.',
       },
     });
   } catch (err) {
@@ -449,6 +456,18 @@ router.post('/usage', async (req, res, next) => {
   const runCharge = async (userId) => {
     if (!USER_ID_RE.test(userId)) {
       return res.status(400).json({ success: false, message: 'user_id required' });
+    }
+    const source = await resolveKeySource(userId, 'hermes', { AgentProviderSetting, ProviderApiKey });
+    const decision = byokUsageDecision(source);
+    touchTenantActivity(userId, 'hermes').catch(() => {});
+    if (decision.skip) {
+      return res.json({
+        ...decision,
+        model: String(req.body?.model || '').trim(),
+        inputTokens: Math.max(0, Math.floor(Number(req.body?.inputTokens) || 0)),
+        outputTokens: Math.max(0, Math.floor(Number(req.body?.outputTokens) || 0)),
+        userId,
+      });
     }
     const model = String(req.body?.model || '').trim();
     if (model && isPhhotelModelId(model)) {
@@ -541,7 +560,12 @@ router.post('/usage', async (req, res, next) => {
 router.get('/provider', authenticate, async (req, res, next) => {
   try {
     const setting = await AgentProviderSetting.findOne({ user: req.user._id, agent: 'hermes' });
-    return res.json({ success: true, selection: setting ? setting.toPublic() : null });
+    const source = await resolveKeySource(req.user._id, 'hermes', { AgentProviderSetting, ProviderApiKey });
+    return res.json({
+      success: true,
+      selection: setting ? setting.toPublic() : null,
+      ...publicKeySource(source),
+    });
   } catch (err) {
     next(err);
   }

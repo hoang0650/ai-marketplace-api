@@ -7,6 +7,7 @@ const { newEntryId } = require('./ledger-service');
 const { vndToUsd } = require('./payout-policy');
 const { isAdmin } = require('../utils/roles');
 const { notifyUser } = require('../utils/notify');
+const { spacebotListingFields, spacebotUnlistedError } = require('../services/spacebot-listing');
 
 /**
  * Platform-hosted agents are rented per month (prepaid from the wallet).
@@ -75,6 +76,7 @@ function describe(agentId, doc, { exempt = false, now = new Date() } = {}) {
     purgedAt: iso(doc?.purgedAt),
     retentionDays: retentionDays(),
     fee,
+    ...spacebotListingFields(agentId),
   };
 }
 
@@ -164,6 +166,7 @@ async function subscribeAgent(user, agentId, { now = new Date(), source = 'manua
     err.status = 400;
     throw err;
   }
+  if (id === 'spacebot') throw spacebotUnlistedError();
   const fee = monthlyFee(id);
   if (isAdmin(user) || fee.amount <= 0) {
     return { ...(await getSubscriptionStatus(user, id)), charged: false };

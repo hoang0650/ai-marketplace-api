@@ -9,7 +9,10 @@ const sshSessionSchema = new mongoose.Schema(
     username: { type: String, required: true },
     /** `password` (OpenClaw/Hermes/NanoClaw) or `key` (SpaceBot sshd). */
     authMethod: { type: String, enum: ['password', 'key'], default: 'password' },
-    /** Plain password shown once at generation; unset for key sessions. */
+    /**
+     * Legacy plaintext. New sessions leave this empty and store passwordHash.
+     * /ssh/active hashes any remaining value and does not return it.
+     */
     password: { type: String, required: false },
     /**
      * scrypt hash of the password for isolated sandbox sessions (SSH gateway).
