@@ -53,7 +53,16 @@ Admin look-up is `POST /v1/admin/tenant-runtime/:agentId/:userId` with `{ "reaso
 
 ## Images
 
-Build the tenant images from the Hermes and NanoClaw pull requests (they read `/run/secrets/byok.json` and refuse another buyer's file) and tag them as `HERMES_TENANT_IMAGE` and `NANOCLAW_TENANT_IMAGE`. The Hermes image must honour `HERMES_AIMARKETS_TENANT_ISOLATED=1`. Do not put `AIMARKETS_SERVICE_SECRET` or a provider key in the image env.
+Build the tenant images from the Hermes and NanoClaw branches and tag them as `HERMES_TENANT_IMAGE` and `NANOCLAW_TENANT_IMAGE`. The Hermes image must honour `HERMES_AIMARKETS_TENANT_ISOLATED=1`. Do not put `AIMARKETS_SERVICE_SECRET` or a provider key in the image env.
+
+Codex's open pull requests are the base. Follow-up commits (secret file, owner check, Hermes tools only when the tenant flag is set, OpenClaw session-id boundary) are in `deploy/agent-followups/*.patch`. This agent's token cannot push to `hoang0650/nanoclaw`, `hoang0650/hermes-agent`, or `hoang0650/openclaw`. Apply them on top of `codex/byok-tenant-isolation-20261029`:
+
+```bash
+git checkout codex/byok-tenant-isolation-20261029
+git am ../ai-marketplace-api/deploy/agent-followups/nanoclaw.patch
+```
+
+Use the matching patch in `hermes-agent` and `openclaw`. OpenClaw stays a shared gateway with the credential fence from that PR. It does not get one container per buyer.
 
 ## Migration (runtime host, not the API database)
 
@@ -95,7 +104,8 @@ On the runtime host, for each `aim-agent-net-*` bridge:
 2. Confirm `POST /v1/hermes/launch` returns `RUNTIME_ISOLATION_MAINTENANCE`.
 3. Finish the volume migration and the egress proxy.
 4. Set `HERMES_BUYER_RUNTIME_ENABLED=1` and `NANOCLAW_BUYER_RUNTIME_ENABLED=1`, then redeploy the API.
-5. Launch one buyer. `docker ps` should show `aim-agent-hermes-<userId>` and `aim-agent-nanoclaw-<userId>` only after that buyer's launch. `docker inspect` must show a read-only root, `CapDrop: ALL`, no binds, and no provider key in `Env`.
+5. Point Traefik at the new containers before expecting the public hostname to open. Each container publishes its port on `127.0.0.1` only. The wildcard files that send every `{userId}.hermes.aimarkets.vn` host to one upstream will not reach these containers. Add a router per running container to `http://127.0.0.1:<published port>` (Hermes listens on 9119 inside the container, NanoClaw on 3100).
+6. Launch one buyer. `docker ps` should show `aim-agent-hermes-<userId>` or `aim-agent-nanoclaw-<userId>` only after that buyer's launch. `docker inspect` must show a read-only root, `CapDrop: ALL`, no binds, and no provider key in `Env`.
 
 Expired subscriptions still flow through `/v1/admin/agent-purges`. For Hermes and NanoClaw, with the flags and `TENANT_DOCKER_HOST` set, purge copies the data volume to `aim-agent-<agent>-<userId>-backup-<stamp>` and only then removes the container and the data volume.
 
