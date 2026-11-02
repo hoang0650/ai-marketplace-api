@@ -9,7 +9,8 @@ function studioPolicy(env = process.env) {
     // TTS after the free daily jobs is billed per character (NFC code points): perKChars USD per 1,000 chars,
     // at least minCharge per job. `price` stays as the per-job figure for 1,000 characters (UI / legacy).
     tts: {
-      freePerDay: num(env.STUDIO_FREE_TTS_PER_DAY, 30),
+      freePerDay: num(env.STUDIO_FREE_TTS_PER_DAY, 10),
+      promoCap: num(env.STUDIO_FREE_TTS_PER_DAY, 10),
       perKChars: ttsPerK,
       minCharge: num(env.STUDIO_PRICE_TTS_MIN_USD, 0.0005),
       price: ttsPerK,

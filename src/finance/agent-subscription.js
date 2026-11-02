@@ -7,6 +7,7 @@ const { newEntryId } = require('./ledger-service');
 const { vndToUsd } = require('./payout-policy');
 const { isAdmin } = require('../utils/roles');
 const { notifyUser } = require('../utils/notify');
+const { assertRuntimeAvailable } = require('../utils/agent-runtime-availability');
 
 /**
  * Platform-hosted agents are rented per month (prepaid from the wallet).
@@ -164,6 +165,7 @@ async function subscribeAgent(user, agentId, { now = new Date(), source = 'manua
     err.status = 400;
     throw err;
   }
+  assertRuntimeAvailable(id);
   const fee = monthlyFee(id);
   if (isAdmin(user) || fee.amount <= 0) {
     return { ...(await getSubscriptionStatus(user, id)), charged: false };

@@ -216,6 +216,7 @@ describe('gpu network volumes', () => {
     });
     r.save = async () => r;
     stub(GpuRental, 'findOneAndUpdate', async () => null);
+    stub(GpuRental, 'findById', () => ({ lean: async () => r }));
     let terminated = '';
     stub(provider, 'terminateServer', async (id) => {
       terminated = id;

@@ -45,11 +45,16 @@ function buildAccessTokenPayload(user) {
     sub: id,
     email: user.email,
     role: normalizeRole(user.role),
+    tv: Number(user.tokenVersion) || 0,
     status: user.accountStatus || 'active',
   };
 }
 
 const JWT_VERIFY = { algorithms: ['HS256'] };
+
+function isCurrentAccess(payload, user) {
+  return !!user && effectiveStatus(user, 'accountStatus') === 'active' && (Number(payload?.tv) || 0) === (Number(user.tokenVersion) || 0);
+}
 
 function signAccessToken(user) {
   return jwt.sign(buildAccessTokenPayload(user), config.jwtSecret, {
@@ -307,6 +312,10 @@ async function authenticateToken(req, res, next) {
       return res.status(401).json({ message: 'Unauthorized', code: 'UNAUTHORIZED' });
     }
 
+    if ((Number(decoded.tv) || 0) !== (Number(user.tokenVersion) || 0)) {
+      return res.status(401).json({ message: 'Session revoked; sign in again', code: 'SESSION_REVOKED' });
+    }
+
     if (typeof user.save === 'function') {
       await liftExpired(user, 'accountStatus');
     }
@@ -337,7 +346,8 @@ function optionalAuth(req, _res, next) {
     const userId = userIdFromPayload(payload);
     if (!userId) return next();
     try {
-      req.user = await loadActiveUser(userId);
+      const user = await loadActiveUser(userId);
+      if (user && effectiveStatus(user, 'accountStatus') === 'active' && (Number(payload.tv) || 0) === (Number(user.tokenVersion) || 0)) req.user = user;
     } catch {
       /* ignore */
     }
@@ -389,6 +399,7 @@ function requireCapability(capability) {
 const authorizeRoles = (allowedRoles) => requireRoles(...(Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles]));
 
 module.exports = {
+  isCurrentAccess,
   asReqUser,
   AUTH_USER_CACHE_TTL,
   AUTH_SESSION_TTL,

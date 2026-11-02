@@ -5,6 +5,8 @@
  * moment the server answers, and terminates the pod when the session stops.
  */
 const net = require('net');
+const crypto = require('crypto');
+const { sealSecret } = require('./secret-box');
 const GameSession = require('../models/GameSession');
 const GpuServer = require('../models/GpuServer');
 const provider = require('./gpu-rental/provider');
@@ -36,6 +38,7 @@ function gameServerSpec(product) {
   const gs = product.gameServer || {};
   const computeType = String(gs.computeType || 'CPU').toUpperCase() === 'GPU' ? 'GPU' : 'CPU';
   return {
+    rdpPort: Number(gs.rdpPort) === 3389 ? 3389 : 0,
     game: String(gs.game || product.slug),
     image: String(gs.image),
     port: Number(gs.port),
@@ -74,18 +77,20 @@ function probeTcp(host, port, timeoutMs = hostingConfig().probeTimeoutMs) {
 
 async function launchDedicatedServer({ product, user, sessionId, client, device }) {
   const spec = gameServerSpec(product);
+  const password = spec.rdpPort ? crypto.randomBytes(24).toString("base64url") : "";
+  const encrypted = password ? sealSecret(password) : "";
   const created = await provider.createServer({
     name: `aim-${spec.game}-${sessionId.slice(-8)}`.slice(0, 120),
     kind: 'game',
     image: spec.image,
-    ports: `${spec.port}/tcp`,
+    ports: [...new Set([spec.port, ...(spec.rdpPort ? [spec.rdpPort] : [])])].map(p => `${p}/tcp`).join(","),
     computeType: spec.computeType,
     cpuFlavorIds: spec.computeType === 'CPU' ? spec.cpuFlavorIds : undefined,
     vcpuCount: spec.computeType === 'CPU' ? spec.vcpuCount : undefined,
     gpuTypeIds: spec.computeType === 'GPU' ? spec.gpuTypeIds : undefined,
     diskGb: spec.diskGb,
     volumeGb: 0,
-    env: spec.env,
+    env: { ...spec.env, ...(password ? { AIM_RDP_PASSWORD: password, AIM_GAME: spec.game } : {}) },
     dataCenterIds: spec.dataCenterIds,
     dockerStartCmd: spec.dockerStartCmd,
   });
@@ -130,6 +135,9 @@ async function launchDedicatedServer({ product, user, sessionId, client, device 
       dedicated: true,
       game: spec.game,
       privatePort: spec.port,
+      rdpPrivatePort: spec.rdpPort,
+      rdpUsername: spec.rdpPort ? "player" : "",
+      rdpPasswordEncrypted: encrypted,
       podCostPerHour: Number(created.costPerHour) || 0,
       ratePerHour: dedicatedRatePerHour(created.costPerHour, spec.diskGb),
     });
@@ -172,7 +180,9 @@ async function refreshDedicated(session, { stop } = {}) {
     if (err.code === 'SERVER_NOT_FOUND') endpoint = null;
     else throw err;
   }
-  if (endpoint && (await module.exports.probeTcp(endpoint.host, endpoint.port))) {
+  const rdp = session.rdpPrivatePort ? await provider.tcpEndpoint(session.providerServerId, session.rdpPrivatePort) : null;
+  const desktopReady = !session.rdpPrivatePort || (rdp && await module.exports.probeRdp(rdp.host, rdp.port));
+  if (endpoint && desktopReady && (await module.exports.probeTcp(endpoint.host, endpoint.port))) {
     const now = new Date();
     const live = await GameSession.findOneAndUpdate(
       { _id: session._id, status: 'starting' },
@@ -185,6 +195,7 @@ async function refreshDedicated(session, { stop } = {}) {
           lastActivityAt: now,
           connectHost: endpoint.host,
           connectPort: endpoint.port,
+          ...(rdp ? { rdpHost: rdp.host, rdpPort: rdp.port } : {}),
         },
       },
       { new: true }
@@ -215,7 +226,18 @@ async function reapDedicated() {
   return reaped;
 }
 
+function probeRdp(host, port, timeoutMs = hostingConfig().probeTimeoutMs) {
+  return new Promise(resolve => {
+    const socket = net.connect({ host, port, timeout: timeoutMs }); let data = Buffer.alloc(0), done = false;
+    const finish = ok => { if (done) return; done = true; socket.destroy(); resolve(ok); };
+    socket.once("connect", () => socket.write(Buffer.from("030000130ee000000000000100080001000000", "hex")));
+    socket.on("data", chunk => { data = Buffer.concat([data, chunk]); if (data.length < 4) return; const length = data.readUInt16BE(2); if (length > 8192 || length < 19) return finish(false); if (data.length >= length) finish(data[0] === 3 && data[5] === 0xd0 && data[length - 8] === 2 && data.readUInt32LE(length - 4) === 1); });
+    socket.once("timeout", () => finish(false)); socket.once("error", () => finish(false)); socket.once("end", () => finish(false));
+  });
+}
+
 module.exports = {
+  probeRdp,
   hostingConfig,
   isDedicatedProduct,
   gameServerSpec,

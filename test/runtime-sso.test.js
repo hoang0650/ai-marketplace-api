@@ -12,6 +12,18 @@ const { buildSsoLaunchUrl, applyTemplate } = require('../src/routes/runtime-sso'
 const UID = '6a69f224e6032a3f00de977f';
 const user = { _id: UID, name: 'Hoàng <script>', email: 'Buyer@Example.com' };
 
+test('NanoClaw buyer tickets carry an owner and never expose the shared dashboard secret', () => {
+  process.env.NANOCLAW_DASHBOARD_SECRET = 'fake-shared-admin-token';
+  const a = issueRuntimeTicket({ runtime: 'nanoclaw', envPrefix: 'NANOCLAW', user });
+  const b = issueRuntimeTicket({ runtime: 'nanoclaw', envPrefix: 'NANOCLAW', user: { ...user, _id: 'b'.repeat(24) } });
+  assert.notEqual(a, process.env.NANOCLAW_DASHBOARD_SECRET);
+  assert.notEqual(a, b);
+  assert.equal(verifyRuntimeTicket({ runtime: 'nanoclaw', envPrefix: 'NANOCLAW', ticket: a }).uid, UID);
+  assert.equal(verifyRuntimeTicket({ runtime: 'nanoclaw', envPrefix: 'NANOCLAW', ticket: b }).uid, 'b'.repeat(24));
+  assert.equal(verifyRuntimeTicket({ runtime: 'openwebui', envPrefix: 'OPENWEBUI', ticket: a }), null);
+  delete process.env.NANOCLAW_DASHBOARD_SECRET;
+});
+
 test('ticket verifies only for its runtime and secret', () => {
   const ticket = issueRuntimeTicket({ runtime: 'openwebui', envPrefix: 'OPENWEBUI', user });
   const data = verifyRuntimeTicket({ runtime: 'openwebui', envPrefix: 'OPENWEBUI', ticket });
@@ -133,3 +145,14 @@ test('launch url is https on the buyer host with the ticket in the query', () =>
   assert.equal(buildSsoLaunchUrl({ base, ssoPath: '/x', ticket: '' }), null);
   assert.equal(applyTemplate('https://{userId}.x', 'bad'), '');
 });
+
+// Exercise the production database-backed replay guard without a live database.
+test.beforeEach(() => {
+  const used = new Set();
+  test.mock.method(require('../src/models/RuntimeByokClaim'), 'create', async row => {
+    if (used.has(row._id)) { const err = new Error('duplicate'); err.code = 11000; throw err; }
+    used.add(row._id); return row;
+  });
+  test.mock.method(require('../src/models/User'), 'findById', () => ({ select: () => ({ lean: async () => ({ accountStatus: 'active' }) }) }));
+});
+test.afterEach(() => test.mock.restoreAll());

@@ -16,7 +16,7 @@ const {
   computeOpenClawSellCost,
   isPhhotelModelId,
 } = require('../utils/openclaw-pricing');
-const { issueMarketTicket, tenantGatewayToken } = require('../utils/openclaw-ticket');
+const { issueMarketTicket, aimarketsGatewayToken } = require('../utils/openclaw-ticket');
 const { serviceSecretOk } = require('../utils/service-secret');
 const { issueIsolatedSshSession } = require('../services/ssh-sandbox');
 const byokRoutes = require('./openclaw-byok');
@@ -53,9 +53,9 @@ function withMarketTicket(url, userId) {
   return `${base}#${params.toString()}`;
 }
 
-/** Puts this buyer's own gateway token in the Control UI fragment. */
+/** Browser credential is accepted only with the signed buyer ticket, never as operator HTTP auth. */
 function withAimarketsGatewayToken(url, userId) {
-  const token = tenantGatewayToken(userId);
+  const token = aimarketsGatewayToken();
   if (!token || !url) return url;
   const [base, hash = ''] = String(url).split('#');
   const params = new URLSearchParams(hash);
@@ -217,12 +217,12 @@ router.post('/launch', authenticate, async (req, res, next) => {
 
     const uiBase = aimarketsPublicBase(userId);
     const gatewayUrl = uiBase.replace(/^https:/i, 'wss:').replace(/^http:/i, 'ws:');
-    const token = tenantGatewayToken(userId);
+    const token = aimarketsGatewayToken();
     if (!token) {
       return res.status(503).json({
         success: false,
         message:
-          'OpenClaw gateway token missing. Set PYTHON_AI_SHARED_SECRET or NEST_SERVICE_AUTH_SECRET on the API and the OpenClaw gateway.',
+          'OpenClaw gateway token missing. Set matching AIMARKETS_SERVICE_SECRET and OPENCLAW_MARKET_TICKET_SECRET on the API and OpenClaw gateway.',
       });
     }
     const url = withMarketTicket(

@@ -4,6 +4,7 @@ const mongoose = require('mongoose');
 const TrainingJob = require('../models/TrainingJob');
 const TrainingDataset = require('../models/TrainingDataset');
 const GpuRental = require('../models/GpuRental');
+const gpuProxy = require('../terminal/gpu-proxy');
 const { authenticate } = require('../middleware/auth');
 const svc = require('../utils/gpu-rental/service');
 const { gpuRentalConfig } = require('../utils/gpu-rental/config');
@@ -27,6 +28,8 @@ const ARTIFACT_PUT_TTL_S = 6 * 3600;
 const ARTIFACT_GET_TTL_S = 3600;
 
 const MESSAGES = {
+  RENTAL_TRAINING_BUSY: 'GPU đang chạy một job train khác.',
+  RENTAL_NOT_READY: 'GPU đã thuê chưa sẵn sàng để train.',
   LICENSE_REQUIRED: 'License của dataset này đã hết hạn. Gia hạn để tiếp tục train.',
   LICENSED_DATASET_SHARED_ONLY: 'Dataset mua license chỉ dùng online: train trên GPU dùng chung của AI Markets, không đưa lên máy GPU thuê riêng.',
   MINIO_NOT_CONFIGURED: 'Kho lưu trữ dữ liệu train chưa được cấu hình.',
@@ -110,9 +113,10 @@ function publicJob(doc, rental) {
     logs: scrubVendor(doc.logs),
     metrics: doc.metrics || {},
     config: doc.config || {},
-    cost: rental ? Math.round((rental.billedTotal || 0) * 100) / 100 : doc.cost,
+    cost: rental && !FINISHED.includes(doc.status) ? Math.round(((rental.billedTotal || 0) - (doc.rentalBilledStart || 0)) * 100) / 100 : doc.cost,
     pricePerHour: rental?.pricePerHour ?? null,
     rentalId: rental ? String(rental._id) : null,
+    reusedRental: Boolean(doc.reusedRental),
     workspaceStatus: rental?.status || null,
     autoStop: doc.autoStop !== false,
     shared: doc.provider === 'aimx',
@@ -124,9 +128,9 @@ function publicJob(doc, rental) {
 }
 
 async function syncJob(doc, rental) {
-  if (!rental) return;
+  if (!rental || FINISHED.includes(doc.status)) return;
   const status = jobStatus(rental, doc.status);
-  const cost = Math.round((rental.billedTotal || 0) * 100) / 100;
+  const cost = Math.max(0, Math.round(((rental.billedTotal || 0) - (doc.rentalBilledStart || 0)) * 100) / 100);
   if (status !== doc.status || cost !== doc.cost) {
     doc.status = status;
     doc.cost = cost;
@@ -255,9 +259,10 @@ async function finishJob(doc) {
     }
   }
   if (rental) {
-    doc.cost = Math.round((rental.billedTotal || 0) * 100) / 100;
+    doc.cost = Math.max(0, Math.round(((rental.billedTotal || 0) - (doc.rentalBilledStart || 0)) * 100) / 100);
     await doc.save();
   }
+  if (doc.rental) await GpuRental.updateOne({ _id: doc.rental, trainingJobId: doc.jobId }, { $set: { trainingJobId: '' } });
   const key = doc.status === 'succeeded' ? 'training.succeeded' : 'training.failed';
   await notifyUser(doc.buyer, key, { name: doc.datasetName || doc.modelId || doc.jobId }, '/training').catch(() => undefined);
 }
@@ -408,10 +413,20 @@ router.post(
   wrap(async (req, res) => {
     const body = req.body || {};
     const picked = String(body.offerId || body.gpuType || '').trim();
-    if (picked === aimx.SHARED_OFFER_ID || (!picked && aimx.gpuConfig().enabled && (body.source || body.task))) {
+    const rentalId = String(body.rentalId || '').trim();
+    let existingRental = null;
+    if (rentalId) {
+      if (!mongoose.isValidObjectId(rentalId)) throw catalog.httpError(404, 'RENTAL_NOT_FOUND');
+      existingRental = await GpuRental.findOne({ _id: rentalId, owner: req.user._id });
+      if (!existingRental) throw catalog.httpError(404, 'RENTAL_NOT_FOUND');
+      if (existingRental.status !== 'running' || !existingRental.ready) throw catalog.httpError(409, 'RENTAL_NOT_READY');
+      if (existingRental.trainingJobId || await TrainingJob.exists({ rental: existingRental._id, status: { $in: ['queued', 'running', 'paused'] } })) throw catalog.httpError(409, 'RENTAL_TRAINING_BUSY');
+      if (!body.source || !body.task) throw catalog.httpError(400, 'TRAINING_SOURCE_INVALID');
+    }
+    if (!rentalId && !body.volumeId && (picked === aimx.SHARED_OFFER_ID || (!picked && aimx.gpuConfig().enabled && (body.source || body.task)))) {
       return createSharedJob(req, res, body);
     }
-    const offerId = picked || (await defaultOfferId());
+    const offerId = existingRental?.offerId || picked || (await defaultOfferId());
     const jobId = `tj_${crypto.randomBytes(8).toString('hex')}`;
 
     if (!body.source && !body.task) {
@@ -443,6 +458,11 @@ router.post(
     if (!catalog.isSource(source)) throw catalog.httpError(400, 'TRAINING_SOURCE_INVALID');
     if (!minio.isMinioEnabled()) throw catalog.httpError(503, 'MINIO_NOT_CONFIGURED');
     const dataset = await loadDataset(req.user, body.datasetId);
+    if (body.volumeId && existingRental) throw catalog.httpError(400, 'VOLUME_IN_USE');
+    if (body.volumeId) {
+      const volume = await svc.findOwnedVolume(req.user, body.volumeId);
+      if (String(volume.owner) !== String(req.user._id)) throw catalog.httpError(404, 'VOLUME_NOT_FOUND');
+    }
     // Online-only: a rented GPU is the buyer's own machine (shell + env), so licensed data never goes there.
     if (dataset?.licensedProduct) throw catalog.httpError(409, 'LICENSED_DATASET_SHARED_ONLY');
     const plan = catalog.planJob({ source, task, dataset, hfDataset: body.hfDataset, modelId: body.modelId });
@@ -462,8 +482,14 @@ router.post(
       labels,
     });
 
+    if (existingRental) {
+      const locked = await GpuRental.updateOne({ _id: existingRental._id, owner: req.user._id, status: 'running', trainingJobId: { $in: ['', null] } }, { $set: { trainingJobId: jobId } });
+      if (locked.modifiedCount !== 1) { await minio.removeTrainingObjects(built.objects).catch(() => undefined); throw catalog.httpError(409, 'RENTAL_TRAINING_BUSY'); }
+    }
+
     // The job exists before the pod boots so its first progress report always finds it.
-    const doc = await TrainingJob.create({
+    let doc;
+    try { doc = await TrainingJob.create({
       jobId,
       buyer: req.user._id,
       source,
@@ -476,21 +502,32 @@ router.post(
       provider: 'runpod',
       status: 'queued',
       stage: 'provisioning',
+      rental: existingRental?._id || null,
+      reusedRental: Boolean(existingRental),
+      rentalBilledStart: existingRental?.billedTotal || 0,
       config,
-      autoStop: body.autoStop !== false,
+      autoStop: existingRental ? body.autoStop === true : body.autoStop !== false,
       reportTokenHash: hash,
       logs: 'Preparing the GPU workspace. Data and training scripts are copied automatically.',
-    });
+    }); } catch (err) {
+      if (existingRental) await GpuRental.updateOne({ _id: existingRental._id, trainingJobId: jobId }, { $set: { trainingJobId: '' } });
+      await minio.removeTrainingObjects(built.objects).catch(() => undefined);
+      throw err;
+    }
 
     let rental;
     try {
-      rental = await svc.createRental(
+      if (existingRental) {
+        rental = existingRental;
+        await gpuProxy.launchTraining(String(rental._id), String(req.user._id), { jobId, bootstrapUrl: built.bootstrapUrl, manifestUrl: built.manifestUrl, token });
+      } else rental = await svc.createRental(
         req.user,
         {
           offerId,
           name: `Train ${dataset ? dataset.name : task}`.slice(0, 80),
           gpuCount: body.gpuCount,
           volumeGb: volumeFor(plan.files, body.volumeGb),
+          volumeId: body.volumeId,
         },
         {
           trainingEnv: {
@@ -501,11 +538,16 @@ router.post(
         }
       );
     } catch (err) {
+      if (existingRental) await GpuRental.updateOne({ _id: existingRental._id, trainingJobId: jobId }, { $set: { trainingJobId: '' } });
       await doc.deleteOne().catch(() => undefined);
       await minio.removeTrainingObjects(built.objects).catch(() => undefined);
       throw err;
     }
 
+    if (existingRental) {
+      await TrainingJob.updateOne({ _id: doc._id }, { $set: { gpuType: rental.offerId } });
+      return res.status(201).json(publicJob(await TrainingJob.findById(doc._id), rental));
+    }
     doc.rental = rental._id;
     doc.gpuType = rental.offerId;
     doc.status = jobStatus(rental, 'queued');
@@ -551,7 +593,8 @@ router.delete(
     const doc = await TrainingJob.findOne({ jobId: req.params.jobId, buyer: req.user._id });
     if (!doc) return res.status(404).json({ message: 'Not found' });
     let rental = doc.rental ? await GpuRental.findById(doc.rental) : null;
-    if (rental) rental = await svc.terminateRental(rental);
+    if (rental) rental = doc.reusedRental ? await svc.stopRental(rental, 'user') : await svc.terminateRental(rental);
+    if (rental) await GpuRental.updateOne({ _id: rental._id, trainingJobId: doc.jobId }, { $set: { trainingJobId: '' } });
     if (doc.provider === 'aimx' && doc.providerResourceId && !FINISHED.includes(doc.status)) {
       await aimx.gpuFetch(`/v1/jobs/${doc.providerResourceId}/cancel`, { method: 'POST' }).catch(() => undefined);
     }
@@ -559,7 +602,7 @@ router.delete(
       doc.status = 'cancelled';
       doc.finishedAt = doc.finishedAt || new Date();
     }
-    if (rental) doc.cost = Math.round((rental.billedTotal || 0) * 100) / 100;
+    if (rental) doc.cost = Math.max(0, Math.round(((rental.billedTotal || 0) - (doc.rentalBilledStart || 0)) * 100) / 100);
     await doc.save();
     if (doc.provider === 'aimx' && doc.status === 'cancelled') await chargeShared(doc).catch(() => undefined);
     return res.json(publicJob(doc, rental));
@@ -572,3 +615,4 @@ module.exports.applyReport = applyReport;
 module.exports.tokenMatches = tokenMatches;
 module.exports.volumeFor = volumeFor;
 module.exports.MESSAGES = MESSAGES;
+module.exports.publicJob = publicJob;

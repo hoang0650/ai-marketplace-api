@@ -8,6 +8,7 @@ const { taxCategoryFromProduct } = require('../finance/tax-category');
 const { CREATOR } = require('./runpod-marketplace-products');
 const { dedicatedRatePerHour } = require('../utils/game-hosting');
 const { gpuRentalConfig } = require('../utils/gpu-rental/config');
+const { withDesktop } = require('./game-rdp-products');
 
 const CDN = 'https://cdn.aimarkets.vn/aimarkets/aimarkets/playground/game-servers';
 
@@ -187,7 +188,7 @@ function buildGameServerProducts() {
         connectHint: 'Mở Terraria → Multiplayer → Join via IP → nhập IP và cổng (port) của máy chủ.',
       },
     }),
-  ];
+  ].map(p => withDesktop(p, p.gameServer.game === 'terraria' ? TYPICAL_POD_COST_PER_HOUR.cpu3c2 : TYPICAL_POD_COST_PER_HOUR.cpu3g2));
 }
 
 module.exports = { buildGameServerProducts, perMinute, DATA_CENTERS };

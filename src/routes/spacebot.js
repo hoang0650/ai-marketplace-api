@@ -174,6 +174,9 @@ async function pushSshAccess({ apiBase, token, publicKey }) {
 
 router.post('/launch', authenticate, async (req, res, next) => {
   try {
+    if (process.env.SPACEBOT_BUYER_RUNTIME_ENABLED === '0') {
+      return res.status(503).json({ success: false, code: 'RUNTIME_ISOLATION_MAINTENANCE', message: 'Spacebot đang bảo trì để tách biệt dữ liệu và API key giữa người dùng. Vui lòng thử lại sau.' });
+    }
     const userId = String(req.user?._id || req.user?.id || '').trim();
     if (!isMongoUserId(userId)) {
       return res.status(400).json({

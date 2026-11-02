@@ -7,7 +7,7 @@ const num = (v, d) => (v !== undefined && v !== null && v !== '' && Number.isFin
 const round6 = (n) => Math.round((Number(n) || 0) * 1e6) / 1e6;
 
 /** The RunPod endpoint only accepts 5 or 8 s clips (its docs also list 10/15 s, but the live API rejects them). */
-const WAN_DURATIONS = [8, 5];
+const WAN_DURATIONS = process.env.FILM_BACKEND === 'own' ? [10, 8, 5] : [8, 5];
 const SCENE_MAX_SEC = 60;
 const PROJECT_MAX_SEC = 120 * 60;
 
@@ -30,6 +30,10 @@ function filmPricing(env = process.env) {
  * 30 -> 8+8+8+5 = 29 s, 60 -> 8*6+5+5 = 58 s, 40 -> 8*5. Billing uses the real seconds.
  */
 function splitDuration(total) {
+  if (process.env.FILM_BACKEND === 'own') {
+    const t = Math.max(5, Math.min(60, Math.round((Number(total) || 5) / 5) * 5));
+    return [...Array(Math.floor(t / 10)).fill(10), ...(t % 10 ? [5] : [])];
+  }
   let t = Math.round((Number(total) || 0) / 5) * 5;
   t = Math.max(5, Math.min(SCENE_MAX_SEC, t || 5));
   for (let n = 1; n <= 20; n += 1) {

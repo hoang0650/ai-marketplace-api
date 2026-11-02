@@ -58,6 +58,7 @@ connectDb()
   })
   .catch((err) => console.error('[catalog] ensure marketplace products failed:', err.message));
 
+require('./utils/tailscale-key').syncTailscaleKey({ cache: require('./utils/cache') }).catch(() => console.error('[tailscale] Sync unavailable'));
 const app = createApp();
 const server = http.createServer(app);
 attachTerminalGateway(server);

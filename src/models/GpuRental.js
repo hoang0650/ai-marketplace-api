@@ -21,6 +21,7 @@ const gpuRentalSchema = new mongoose.Schema(
     providerServerId: { type: String, default: '', index: true },
     status: { type: String, enum: STATUSES, default: 'creating', index: true },
     ready: { type: Boolean, default: false },
+    trainingJobId: { type: String, default: '' },
     /** Upstream cost (USD/hour) and locked sell prices (USD/hour). */
     costPerHour: { type: Number, default: 0 },
     pricePerHour: { type: Number, required: true, min: 0 },

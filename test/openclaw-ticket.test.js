@@ -37,3 +37,14 @@ test('AI Markets gateway token is empty unless both secrets are set', () => {
     assert.equal(aimarketsGatewayToken(), '');
   });
 });
+
+
+test('browser gateway credential does not inherit the separate PHHotel tenant seed', () => {
+  withEnv({ AIMARKETS_SERVICE_SECRET: 'service-secret', OPENCLAW_MARKET_TICKET_SECRET: 'ticket-secret', PYTHON_AI_SHARED_SECRET: 'separate-phhotel-secret' }, () => {
+    const { tenantGatewayToken, issueMarketTicket, verifyMarketTicket } = require('../src/utils/openclaw-ticket');
+    const uid = '0123456789abcdef01234567';
+    assert.equal(aimarketsGatewayToken(), 'd2acf1f3372abe6942578a088ea811b39e1f14f85dabf74b');
+    assert.notEqual(aimarketsGatewayToken(), tenantGatewayToken(uid));
+    assert.equal(verifyMarketTicket(issueMarketTicket(uid)), uid);
+  });
+});

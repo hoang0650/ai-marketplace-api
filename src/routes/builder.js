@@ -180,6 +180,7 @@ function publicProject(doc, full = false) {
       id: String(m._id),
       role: m.role,
       content: m.content,
+      durationMs: m.durationMs || 0,
       files: m.files || [],
       provider: m.provider || '',
       model: m.model || '',
@@ -436,7 +437,7 @@ async function resolveKey(userId, providerId) {
  * Applies one model reply to the project and records the chat turn.
  * Exported for tests; the route below handles transport (SSE or JSON).
  */
-function applyGeneration(doc, { prompt, previewError, text, provider, model }) {
+function applyGeneration(doc, { prompt, previewError, text, provider, model, durationMs = 0 }) {
   const parsed = files.parseOutput(text);
   if (!parsed.files.length && !parsed.deletes.length) {
     if (!parsed.summary) throw httpError(502, 'EMPTY_OUTPUT');
@@ -450,6 +451,7 @@ function applyGeneration(doc, { prompt, previewError, text, provider, model }) {
     files: out.touched,
     provider,
     model,
+    durationMs: Number.isFinite(Number(durationMs)) ? Math.min(3600000, Math.max(0, Math.round(Number(durationMs)))) : 0,
   });
   if (doc.messages.length > MESSAGES_KEEP) doc.messages.splice(0, doc.messages.length - MESSAGES_KEEP);
   doc.files = out.files;
@@ -491,6 +493,7 @@ router.post('/projects/:id/generate', async (req, res, next) => {
   if (running.has(userId)) return fail(httpError(409, 'GENERATION_BUSY'));
   running.add(userId);
   const controller = new AbortController();
+  const generationStartedAt = Date.now();
   const timer = setTimeout(() => controller.abort(new Error('timeout')), GENERATION_TIMEOUT_MS);
   res.on('close', () => {
     if (!res.writableEnded) controller.abort(new Error('client closed'));
@@ -552,7 +555,7 @@ router.post('/projects/:id/generate', async (req, res, next) => {
     }
 
     const fresh = await findOwned(req);
-    const outcome = applyGeneration(fresh, { prompt, previewError, text: result.text, provider: spec.id, model });
+    const outcome = applyGeneration(fresh, { prompt, previewError, text: result.text, provider: spec.id, model, durationMs: Date.now() - generationStartedAt });
     await fresh.save();
     ProviderApiKey.updateOne({ _id: key._id }, { $set: { lastUsedAt: new Date() } }).catch(() => {});
 
@@ -613,7 +616,7 @@ router.post(
     if (text.length > LOCAL_TEXT_MAX) throw httpError(413, 'OUTPUT_TOO_LARGE');
     const model = cleanModel(body.model) || 'local';
     const doc = await findOwned(req);
-    const outcome = applyGeneration(doc, { prompt, previewError, text, provider: LOCAL_PROVIDER, model });
+    const outcome = applyGeneration(doc, { prompt, previewError, text, provider: LOCAL_PROVIDER, model, durationMs: body.durationMs });
     await doc.save();
     res.json({
       project: publicProject(doc, true),

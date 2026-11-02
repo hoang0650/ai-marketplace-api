@@ -2,6 +2,9 @@ const crypto = require('crypto');
 const { verifyRuntimeTicket, ssoSecret } = require('../utils/runtime-sso-ticket');
 const { getByokProvider } = require('../utils/byok-providers');
 
+const RuntimeByokClaim = require('../models/RuntimeByokClaim');
+const User = require('../models/User');
+const { effectiveStatus } = require('../utils/moderation');
 const MAX_TICKET_LEN = 4096;
 
 function secretMatches(given, expected) {
@@ -34,14 +37,10 @@ function toOpenAICompatibleConnection({ provider, apiKey, baseUrl, model }) {
  * @param {{ runtime: string, envPrefix: string, loadKeys: (uid: string) => Promise<Array<{provider: string, apiKey: string, baseUrl?: string, model?: string}>> }} opts
  */
 function createByokClaimHandler({ runtime, envPrefix, loadKeys }) {
-  const claimed = new Map();
-
-  function consume(jti, expMs) {
-    const now = Date.now();
-    for (const [key, until] of claimed) if (until < now) claimed.delete(key);
-    if (claimed.has(jti)) return false;
-    claimed.set(jti, expMs + 60_000);
-    return true;
+  async function consume(jti, expMs) {
+    const id = crypto.createHash('sha256').update(runtime + ':' + jti).digest('hex');
+    try { await RuntimeByokClaim.create({ _id: id, expiresAt: new Date(expMs + 60000) }); return true; }
+    catch (err) { if (err.code === 11000) return false; throw err; }
   }
 
   return async function byokClaim(req, res, next) {
@@ -59,10 +58,12 @@ function createByokClaimHandler({ runtime, envPrefix, loadKeys }) {
       if (!data) {
         return res.status(401).json({ success: false, code: 'TICKET_INVALID', message: 'Invalid or expired ticket.' });
       }
-      if (!data.jti || !consume(String(data.jti), Number(data.exp))) {
+      if (!data.jti || !await consume(String(data.jti), Number(data.exp))) {
         return res.status(409).json({ success: false, code: 'TICKET_CLAIMED', message: 'Ticket already claimed.' });
       }
 
+      const user = await User.findById(data.uid).select('accountStatus suspendedUntil').lean();
+      if (!user || effectiveStatus(user) !== 'active') return res.status(403).json({ success: false, message: 'Account unavailable' });
       const rows = await loadKeys(data.uid);
       const connections = rows.map(toOpenAICompatibleConnection).filter(Boolean);
       return res.json({ success: true, userId: data.uid, connections });

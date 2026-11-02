@@ -69,9 +69,9 @@ test('scene plan: text-only scenes pay one first-frame image, chained scenes reu
     { sid: 'c', prompt: 'z', duration: 60 },
   ] });
   const b = scenePlan(p, p.scenes[1], 1);
-  assert.deepEqual([b.seconds, b.images, b.price, b.start.key], [29, 0, 2.2968, 'f']);
+  assert.deepEqual([b.seconds, b.images, b.price, b.start.key], [29, 0, fp.filmCharge({ seconds: 29, images: 0 }), 'f']);
   const c = scenePlan(p, p.scenes[2], 2);
-  assert.deepEqual([c.seconds, c.images, c.price], [58, 1, 4.62]);
+  assert.deepEqual([c.seconds, c.images, c.price], [58, 1, fp.filmCharge({ seconds: 58, images: 1 })]);
   assert.equal(renderPlan({ scenes: [{ narration: 'a'.repeat(2000) }] }).chars, 2000);
 });
 
@@ -131,6 +131,23 @@ test('settling a partial scene refunds failed shots once and versions the produc
 
 const FilmAsset = require('../../src/models/FilmAsset');
 const minio = require('../../src/config/minio');
+
+test('partial public model jobs refund exact quoted shot prices, including nonlinear duration tiers', async () => {
+  const db = installFakeLedger({ saved });
+  process.env.AIMX_PROVIDER_URL = 'http://ai.test';
+  process.env.DENGLISH_SERVICE_KEY = 'k';
+  for (const [o, k, fn] of [
+    [StudioJob, 'updateOne', async () => ({ modifiedCount: 1 })],
+    [global, 'fetch', async () => new Response(JSON.stringify({ status: 'partial', keyframe: { status: 'succeeded' }, shots: [{ status: 'succeeded' }, { status: 'failed' }] }))],
+  ]) { saved.push([o, k, o[k]]); o[k] = fn; }
+  const job = { _id: new mongoose.Types.ObjectId(), user: new mongoose.Types.ObjectId(), kind: 'film-scene',
+    status: 'running', remoteId: 'ef'.repeat(16), charged: 3.0528, createdAt: new Date(), $locals: {}, save: async () => {},
+    meta: { keyframeKey: 'kf', rates: { perSecond: 0.25, perImage: 0.0528 },
+      shots: [{ duration: 4, price: 1 }, { duration: 8, price: 2 }] } };
+  const out = await filmRoutes.refreshFilmJob(job);
+  assert.equal(out.refundedAmount, 2);
+  assert.equal(db.tx.filter(t => t.type === 'credit')[0].amount, 2);
+});
 
 test('scene refs: characters with images first (image 1..n), setting image last, max 3 images, owner-scoped', async () => {
   const user = new mongoose.Types.ObjectId();

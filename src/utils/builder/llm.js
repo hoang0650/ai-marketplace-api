@@ -37,8 +37,9 @@ function bearer(apiKey) {
 }
 
 function upstreamError(status, body) {
-  const detail = body?.error?.message || body?.message || (typeof body?.error === 'string' ? body.error : '');
-  const err = new Error(detail ? String(detail).slice(0, 300) : `HTTP ${status}`);
+  // A custom provider can echo Authorization in its error body. Return only the
+  // status/code so secrets never enter the transcript, UI or application logs.
+  const err = new Error(`Provider returned HTTP ${status}`);
   err.status = status;
   err.code = status === 401 || status === 403 ? 'PROVIDER_KEY_REJECTED' : status === 429 ? 'PROVIDER_RATE_LIMITED' : 'PROVIDER_ERROR';
   return err;

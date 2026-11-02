@@ -21,7 +21,7 @@ function sendError(res, next, e) {
 }
 
 function attachRunRoutes(router, { idParam = 'id' } = {}) {
-  router.post(`/:${idParam}/runsync`, authStack, async (req, res, next) => {
+  router.post(`/:${idParam}/runsync`, authStack, require('../utils/inference-history').recordRequest, async (req, res, next) => {
     try {
       res.json(await runCatalogModel(req, req.params[idParam], 'runsync'));
     } catch (e) {

@@ -132,8 +132,8 @@ function createApp() {
       skip: (req) => req.path === '/health' || req.path === '/health/ready',
     })
   );
-  app.use('/v1/studio/film', express.json({ limit: '4mb' }), require('./routes/studio-film'));
-  app.use('/v1/studio', express.json({ limit: '12mb' }), require('./routes/studio'));
+  app.use('/v1/studio/film', express.json({ limit: '4mb' }));
+  app.use('/v1/studio', express.json({ limit: '12mb' }));
   // Skill runs upload input files (≤20 MB, base64) — parsed here before the global 1 MB parser.
   app.use('/v1/skills', express.json({ limit: '28mb' }));
   app.use(express.json({ limit: '1mb' }));
@@ -162,7 +162,7 @@ function createApp() {
     standardHeaders: true,
     legacyHeaders: false,
     message: { message: 'Too many requests, please slow down.' },
-    skip: (req) => String(req.originalUrl || req.path || '').includes('/content/play'),
+    skip: (req) => String(req.originalUrl || '').split('?')[0] === '/v1/content/play',
   });
   // Stricter limit for credential endpoints (brute-force protection).
   const authLimiter = rateLimit({
@@ -213,6 +213,8 @@ function createApp() {
     });
   });
 
+  app.use('/v1/studio/film', require('./routes/studio-film'));
+  app.use('/v1/studio', require('./routes/studio'));
   app.use('/v1/auth', authRoutes);
   app.use('/v1/account', accountRoutes);
   app.use('/v1/products', productRoutes);

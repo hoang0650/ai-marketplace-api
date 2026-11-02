@@ -105,6 +105,7 @@ router.patch('/hired/:agentId', authenticate, async (req, res, next) => {
   }
 });
 
+const { runtimeAvailability } = require('../utils/agent-runtime-availability');
 /** GET /v1/agents/pricing — public monthly price + token policy per hosted agent. */
 router.get('/pricing', (_req, res) => {
   res.json(
@@ -113,6 +114,7 @@ router.get('/pricing', (_req, res) => {
       fee: monthlyFee(agentId),
       tokenMarkup: AIMARKETS_PROVIDER_MARKUP,
       byokOnly: BYOK_ONLY_AGENTS.includes(agentId),
+      availability: runtimeAvailability(agentId),
     })),
   );
 });

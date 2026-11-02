@@ -149,7 +149,7 @@ async function meterAndInfer(req, product, input, action = 'runsync') {
       provider,
       unit: usage.unit || 'tokens',
       quantity: Number(usage.quantity) || Number(usage.total_tokens) || 0,
-      rawUsage: shortfall > 0 ? { ...usage, shortfall } : usage,
+      rawUsage: { ...usage, ...(shortfall > 0 ? { shortfall } : {}), gatewayJobId: String(aiData.id || ai.raw?.id || ai.raw?.jobId || '') },
       source: 'gateway',
       usageType: 'API_REQUEST',
       idempotencyKey: scopedKey ? `gw_${scopedKey}` : `gw_${crypto.randomBytes(8).toString('hex')}`,
@@ -218,6 +218,9 @@ async function pollCatalogJob(req, identifier, jobId) {
     throw err;
   }
   assertKeyOwnsProduct(req, product);
+  // Provider job IDs are opaque identifiers, never authorization credentials.
+  const owned = await UsageEvent.exists({ buyer: req.user._id, product: product._id, 'rawUsage.gatewayJobId': String(jobId) });
+  if (!owned) { const err = new Error('Job not found'); err.status = 404; err.body = { code: 'NOT_FOUND' }; throw err; }
   const resolved = resolveProviderForProduct(product);
   const result = await fetchJobStatus(resolved.endpointId || resolved.model || identifier, jobId);
   const data = result.data && typeof result.data === 'object' ? result.data : result;

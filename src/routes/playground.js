@@ -36,6 +36,33 @@ const LicenseKey = require('../models/LicenseKey');
 const aimxTts = require('../utils/aimx-tts');
 
 const router = express.Router();
+const history = require('../utils/inference-history');
+const InferenceRequest = require('../models/InferenceRequest');
+const mongoose = require('mongoose');
+
+router.get('/requests', authenticate, async (req, res, next) => {
+  try {
+    const query = history.ownerFilter(req.user);
+    if (req.query.productId) {
+      if (!mongoose.isValidObjectId(req.query.productId)) return res.status(400).json({ message: 'Invalid product' });
+      query.product = req.query.productId;
+    }
+    const days = new Map([['24h', 1], ['7d', 7], ['30d', 30]]).get(req.query.range);
+    if (days) query.createdAt = { $gte: new Date(Date.now() - days * 86400000) };
+    const page = Math.max(1, Math.min(100000, Math.floor(Number(req.query.page) || 1)));
+    const limit = Math.max(1, Math.min(50, Math.floor(Number(req.query.limit) || 10)));
+    const [rows, total] = await Promise.all([InferenceRequest.find(query).select('-request -response').sort({ createdAt: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).lean(), InferenceRequest.countDocuments(query)]);
+    res.set('Cache-Control', 'no-store').json({ items: rows.map(r => history.view(r)), total, page, limit });
+  } catch(e) { next(e); }
+});
+router.get('/requests/:id', authenticate, async (req, res, next) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(404).json({ message: 'Not found' });
+    const row = await InferenceRequest.findOne(history.ownerFilter(req.user, { _id: req.params.id })).lean();
+    if (!row) return res.status(404).json({ message: 'Not found' });
+    res.set('Cache-Control', 'no-store').json(history.view(row, true));
+  } catch(e) { next(e); }
+});
 
 const MEDIA_FIELDS = ['image_url', 'video_url', 'audio_url'];
 
@@ -56,6 +83,7 @@ function buildOutput(data, { kind, charged, providerCost, usage }) {
   }
   if (Array.isArray(data.images) && data.images.length) output.images = data.images;
   if (data.text) output.text = data.text;
+  if (data.reasoning) output.reasoning = data.reasoning;
   if (data.seed !== undefined) output.seed = data.seed;
   if (data.job_id) output.jobId = data.job_id;
   if (data.raw_output !== undefined) output.rawOutput = data.raw_output;
@@ -65,6 +93,7 @@ function buildOutput(data, { kind, charged, providerCost, usage }) {
   output.usage = {
     input: Number(usage.input_tokens) || 0,
     output: Number(usage.output_tokens) || 0,
+    cached_input: Number(usage.cached_input_tokens) || 0,
     unit: usage.unit,
     quantity: usage.quantity,
   };
@@ -105,7 +134,7 @@ function insufficientBody(err, extra = {}) {
  * Header `Idempotency-Key` (or input.idempotencyKey): replays the first result for this buyer.
  * Auth: JWT — reserves the estimate, charges the wallet + records UsageEvent, proxies AI via denglish-api.
  */
-router.post('/run', authenticate, async (req, res, next) => {
+router.post('/run', authenticate, history.recordRequest, async (req, res, next) => {
   let claim = null;
   let hold = null;
   try {

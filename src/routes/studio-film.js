@@ -18,10 +18,14 @@ const { studioPolicy } = require('../utils/studio-policy');
 const { voiceLang } = require('../utils/voice-params');
 const filmLangs = require('../utils/film-langs');
 const fp = require('../utils/film-pricing');
+const fm = require('../utils/film-models');
+const quota = require('../utils/film-quota');
 const minio = require('../config/minio');
 const FilmAsset = require('../models/FilmAsset');
+const filmVoices = require('../utils/film-voices');
 
 const router = express.Router();
+router.use(async (req, res, next) => { try { await fm.catalog(); next(); } catch (e) { next(e); } });
 const MAX_PROJECTS = Number(process.env.FILM_MAX_PROJECTS || 30);
 const MAX_ACTIVE = Number(process.env.FILM_MAX_ACTIVE_JOBS || 3);
 const MAX_VERSIONS = 10;
@@ -50,6 +54,10 @@ function fail(res, status, code, extra = {}) {
 const clean = (v, n) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f]+/g, ' ').trim().slice(0, n) : '');
 const newSid = () => crypto.randomBytes(5).toString('hex');
 const seedOf = () => crypto.randomInt(1, 2 ** 31 - 1);
+
+router.get('/voices', authenticate, async (req, res, next) => {
+  try { res.json({ items: await filmVoices.catalog(req.user) }); } catch (e) { next(e); }
+});
 
 /* ------------------------------------------------------------- availability -- */
 let avail = { at: 0, v: null };
@@ -96,7 +104,7 @@ const putUrl = (k) => minio.presignFilmPut(k, SIGN_TTL);
 
 function planShots(scene) {
   const old = scene.shots || [];
-  return fp.splitDuration(scene.duration).map((d, i) => {
+  return fm.splitDuration(scene.duration, scene.videoModel).map((d, i) => {
     const o = old[i];
     if (o && o.duration === d) return o;
     return { sid: o ? o.sid : newSid(), prompt: o ? o.prompt : '', duration: d, seed: -1, status: 'draft', error: '', active: -1, versions: o && o.duration === d ? o.versions : [] };
@@ -109,7 +117,7 @@ function sceneSeconds(p, s) {
     return u ? Math.round(u.duration || 0) : 0;
   }
   const done = (s.shots || []).every((sh) => sh.active >= 0);
-  return done && s.shots.length ? s.shots.reduce((a, sh) => a + sh.duration, 0) : fp.splitDuration(s.duration).reduce((a, b) => a + b, 0);
+  return done && s.shots.length ? s.shots.reduce((a, sh) => a + sh.duration, 0) : fm.splitDuration(s.duration, s.videoModel).reduce((a, b) => a + b, 0);
 }
 const projectSeconds = (p) => (p.scenes || []).reduce((a, s) => a + sceneSeconds(p, s), 0);
 
@@ -119,6 +127,9 @@ function sceneIn(raw, prev) {
   if (raw.prompt !== undefined) s.prompt = clean(raw.prompt, 600);
   if (raw.narration !== undefined) s.narration = clean(raw.narration, 1500);
   if (raw.voice !== undefined) s.voice = clean(raw.voice, 80) || 'Binh';
+  if (raw.voiceSource !== undefined) s.voiceSource = ['preset', 'upload', 'marketplace'].includes(raw.voiceSource) ? raw.voiceSource : 'preset';
+  if (raw.voiceUploadId !== undefined) s.voiceUploadId = clean(raw.voiceUploadId, 40);
+  if (raw.voiceProductId !== undefined) s.voiceProductId = clean(raw.voiceProductId, 24);
   if (raw.lang !== undefined) s.lang = filmLangs.filmLang(raw.lang); // '' = use the project language
   if (raw.camera !== undefined) s.camera = CAMERAS.includes(raw.camera) ? raw.camera : 'push-in';
   if (raw.transition !== undefined) s.transition = clean(raw.transition, 20) || 'cut';
@@ -129,12 +140,21 @@ function sceneIn(raw, prev) {
   if (Array.isArray(raw.characterIds)) s.characterIds = raw.characterIds.filter((x) => /^[a-f0-9]{24}$/.test(String(x))).slice(0, 3);
   if (raw.settingId !== undefined) s.settingId = /^[a-f0-9]{24}$/.test(String(raw.settingId || '')) ? raw.settingId : null;
   const busy = s.status === 'generating';
+  let modelChanged = false;
+  if (!busy) for (const [field, kind] of [['videoModel', 'video'], ['imageModel', 'image']]) {
+    if (raw[field] !== undefined) {
+      const id = fm.model(raw[field], kind).id;
+      if (s[field] && s[field] !== id && s.shots.some(sh => sh.versions?.length)) s.status = 'stale';
+      modelChanged ||= s[field] !== id;
+      s[field] = id;
+    }
+  }
   if (raw.duration !== undefined && !busy) {
     const d = Math.max(5, Math.min(fp.SCENE_MAX_SEC, Math.round(Number(raw.duration) / 5) * 5 || 5));
-    if (d !== s.duration || !s.shots.length) {
+    if (d !== s.duration || !s.shots.length || modelChanged) {
       s.duration = d;
       const generated = s.shots.some((sh) => sh.versions && sh.versions.length);
-      const same = fp.splitDuration(d).join() === s.shots.map((x) => x.duration).join();
+      const same = fm.splitDuration(d, s.videoModel).join() === s.shots.map((x) => x.duration).join();
       if (!generated) s.shots = planShots(s);
       else if (!same) s.status = 'stale';
     }
@@ -187,7 +207,7 @@ async function mutate(projectId, fn, tries = 4) {
 
 /* --------------------------------------------------------------- estimate -- */
 function scenePlan(p, s, idx) {
-  const shots = fp.splitDuration(s.duration);
+  const shots = fm.splitDuration(s.duration, s.videoModel);
   const prev = idx > 0 ? p.scenes[idx - 1] : null;
   const prevFrame = prev && prev.shots && prev.shots.length ? (prev.shots[prev.shots.length - 1].versions || [])[prev.shots[prev.shots.length - 1].active] : null;
   const startUpload = s.startUploadId ? (p.uploads || []).find((u) => u.uid === s.startUploadId && u.kind === 'image' && u.status === 'ready') : null;
@@ -195,7 +215,8 @@ function scenePlan(p, s, idx) {
   let start = null;
   if (!refs && s.chainPrev && prevFrame && prevFrame.frameKey) start = { key: prevFrame.frameKey, from: 'prev' };
   else if (!refs && startUpload) start = { key: startUpload.key, from: 'upload' };
-  const images = start ? 0 : 1;
+  const textVideo = s.videoModel && s.videoModel !== fm.DEFAULT_VIDEO && fm.model(s.videoModel, 'video').modality === 'text-to-video';
+  const images = start || textVideo ? 0 : 1;
   const seconds = shots.reduce((a, b) => a + b, 0);
   return { sid: s.sid, shots, seconds, images, start, price: fp.filmCharge({ seconds, images }) };
 }
@@ -207,15 +228,26 @@ function renderPlan(p) {
   return { chars, price };
 }
 
+async function pricedPlan(p, s, idx) {
+  const plan = scenePlan(p, s, idx);
+  const q = await fm.quote({ videoModel: s.videoModel, imageModel: s.imageModel, shots: plan.shots, images: plan.images });
+  return { ...plan, ...q, shots: plan.shots, shotPrices: q.shots, seconds: plan.seconds, images: plan.images };
+}
+
+router.post('/model-quote', authenticate, async (req, res, next) => {
+  try { const b = req.body || {}; res.json(await fm.quote({ imageModel: b.imageModel, images: 1, mode: b.mode === 'character' ? 'character' : 'keyframe' })); } catch (e) { next(e); }
+});
+
 /* ------------------------------------------------------------------ routes -- */
 router.get('/config', authenticate, async (req, res, next) => {
   try {
     const a = await availability();
-    const pr = fp.filmPricing();
+    const q = await fm.quote({ shots: [5], images: 1 });
+    const pr = q.rates;
     res.json({
       available: a.film, perSecond: pr.perSecond, perImage: pr.perImage, ttsPerK: studioPolicy().tts.perKChars,
-      durations: fp.WAN_DURATIONS, sceneMaxSec: fp.SCENE_MAX_SEC, projectMaxSec: fp.PROJECT_MAX_SEC, freePerDay: 0,
-      cameras: CAMERAS, models: { video: 'Wan 2.2 I2V 720p', image: 'Qwen-Image-Edit-2511', tts: { vi: 'VieNeu-TTS', other: 'Chatterbox Multilingual' } },
+      durations: fp.WAN_DURATIONS, sceneMaxSec: fp.SCENE_MAX_SEC, projectMaxSec: fp.PROJECT_MAX_SEC, freePerDay: quota.limits().videos, freeImagesPerDay: quota.limits().images, freeVideoMaxSec: 20, remainingFree: await quota.status(req.user._id),
+      modelCatalog: await fm.catalog(), cameras: CAMERAS, models: { video: 'Wan 2.2 I2V 720p', image: 'Qwen-Image-Edit-2511', tts: { vi: 'VieNeu-TTS', other: 'Chatterbox Multilingual' } },
       ...filmLangs.catalog(),
     });
   } catch (e) { next(e); }
@@ -366,7 +398,7 @@ router.delete('/projects/:id/uploads/:uid', authenticate, async (req, res, next)
     await mutate(p0._id, (p) => {
       const u = p.uploads.find((x) => x.uid === req.params.uid);
       if (!u) return false;
-      used = p.scenes.some((s) => s.uploadId === u.uid || s.startUploadId === u.uid) || p.music.uploadId === u.uid;
+      used = p.scenes.some((s) => s.uploadId === u.uid || s.startUploadId === u.uid || (s.voiceSource === 'upload' && s.voiceUploadId === u.uid)) || p.music.uploadId === u.uid;
       if (used) return false;
       k = u.key;
       p.uploads = p.uploads.filter((x) => x.uid !== u.uid);
@@ -385,9 +417,14 @@ router.post('/projects/:id/estimate', authenticate, async (req, res, next) => {
     if (!p) return;
     const b = req.body || {};
     const want = Array.isArray(b.sceneIds) ? new Set(b.sceneIds.map(String)) : null;
-    const items = p.scenes.map((s, i) => [s, i])
+    const items = await Promise.all(p.scenes.map((s, i) => [s, i])
       .filter(([s]) => s.source === 'ai' && (want ? want.has(s.sid) : !['ready', 'generating'].includes(s.status)))
-      .map(([s, i]) => { const pl = scenePlan(p, s, i); return { sid: s.sid, shots: pl.shots, seconds: pl.seconds, images: pl.images, price: pl.price }; });
+      .map(async ([s, i]) => { const pl = await pricedPlan(p, s, i); return { sid: s.sid, shots: pl.shots, seconds: pl.seconds, images: pl.images, price: pl.price, videoModel: pl.videoModel, imageModel: pl.imageModel }; }));
+    const usage = await quota.status(req.user._id);
+    if (process.env.FILM_BACKEND === 'own') for (const item of items) {
+      const q = await quota.quote(req.user._id, item, usage); item.price = q.price; item.free = q.free;
+      usage.videos += q.free.videos; usage.images += q.free.images;
+    }
     const rp = renderPlan(p);
     const pr = fp.filmPricing();
     res.json({
@@ -420,16 +457,33 @@ async function submitAi(path, body) {
  */
 async function billAndSubmit(req, { charge, path, body, job }) {
   const userId = req.user._id;
-  let tx = null;
-  if (charge.amount > 0) tx = await debit(userId, charge.amount, charge.note, charge.meta);
-  const out = await submitAi(path, body).catch(() => ({ error: 'STUDIO_UNAVAILABLE', status: 503 }));
-  if (out.error) {
-    if (tx) await credit(userId, charge.amount, `Hoàn phí ${charge.note} (không gửi được)`, { kind: charge.meta.kind, submitFailed: true });
-    return out;
+  const eligible = process.env.FILM_BACKEND === 'own' && job.kind !== 'film-render';
+  const plan = { seconds: Number(job.meta?.seconds || 0), images: Number(job.meta?.images || 0) };
+  const hold = eligible ? await quota.reserve(userId, plan) : null;
+  if (hold) {
+    const expected = Number(req.body?.expectedPrice);
+    if (hold.price > 0 && job.kind !== 'fast' && (!Number.isFinite(expected) || Math.abs(expected - hold.price) > 1e-6)) {
+      await quota.release(hold); return { error: 'PRICE_CHANGED', status: 409, price: hold.price };
+    }
+    charge = { ...charge, amount: hold.price };
+    job.meta = { ...job.meta, quota: hold, rates: { ...(job.meta?.rates || fp.filmPricing()),
+      ...(hold.videos ? { perSecond: 0 } : {}), ...(hold.images >= plan.images && plan.images ? { perImage: 0 } : {}) } };
   }
-  const row = await StudioJob.create({ user: userId, remoteId: out.remote.id, status: 'queued', charged: charge.amount, free: false, walletTx: tx ? tx._id : null, ...job });
-  if (tx) WalletTx.updateOne({ _id: tx._id }, { $set: { 'meta.remoteId': out.remote.id, 'meta.job': String(row._id) } }).catch(() => {});
-  return { job: row };
+  let tx = null; let accepted = false;
+  try {
+    if (charge.amount > 0) tx = await debit(userId, charge.amount, charge.note, charge.meta);
+    const out = await submitAi(path, body).catch(() => ({ error: 'STUDIO_UNAVAILABLE', status: 503 }));
+    if (out.error) {
+      if (tx) await credit(userId, charge.amount, 'Refund: submission failed', { kind: charge.meta.kind, submitFailed: true });
+      if (hold) await quota.release(hold);
+      return out;
+    }
+    accepted = true;
+    const row = await StudioJob.create({ user: userId, remoteId: out.remote.id, status: 'queued', charged: charge.amount, free: charge.amount === 0, walletTx: tx ? tx._id : null, ...job });
+    if (tx) WalletTx.updateOne({ _id: tx._id }, { $set: { 'meta.remoteId': out.remote.id, 'meta.job': String(row._id) } }).catch(() => {});
+    return { job: row };
+  } catch (e) { if (hold && !accepted) await quota.release(hold); throw e; }
+
 }
 
 function priceGate(req, res, price) {
@@ -450,7 +504,8 @@ router.post('/projects/:id/scenes/:sid/generate', authenticate, async (req, res,
     if (!scene || scene.source !== 'ai') return fail(res, 404, 'NOT_FOUND');
     if (scene.status === 'generating') return fail(res, 409, 'BUSY');
     if ((scene.prompt || '').length < 3) return fail(res, 400, 'BAD_INPUT', { reason: 'prompt' });
-    const plan = scenePlan(p, scene, idx);
+    const plan = await pricedPlan(p, scene, idx);
+    if (process.env.FILM_BACKEND === 'own') plan.price = (await quota.quote(req.user._id, plan)).price;
     if (!priceGate(req, res, plan.price)) return;
     if ((await checkActive(req.user._id)) >= MAX_ACTIVE) return fail(res, 429, 'JOB_ACTIVE');
     // Claim the scene atomically so two clicks can never bill/submit it twice.
@@ -464,16 +519,17 @@ router.post('/projects/:id/scenes/:sid/generate', authenticate, async (req, res,
     const gen = (scene.generation || 0) + 1;
     shots = planShots(scene.toObject());
     const base = (n) => key(p, 'scenes', scene.sid, n);
-    const kfKey = plan.start ? '' : base(`key-g${gen}.jpg`);
+    const kfKey = !plan.images ? '' : base(`key-g${gen}.jpg`);
     const startKey = plan.start ? base(`start-g${gen}.jpg`) : '';
     const refs = await sceneRefs(req.user._id, scene);
     const spec = {
+      videoModel: plan.videoModel, imageModel: plan.imageModel,
       scene: { prompt: scene.prompt, camera: scene.camera, characters: refs.characters, setting: refs.setting },
-      keyframe: plan.start ? null : { mode: 'keyframe', prompt: scene.prompt, images: refs.images, charImages: refs.charImages, settingImage: refs.settingImage, put: await putUrl(kfKey), get: await sign(kfKey), seed: seedOf() },
+      keyframe: !plan.images ? null : { mode: 'keyframe', prompt: scene.prompt, images: refs.images, charImages: refs.charImages, settingImage: refs.settingImage, put: await putUrl(kfKey), get: await sign(kfKey), seed: seedOf() },
       start: plan.start ? { get: await sign(plan.start.key) } : null,
       shots: [],
     };
-    const meta = { sid: scene.sid, gen, seconds: plan.seconds, images: plan.images, keyframeKey: kfKey, startKey, rates: fp.filmPricing(), shots: [] };
+    const meta = { sid: scene.sid, gen, seconds: plan.seconds, images: plan.images, keyframeKey: kfKey, startKey, videoModel: plan.videoModel, imageModel: plan.imageModel, rates: plan.rates, shots: [] };
     for (const [i, sh] of shots.entries()) {
       const vk = base(`${sh.sid}-g${gen}.mp4`);
       const fk = base(`${sh.sid}-g${gen}.jpg`);
@@ -481,7 +537,7 @@ router.post('/projects/:id/scenes/:sid/generate', authenticate, async (req, res,
       const s = { id: sh.sid, prompt: sh.prompt || '', duration: sh.duration, seed, camera: scene.camera, videoPut: await putUrl(vk), framePut: await putUrl(fk), frameGet: await sign(fk) };
       if (i === 0 && startKey) { s.startPut = await putUrl(startKey); s.startGet = await sign(startKey); }
       spec.shots.push(s);
-      meta.shots.push({ sid: sh.sid, duration: sh.duration, seed, prompt: sh.prompt || '', videoKey: vk, frameKey: fk });
+      meta.shots.push({ sid: sh.sid, duration: sh.duration, price: plan.shotPrices[i].price, seed, prompt: sh.prompt || '', videoKey: vk, frameKey: fk });
     }
     out = await billAndSubmit(req, {
       charge: { amount: plan.price, note: `Phim AI: cảnh ${idx + 1} (${plan.seconds}s${plan.images ? ` + ${plan.images} ảnh` : ''})`, meta: { kind: 'film-scene', unit: 'seconds', quantity: plan.seconds, images: plan.images, project: String(p._id) } },
@@ -489,7 +545,7 @@ router.post('/projects/:id/scenes/:sid/generate', authenticate, async (req, res,
       job: { kind: 'film-scene', project: p._id, prompt: scene.prompt.slice(0, 1000), meta },
     });
     } catch (e) { await unclaim(); throw e; }
-    if (out.error) { await unclaim(); return fail(res, out.status, out.error); }
+    if (out.error) { await unclaim(); return fail(res, out.status, out.error, out.price == null ? {} : { price: out.price }); }
     const saved = await mutate(p._id, (doc) => {
       const s = doc.scenes.find((x) => x.sid === out.job.meta.sid);
       if (!s) return false;
@@ -498,7 +554,7 @@ router.post('/projects/:id/scenes/:sid/generate', authenticate, async (req, res,
       s.shots = shots.map((sh) => ({ ...(sh.toObject ? sh.toObject() : sh), status: 'generating', error: '' }));
       return true;
     });
-    res.status(202).json({ job: jobView(out.job), price: plan.price, project: await view(saved) });
+    res.status(202).json({ job: jobView(out.job), price: out.job.charged, project: await view(saved) });
   } catch (e) {
     if (e.code === 'INSUFFICIENT_WALLET') return fail(res, 402, 'INSUFFICIENT_WALLET', { available: e.available });
     if (e.code === 'WALLET_BUSY') return fail(res, 503, 'STUDIO_UNAVAILABLE');
@@ -529,7 +585,8 @@ router.post('/projects/:id/scenes/:sid/shots/:shot/estimate', authenticate, asyn
     const i = scene ? scene.shots.findIndex((x) => x.sid === req.params.shot) : -1;
     if (i < 0) return fail(res, 404, 'NOT_FOUND');
     const seconds = scene.shots[i].duration;
-    res.json({ seconds, images: 0, price: fp.filmCharge({ seconds }), ready: !!shotStart(scene, i), available: await getSpendableBalance(req.user._id) });
+    const quote = await fm.quote({ videoModel: scene.videoModel, shots: [seconds] });
+    res.json({ seconds, images: 0, price: quote.price, ready: !!shotStart(scene, i), available: await getSpendableBalance(req.user._id) });
   } catch (e) { next(e); }
 });
 
@@ -546,7 +603,8 @@ router.post('/projects/:id/scenes/:sid/shots/:shot/generate', authenticate, asyn
     const startFrame = shotStart(scene, i);
     if (!startFrame) return fail(res, 409, 'NEED_PREVIOUS', { reason: i ? 'previous shot has no video yet' : 'generate the scene first' });
     const sh = scene.shots[i];
-    const price = fp.filmCharge({ seconds: sh.duration });
+    const quote = await fm.quote({ videoModel: scene.videoModel, shots: [sh.duration] });
+    const price = quote.price;
     if (!priceGate(req, res, price)) return;
     if ((await checkActive(req.user._id)) >= MAX_ACTIVE) return fail(res, 429, 'JOB_ACTIVE');
     const prevStatus = scene.status;
@@ -563,20 +621,21 @@ router.post('/projects/:id/scenes/:sid/shots/:shot/generate', authenticate, asyn
       const prompt = clean((req.body || {}).prompt, 600) || sh.prompt || '';
       const refs = await sceneRefs(req.user._id, scene);
       const spec = {
+        videoModel: quote.videoModel,
         scene: { prompt: scene.prompt, camera: scene.camera, characters: refs.characters, setting: refs.setting },
         keyframe: null,
         start: { get: await sign(startFrame) },
         shots: [{ id: sh.sid, prompt, duration: sh.duration, seed, camera: scene.camera, videoPut: await putUrl(vk), framePut: await putUrl(fk), frameGet: await sign(fk) }],
       };
-      const meta = { sid: scene.sid, gen, single: true, seconds: sh.duration, images: 0, keyframeKey: '', startKey: '', rates: fp.filmPricing(),
-        shots: [{ sid: sh.sid, duration: sh.duration, seed, prompt, videoKey: vk, frameKey: fk, startKey: i === 0 ? startFrame : '' }] };
+      const meta = { sid: scene.sid, gen, single: true, seconds: sh.duration, images: 0, keyframeKey: '', startKey: '', videoModel: quote.videoModel, rates: quote.rates,
+        shots: [{ sid: sh.sid, duration: sh.duration, price: quote.price, seed, prompt, videoKey: vk, frameKey: fk, startKey: i === 0 ? startFrame : '' }] };
       out = await billAndSubmit(req, {
         charge: { amount: price, note: `Phim AI: quay lại đoạn ${i + 1} cảnh ${idx + 1} (${sh.duration}s)`, meta: { kind: 'film-scene', unit: 'seconds', quantity: sh.duration, images: 0, project: String(p._id) } },
         path: '/film/scene', body: spec,
         job: { kind: 'film-scene', project: p._id, prompt: (prompt || scene.prompt).slice(0, 1000), meta },
       });
     } catch (e) { await unclaim(); throw e; }
-    if (out.error) { await unclaim(); return fail(res, out.status, out.error); }
+    if (out.error) { await unclaim(); return fail(res, out.status, out.error, out.price == null ? {} : { price: out.price }); }
     const saved = await mutate(p._id, (doc) => {
       const s = doc.scenes.find((x) => x.sid === scene.sid);
       const t = s && s.shots.find((x) => x.sid === sh.sid);
@@ -585,7 +644,7 @@ router.post('/projects/:id/scenes/:sid/shots/:shot/generate', authenticate, asyn
       if ((req.body || {}).prompt !== undefined) t.prompt = clean(req.body.prompt, 600);
       return true;
     });
-    res.status(202).json({ job: jobView(out.job), price, project: await view(saved) });
+    res.status(202).json({ job: jobView(out.job), price: out.job.charged, project: await view(saved) });
   } catch (e) {
     if (e.code === 'INSUFFICIENT_WALLET') return fail(res, 402, 'INSUFFICIENT_WALLET', { available: e.available });
     if (e.code === 'WALLET_BUSY') return fail(res, 503, 'STUDIO_UNAVAILABLE');
@@ -632,25 +691,26 @@ router.post('/projects/:id/render', authenticate, async (req, res, next) => {
     const rp = renderPlan(p);
     if (!priceGate(req, res, rp.price)) return;
 
-    const segments = [];
+    const segments = [], voiceReferences = {};
     for (const s of p.scenes) {
       const videos = s.source === 'upload'
         ? [await sign(p.uploads.find((u) => u.uid === s.uploadId).key)]
         : await Promise.all(s.shots.map((sh) => sign(sh.versions[sh.active].videoKey)));
-      segments.push({ kind: s.source, videos, narration: s.narration ? { text: s.narration, ...filmLangs.sceneVoice(p, s) } : null });
+      segments.push({ kind: s.source, videos, narration: await filmVoices.narration(p, s, req.user, voiceReferences) });
     }
     const music = p.music.uploadId ? p.uploads.find((u) => u.uid === p.music.uploadId && u.status === 'ready') : null;
     const rk = key(p, 'renders', `${Date.now().toString(36)}-${newSid()}.mp4`);
     const out = await billAndSubmit(req, {
       charge: { amount: rp.price, note: `Phim AI: lồng tiếng khi xuất phim (${rp.chars} ký tự)`, meta: { kind: 'film-render', unit: 'characters', quantity: rp.chars, project: String(p._id) } },
       path: '/film/render',
-      body: { segments, subtitles: filmLangs.subtitleMode(p.subtitles), music: music ? { get: await sign(music.key), volume: p.music.volume } : null, put: await putUrl(rk) },
+      body: { segments, voiceReferences, subtitles: filmLangs.subtitleMode(p.subtitles), music: music ? { get: await sign(music.key), volume: p.music.volume } : null, put: await putUrl(rk) },
       job: { kind: 'film-render', project: p._id, prompt: p.title, meta: { key: rk, chars: rp.chars } },
     });
-    if (out.error) return fail(res, out.status, out.error);
+    if (out.error) return fail(res, out.status, out.error, out.price == null ? {} : { price: out.price });
     const saved = await mutate(p._id, (doc) => { doc.renders.push({ job: out.job._id, key: rk, status: 'queued' }); doc.renders = doc.renders.slice(-20); });
-    res.status(202).json({ job: jobView(out.job), price: rp.price, project: await view(saved) });
+    res.status(202).json({ job: jobView(out.job), price: out.job.charged, project: await view(saved) });
   } catch (e) {
+    if (String(e.code || "").startsWith("VOICE_")) return res.status(e.status || 400).json({ code: e.code, message: e.message });
     if (e.code === 'INSUFFICIENT_WALLET') return fail(res, 402, 'INSUFFICIENT_WALLET', { available: e.available });
     if (e.code === 'WALLET_BUSY') return fail(res, 503, 'STUDIO_UNAVAILABLE');
     next(e);
@@ -800,7 +860,8 @@ router.post('/assets/:aid/generate', authenticate, async (req, res, next) => {
     if (!a) return;
     if (!(await availability()).film) return fail(res, 503, 'STUDIO_UNAVAILABLE');
     if (a.images.length >= MAX_ASSET_IMAGES) return fail(res, 409, 'LIMIT');
-    const price = fp.filmCharge({ images: 1 });
+    const imageQuote = await fm.quote({ imageModel: req.body?.imageModel, images: 1, mode: a.type });
+    const price = imageQuote.price;
     if (!priceGate(req, res, price)) return;
     if ((await checkActive(req.user._id)) >= MAX_ACTIVE) return fail(res, 429, 'JOB_ACTIVE');
     const claim = await FilmAsset.updateOne({ _id: a._id, status: { $ne: 'generating' } }, { $set: { status: 'generating' } });
@@ -814,12 +875,12 @@ router.post('/assets/:aid/generate', authenticate, async (req, res, next) => {
       out = await billAndSubmit(req, {
         charge: { amount: price, note: `Phim AI: ảnh tham chiếu ${a.type === 'character' ? 'nhân vật' : 'bối cảnh'} “${a.name}”`, meta: { kind: 'film-image', unit: 'images', quantity: 1, asset: String(a._id) } },
         path: '/film/image',
-        body: { mode: a.type, prompt, images: base ? [base] : [], put: await putUrl(k), get: await sign(k), seed: seedOf() },
-        job: { kind: 'film-image', prompt: prompt.slice(0, 1000), meta: { asset: String(a._id), key: k, images: 1, rates: fp.filmPricing() } },
+        body: { imageModel: imageQuote.imageModel, mode: a.type, prompt, images: base ? [base] : [], put: await putUrl(k), get: await sign(k), seed: seedOf() },
+        job: { kind: 'film-image', prompt: prompt.slice(0, 1000), meta: { asset: String(a._id), key: k, images: 1, imageModel: imageQuote.imageModel, rates: imageQuote.rates } },
       });
     } catch (e) { await FilmAsset.updateOne({ _id: a._id }, { $set: { status: 'ready' } }); throw e; }
-    if (out.error) { await FilmAsset.updateOne({ _id: a._id }, { $set: { status: 'ready' } }); return fail(res, out.status, out.error); }
-    res.status(202).json({ job: jobView(out.job), price, asset: await assetView(await FilmAsset.findById(a._id)) });
+    if (out.error) { await FilmAsset.updateOne({ _id: a._id }, { $set: { status: 'ready' } }); return fail(res, out.status, out.error, out.price == null ? {} : { price: out.price }); }
+    res.status(202).json({ job: jobView(out.job), price: out.job.charged, asset: await assetView(await FilmAsset.findById(a._id)) });
   } catch (e) {
     if (e.code === 'INSUFFICIENT_WALLET') return fail(res, 402, 'INSUFFICIENT_WALLET', { available: e.available });
     if (e.code === 'WALLET_BUSY') return fail(res, 503, 'STUDIO_UNAVAILABLE');
@@ -918,12 +979,16 @@ async function refreshFilmJob(job) {
   }
   let refund;
   if (job.kind === 'film-render') refund = st === 'succeeded' ? 0 : job.charged;
-  else refund = fp.filmRefund({ charged: job.charged, okSeconds, okImages, rates: m.rates });
+  else if (m.shots?.length && m.shots.every(sh => Number.isFinite(sh.price))) {
+    const used = (remote?.shots || []).reduce((sum, sh, i) => sum + (sh.status === "succeeded" ? m.shots[i]?.price || 0 : 0), 0) + okImages * (m.rates?.perImage || 0);
+    refund = fp.round6(Math.max(0, job.charged - used));
+  } else refund = fp.filmRefund({ charged: job.charged, okSeconds, okImages, rates: m.rates });
   const produced = job.kind === 'film-render' ? st === 'succeeded' : okSeconds > 0 || (job.kind === 'film-image' && okImages > 0);
   const final = produced ? 'succeeded' : 'failed';
-  const error = lost ? 'lost' : String(remote.error || '').slice(0, 300);
+  const error = lost ? 'lost' : String(remote?.error || '').slice(0, 300);
+  if (m.quota) await quota.release(m.quota, { video: okSeconds === 0, image: okImages === 0 });
   const upd = await StudioJob.updateOne({ _id: job._id, settled: { $ne: true } }, {
-    $set: { settled: true, status: final, error, refunded: refund > 0, refundedAmount: refund, ...(remote && remote.cost != null ? { 'meta.runpodCost': remote.cost } : {}), ...(remote && remote.duration ? { 'meta.duration': remote.duration } : {}) },
+    $set: { settled: true, status: final, error, refunded: refund > 0, refundedAmount: refund, ...(remote && remote.cost != null ? { 'meta.runpodCost': remote.cost } : {}), ...(remote ? { 'meta.runpodCostSource': remote.costSource || 'legacy_unspecified', 'meta.providerUsage': remote.providerUsage || [] } : {}), ...(remote && remote.duration ? { 'meta.duration': remote.duration } : {}) },
   });
   job.status = final; job.error = error; job.refunded = refund > 0; job.refundedAmount = refund; job.settled = true;
   if (!upd.modifiedCount) return job; // someone else settled it
@@ -967,7 +1032,8 @@ async function fastViaFilm(req, res, { prompt, imageBuffer }) {
   const id = newSid() + newSid();
   const k = (n) => minio.filmObjectName(userId, 'fast', id, n);
   const images = imageBuffer ? 0 : 1;
-  const price = fp.filmCharge({ seconds: 5, images });
+  const fastQuote = await fm.quote({ shots: [5], images });
+  const price = fastQuote.price;
   const startKey = k('start.jpg');
   if (imageBuffer) {
     const cfg = await minio.ensurePlaygroundBucket();
@@ -985,8 +1051,8 @@ async function fastViaFilm(req, res, { prompt, imageBuffer }) {
       charge: { amount: price, note: `AI Studio video nhanh (5s${images ? ' + 1 ảnh' : ''})`, meta: { kind: 'fast', unit: 'seconds', quantity: 5, images } },
       path: '/film/scene', body: spec, job: { kind: 'fast', prompt, meta },
     });
-    if (out.error) return fail(res, out.status, out.error);
-    return res.status(202).json({ id: String(out.job._id), status: 'queued', free: false, charged: price, remainingFree: 0, position: null });
+    if (out.error) return fail(res, out.status, out.error, out.price == null ? {} : { price: out.price });
+    return res.status(202).json({ id: String(out.job._id), status: 'queued', free: out.job.free, charged: out.job.charged, remainingFree: (await quota.status(userId)).remainingVideos, position: null });
   } catch (e) {
     if (e.code === 'INSUFFICIENT_WALLET') return res.status(402).json({ code: 'INSUFFICIENT_WALLET', message: MESSAGES.INSUFFICIENT_WALLET, price });
     throw e;

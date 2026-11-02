@@ -29,6 +29,7 @@ const { setPlayerFrameHeaders } = require('../utils/frame-ancestors');
 const { publicHttps } = require('../utils/proxvn');
 const GpuServer = require('../models/GpuServer');
 const Product = require('../models/Product');
+const rdp = require('../utils/rdp-access');
 const {
   viewportMeta,
   sandboxGameHtml,
@@ -49,6 +50,7 @@ function dedicatedInfo(doc) {
   const ready = doc.status === 'live' && doc.connectHost && doc.connectPort;
   return {
     dedicated: true,
+    remoteDesktop: rdp.connection(doc),
     game: doc.game || undefined,
     ratePerHour: doc.ratePerHour || 0,
     ratePerMinute: Math.round(((doc.ratePerHour || 0) / 60) * 1e6) / 1e6,
@@ -346,6 +348,26 @@ router.get('/:sessionId', authenticate, async (req, res, next) => {
   }
 });
 
+router.get('/:sessionId/rdp/credentials', authenticate, async (req, res, next) => {
+  try {
+    const doc = await GameSession.findOne({ sessionId: req.params.sessionId, user: req.user._id }).select('+rdpPasswordEncrypted');
+    if (!doc) return res.status(404).json({ code: 'SESSION_EXPIRED' });
+    const result = rdp.credentials(doc);
+    if (!result) return res.status(409).json({ code: 'RDP_NOT_READY' });
+    res.set('Cache-Control', 'no-store'); res.json(result);
+  } catch (e) { next(e); }
+});
+router.get('/:sessionId/rdp/file', authenticate, async (req, res, next) => {
+  try {
+    const doc = await GameSession.findOne({ sessionId: req.params.sessionId, user: req.user._id });
+    if (!doc) return res.status(404).json({ code: 'SESSION_EXPIRED' });
+    const file = rdp.profile(doc);
+    if (!file) return res.status(409).json({ code: 'RDP_NOT_READY' });
+    res.set({ 'Cache-Control': 'no-store', 'Content-Type': 'application/x-rdp', 'Content-Disposition': 'attachment; filename="ai-markets-linux.rdp"' });
+    res.send(file);
+  } catch (e) { next(e); }
+});
+
 router.delete('/:sessionId', authenticate, async (req, res, next) => {
   try {
     const doc = await GameSession.findOne({ sessionId: req.params.sessionId, user: req.user._id });
@@ -441,16 +463,29 @@ function dedicatedServerHtml(product) {
   ${hint ? `<p class="muted">${hint}</p>` : ''}
   <p class="muted">Giữ tab này mở khi đang chơi; đóng tab hoặc bấm Dừng sẽ tắt máy chủ và ngừng tính phí. · Keep this tab open while playing; closing it or pressing Stop shuts the server down and stops billing.</p>
 </div>
+<div class="card" id="rdp" hidden>
+  <strong>Remote Desktop - Linux XFCE</strong>
+  <p class="muted" id="rdpaddr"></p>
+  <button type="button" id="rdpdetails">Xem tài khoản RDP · Show login</button>
+  <button type="button" id="rdpfile">Tải file .rdp · Download</button>
+  <div id="rdplogin" hidden><p>Tài khoản · User: <b>player</b></p><label>Mật khẩu · Password <input id="rdppass" type="password" readonly autocomplete="off" /></label><button type="button" id="rdpshow">Hiện / ẩn · Show / hide</button><button type="button" id="rdpcopy">Sao chép mật khẩu · Copy password</button></div>
+</div>
 <div class="card muted" id="bill"></div>
 </main><script>
 const base=location.pathname.replace(/\\/player$/,'')+location.search;
 const $=(id)=>document.getElementById(id);
 /* Same rule as the web app (CurrencyService.formatRateFromUsd): cents, or 3 significant digits under one cent. */
 const usd=(v)=>{v=Number(v)||0;const d=v>0&&v<0.01?Math.min(8,Math.max(3,2-Math.floor(Math.log10(v)))):2;return '$'+v.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:d});};
+const rdpApi=(suffix)=>location.pathname.replace(/\\/player$/,'')+suffix+location.search;
+$('rdpdetails').onclick=async()=>{const r=await fetch(rdpApi('/rdp/credentials'),{credentials:'include',cache:'no-store'});if(!r.ok)return;const c=await r.json();$('rdppass').value=c.password;$('rdplogin').hidden=false;};
+$('rdpshow').onclick=()=>{$('rdppass').type=$('rdppass').type==='password'?'text':'password';};
+$('rdpcopy').onclick=()=>navigator.clipboard&&navigator.clipboard.writeText($('rdppass').value);
+$('rdpfile').onclick=async()=>{const r=await fetch(rdpApi('/rdp/file'),{credentials:'include',cache:'no-store'});if(!r.ok)return;const u=URL.createObjectURL(await r.blob()),a=document.createElement('a');a.href=u;a.download='ai-markets-linux.rdp';a.click();setTimeout(()=>URL.revokeObjectURL(u),60000);};
 $('cp').onclick=()=>navigator.clipboard&&navigator.clipboard.writeText($('addr').textContent);
 async function poll(){
   try{
     const r=await fetch(base,{credentials:'include'});const s=await r.json();
+    if(s.remoteDesktop){$('rdp').hidden=false;$('rdpaddr').textContent=s.remoteDesktop.address;}else{$('rdp').hidden=true;$('rdppass').value='';}
     if(s.connect){$('st').className='card live';$('msg').textContent='Máy chủ đang chạy · Server is live';$('cn').hidden=false;$('addr').textContent=s.connect.address;}
     else if(s.status==='stopped'||s.status==='error'){$('msg').textContent=s.stopReason==='launch_failed'?'Không khởi động được máy chủ, không tính phí. Vui lòng thử lại. · Launch failed, not billed. Please retry.':'Máy chủ đã dừng · Server stopped';$('cn').hidden=true;return;}
     if(s.ratePerMinute){
