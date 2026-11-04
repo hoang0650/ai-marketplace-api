@@ -52,6 +52,7 @@ function mapProduct(doc, { includeSecrets = false } = {}) {
       createdAt: d.createdAt || null,
     })),
     pricing: o.pricing,
+    serviceDeliveryDays: Number(o.serviceDeliveryDays) || null,
     affiliateRate: o.affiliateRate ?? null,
     contentMeta: o.contentMeta || null,
     streaming: isStreamCategory(o.category)

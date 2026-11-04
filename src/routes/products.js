@@ -178,6 +178,23 @@ function servicePricingError(category, pricing) {
   };
 }
 
+/** Professional-service listings must declare a whole-number turnaround before publication. */
+function serviceDeliveryDays(category, value) {
+  if (!PROFESSIONAL_SERVICE_CATEGORIES.includes(String(category))) return null;
+  if (typeof value === 'string' && !/^\d+$/.test(value.trim())) return null;
+  const days = Number(value);
+  return Number.isInteger(days) && days >= 1 && days <= 365 ? days : null;
+}
+
+function serviceDeliveryError(category, value) {
+  if (!PROFESSIONAL_SERVICE_CATEGORIES.includes(String(category))) return null;
+  if (serviceDeliveryDays(category, value) !== null) return null;
+  return {
+    message: 'Vui lòng nhập thời gian hoàn thành dịch vụ từ 1 đến 365 ngày trước khi đăng bán.',
+    code: 'SERVICE_DELIVERY_DAYS_REQUIRED',
+  };
+}
+
 async function ensureCreatorSlug(user) {
   if (user.creatorSlug) return user.creatorSlug;
   const fresh = await User.findById(user._id).select('creatorSlug').lean();
@@ -206,6 +223,8 @@ router.post('/', authenticate, requireRoles('seller', 'talent', 'admin'), async 
     if (forbidden) return res.status(403).json(forbidden);
     const badServicePrice = servicePricingError(body.category, body.pricing);
     if (badServicePrice) return res.status(400).json(badServicePrice);
+    const badServiceDelivery = serviceDeliveryError(body.category, body.serviceDeliveryDays);
+    if (badServiceDelivery) return res.status(400).json(badServiceDelivery);
     const affiliate = parseAffiliateRate(body.affiliateRate, { allowNull: true });
     if (!affiliate.ok) return res.status(400).json({ message: affiliate.message, code: affiliate.code });
     // Required in the web/app forms. An invalid value is rejected; a missing one (older app
@@ -292,6 +311,7 @@ router.post('/', authenticate, requireRoles('seller', 'talent', 'admin'), async 
       coverUrl: body.coverUrl || '',
       gallery: Array.isArray(body.gallery) ? body.gallery : [],
       pricing: hirePricing(body.category, body.pricing),
+      serviceDeliveryDays: serviceDeliveryDays(body.category, body.serviceDeliveryDays),
       affiliateRate: affiliate.rate,
       runtime: normalizeRuntime(body.runtime || {}, {
         defaults: { baseModel: name },
@@ -387,6 +407,11 @@ router.put('/:id', authenticate, requireRoles('seller', 'talent', 'admin'), asyn
       if (badServicePrice) return res.status(400).json(badServicePrice);
       product.pricing = hirePricing(product.category, plain);
     }
+    const effectiveDeliveryDays =
+      body.serviceDeliveryDays !== undefined ? body.serviceDeliveryDays : product.serviceDeliveryDays;
+    const badServiceDelivery = serviceDeliveryError(product.category, effectiveDeliveryDays);
+    if (badServiceDelivery) return res.status(400).json(badServiceDelivery);
+    product.serviceDeliveryDays = serviceDeliveryDays(product.category, effectiveDeliveryDays);
     if (body.contentMeta !== undefined || body.category) {
       product.contentMeta = normalizeContentMeta(product.category, body.contentMeta || product.contentMeta) || product.contentMeta;
     }
@@ -445,3 +470,5 @@ module.exports.normalizeProductKind = normalizeProductKind;
 module.exports.talentCategoryError = talentCategoryError;
 module.exports.hirePricing = hirePricing;
 module.exports.servicePricingError = servicePricingError;
+module.exports.serviceDeliveryDays = serviceDeliveryDays;
+module.exports.serviceDeliveryError = serviceDeliveryError;

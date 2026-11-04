@@ -176,6 +176,8 @@ const productSchema = new mongoose.Schema(
       type: [new mongoose.Schema({ title: String, percent: Number, days: Number }, { _id: false })],
       default: undefined,
     },
+    /** Seller-promised completion time for a professional-service package, measured in days. */
+    serviceDeliveryDays: { type: Number, default: null, min: 1, max: 365 },
     /** Affiliate commission 0–0.25 of the price after discount, paid by the seller. null = store default. */
     affiliateRate: { type: Number, default: null, min: 0, max: 0.25 },
     runtime: { type: runtimeSchema, default: () => ({}) },
