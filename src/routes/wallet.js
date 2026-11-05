@@ -185,8 +185,11 @@ router.post('/withdraw', authenticate, async (req, res, next) => {
 
     if (!policy.canWithdraw) {
       return res.status(403).json({
-        message: 'Withdrawal is not available for this account.',
-        code: 'WITHDRAW_UNAVAILABLE',
+        message:
+          persona === 'buyer'
+            ? 'Buyer marketplace credit cannot be withdrawn or transferred. Eligible refunds are returned to the original payment method.'
+            : 'Withdrawal is not available for this account.',
+        code: policy.unavailableCode || 'WITHDRAW_UNAVAILABLE',
         persona: pickPrimary(personas),
         personas,
         policy: mapPolicy(policy),
@@ -208,15 +211,15 @@ router.post('/withdraw', authenticate, async (req, res, next) => {
       }
     }
 
-    // Payout bank account: from the request, else the user's saved account. Required for buyers
-    // (no seller profile). The holder must match the eKYC name.
+    // Payout bank account: from the request, else the user's saved account. Buyer withdrawals
+    // are rejected above; this path is only for payout-bearing personas.
     let payoutAccount = null;
-    if (persona === 'buyer' || req.body?.bankAccount) {
+    if (req.body?.bankAccount) {
       const resolved = await resolveWithdrawAccount(req.user._id, req.body?.bankAccount, {
         save: req.body?.saveAccount === true,
       });
       if (!resolved.ok) {
-        if (persona === 'buyer' || req.body?.bankAccount) {
+        if (req.body?.bankAccount) {
           return res.status(400).json({ message: resolved.message, code: resolved.code });
         }
       } else payoutAccount = resolved.account;

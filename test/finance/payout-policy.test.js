@@ -59,10 +59,12 @@ test('employer pays 1% and needs the VND minimum balance', () => {
   assert.equal(q.net, 198);
 });
 
-test('buyer may withdraw wallet balance (after eKYC) with no withdrawal fee', () => {
+test('buyer marketplace credit cannot be withdrawn or transferred', () => {
   const policy = policyFor('buyer');
-  assert.equal(policy.canWithdraw, true);
+  assert.equal(policy.canWithdraw, false);
+  assert.equal(policy.unavailableCode, 'BUYER_CREDIT_NON_WITHDRAWABLE');
   assert.equal(policy.totalFeeRate, 0);
   const q = quoteWithdrawal(50, policy);
   assert.equal(q.net, 50);
+  assert.equal(q.chargeAtWithdraw, false);
 });

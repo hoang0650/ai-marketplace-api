@@ -31,7 +31,7 @@ async function createPayout({
   currency = 'USD',
   actorId = null,
   idempotencyKey = '',
-  /** false for buyer wallet withdrawals (eKYC-gated by the caller, no seller profile). */
+  /** false when the payout account comes from the dedicated eligible-persona flow. */
   requireSellerProfile = true,
 }) {
   if (idempotencyKey) {

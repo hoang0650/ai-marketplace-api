@@ -1,5 +1,5 @@
 /**
- * Bank account a buyer gives with a wallet withdrawal (buyers have no seller profile / payout account on file).
+ * Bank account used for an eligible seller, talent, freelancer or affiliate payout.
  */
 function clean(v, max) {
   return String(v ?? '')

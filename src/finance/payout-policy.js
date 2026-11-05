@@ -6,7 +6,8 @@ const { currentVndPerUsd } = require('./exchange-rate');
 /**
  * Withdrawal policy per marketplace persona.
  *
- * - buyer        : may withdraw the wallet balance after eKYC (ID/passport); no fee
+ * - buyer        : cannot withdraw or transfer marketplace credit; refunds go back to the
+ *                  original payment method
  * - seller       : product/creator earnings — 20% platform commission + tax by seller type
  *                  (individual 7% digital / 1.5% goods withheld; household business & company 0%)
  * - talent       : talent profile earnings — same as seller
@@ -158,11 +159,12 @@ function policyFor(persona, { sellerType, sellerTypeKnown, productKinds, pitComm
       requiresNoDispute: true,
     };
   }
-  // Quy chế 2.1, khoản 3 Mục XI: buyers may withdraw their wallet balance once eKYC
-  // (CCCD/passport) is verified. No platform fee/tax applies to a buyer's own top-ups.
+  // Buyer credit is only usable to pay for marketplace orders. It is not cash, a deposit,
+  // or a transferable payment account. Seller and affiliate payouts use separate personas.
   return {
     persona: 'buyer',
-    canWithdraw: true,
+    canWithdraw: false,
+    unavailableCode: 'BUYER_CREDIT_NON_WITHDRAWABLE',
     platformFeeRate: 0,
     taxRate: 0,
     totalFeeRate: 0,
@@ -187,8 +189,8 @@ async function detectPersonas(user) {
   if (user.role === 'admin') return ['admin'];
   const uid = user._id || user.id;
   const role = require('../utils/roles').normalizeRole(user.role);
-  // Work is shut down: employer/freelancer personas are no longer offered. Their wallet
-  // balance (one wallet per user) is withdrawn under the seller/talent or buyer policy.
+  // Work is shut down: employer/freelancer personas are no longer offered. Eligible
+  // seller/talent proceeds use their payout policy; buyer marketplace credit is not cash.
   const AffiliateCommission = require('../models/AffiliateCommission');
   const [seller, talent, affiliate] = await Promise.all([
     role === 'seller' ? Promise.resolve(true) : SellerProfile.exists({ user: uid }),
@@ -275,6 +277,7 @@ function mapPolicy(policy) {
   return {
     persona: policy.persona,
     canWithdraw: policy.canWithdraw,
+    unavailableCode: policy.unavailableCode || null,
     platformFeeRate: policy.platformFeeRate,
     taxRate: policy.taxRate,
     totalFeeRate: policy.totalFeeRate,

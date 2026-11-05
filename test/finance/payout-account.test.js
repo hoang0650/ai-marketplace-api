@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { parseBankAccount, maskAccountNumber } = require('../../src/utils/payout-account');
 
-test('buyer withdrawal bank account is required and validated', () => {
+test('payout bank account is required and validated for eligible payout personas', () => {
   assert.equal(parseBankAccount(undefined).code, 'BANK_ACCOUNT_REQUIRED');
   assert.equal(parseBankAccount({ bankName: 'V', accountNumber: '0123456789', accountName: 'A B' }).code, 'INVALID_BANK_NAME');
   assert.equal(parseBankAccount({ bankName: 'Vietcombank', accountNumber: '12ab', accountName: 'A B' }).code, 'INVALID_ACCOUNT_NUMBER');

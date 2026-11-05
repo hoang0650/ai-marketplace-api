@@ -34,7 +34,7 @@ Dữ liệu cá nhân được xử lý theo Luật Bảo vệ dữ liệu cá n
 - Ảnh giấy tờ tùy thân khi xác minh người bán là dữ liệu nhạy cảm, được giới hạn truy cập.
 - Nội dung trao đổi với AI không dùng để huấn luyện mô hình; được chuyển tới nhà cung cấp mô hình để xử lý yêu cầu.
 - Cơ sở dữ liệu và dữ liệu cá nhân được lưu trữ tại Việt Nam trên máy chủ của Công ty TNHH Lưu Trữ Số (123HOST, MST 0312088232) (trung tâm dữ liệu của 123HOST tại TP. Hồ Chí Minh, địa chỉ IP 103.97.127.39); chỉ chuyển ra nước ngoài trong phạm vi cần thiết để cung cấp dịch vụ (ví dụ nhà cung cấp mô hình AI) theo quy định pháp luật.
-- Ảnh CCCD/hộ chiếu khi người mua rút số dư ví và giấy chứng nhận đăng ký kinh doanh của người bán là hộ kinh doanh, doanh nghiệp được giới hạn truy cập.
+- Giấy chứng nhận đăng ký kinh doanh và hồ sơ eKYC của người bán được giới hạn truy cập. Người mua không phải xác minh danh tính để rút ví vì tín dụng dịch vụ của Người mua không hỗ trợ rút hoặc chuyển nhượng.
 - Không bán dữ liệu cá nhân.
 - Người dùng thực hiện quyền của chủ thể dữ liệu trong Cài đặt hoặc qua support@aimarkets.vn.
 
@@ -57,6 +57,8 @@ Luật Thương mại điện tử số 122/2025/QH15; Nghị định số 248/2
 - **Nền tảng**: ${OPERATOR}; là người bán khi sản phẩm gắn nhãn Platform Direct.
 - **Nhà cung cấp hạ tầng** (GPU, mô hình AI, đám mây) không phải người bán.
 
+Người đại diện pháp luật và nhân sự trực tiếp chịu trách nhiệm quản lý hoạt động TMĐT: **Phan Huy Hoàng**, Giám đốc kiêm Trưởng bộ phận Vận hành sàn TMĐT, CCCD 035099004339, điện thoại 0931881584, email phanhuyhoang@phgrouptechs.com, địa chỉ 44/26/53 Ngô Thì Nhậm, Nhị Đồng 2, Dĩ An, Bình Dương. Nền tảng hiện chưa thuộc diện nền tảng số lớn. Bộ máy vận hành gồm 01 nhân sự trực tiếp kiêm nhiệm, phối hợp với đơn vị kế toán/thuế và hạ tầng kỹ thuật thuê ngoài.
+
 ## 3. Sản phẩm
 Mô hình và API AI, agent, gói kỹ năng, phần mềm, mẫu website/ứng dụng, giọng đọc AI, phim AI, truyện/sách AI (license xem/đọc theo thời hạn), dataset, thuê GPU, máy chủ chơi game theo phút và dịch vụ chuyên môn trọn gói (làm web, làm app, marketing, SEO, creator, tự động hóa) bán theo gói giá cố định. Sàn không cung cấp tin tuyển dụng, đăng việc, hồ sơ ứng viên hay dịch vụ tính theo giờ/tháng.
 
@@ -68,13 +70,15 @@ Mô hình và API AI, agent, gói kỹ năng, phần mềm, mẫu website/ứng 
 - Thay đổi phí được thông báo trước ít nhất 30 ngày và chỉ áp dụng cho đơn hàng mới.
 
 ## 5. Thanh toán và chi trả
-Mọi đơn hàng được thanh toán bằng số dư ví AI Markets. Chuyển khoản ngân hàng (mã QR VietQR) vào tài khoản thanh toán của Công ty, Apple IAP và Google Play Billing chỉ dùng để nạp tiền vào ví. Người mua được rút số dư ví sau khi xác minh danh tính (eKYC). Tiền của người bán được giữ 48 giờ, chỉ chi trả khi không có tranh chấp và người bán đã xác minh (bao gồm eKYC). Cấm giao dịch ngoài sàn.
+Mọi đơn hàng được thanh toán bằng tín dụng dịch vụ AI Markets. Chuyển khoản ngân hàng (mã QR VietQR) vào tài khoản thanh toán của Công ty, Apple IAP và Google Play Billing chỉ dùng để nạp tín dụng. Tín dụng của Người mua không hỗ trợ rút tiền mặt hoặc chuyển khoản nội bộ; khoản hoàn đủ điều kiện được trả về phương thức thanh toán ban đầu. Tiền của Người bán được giữ 48 giờ và được chi trả bằng VNĐ vào tài khoản ngân hàng đã đăng ký trong vòng 03 ngày làm việc sau khi kết thúc thời hạn giữ, khi không có tranh chấp và Người bán đã xác minh. Cấm giao dịch ngoài sàn.
 
 ## 6. Khiếu nại
 Xác nhận tiếp nhận trong 24 giờ; xác minh sơ bộ trong 01 ngày làm việc; người bán phản hồi trong 02 ngày làm việc; ra quyết định trong 07 ngày làm việc kể từ khi đủ hồ sơ. Khiếu nại lại trong 07 ngày kể từ khi có quyết định, được trả lời trong 07 ngày làm việc.
 
 ## 7. Dữ liệu
 Cơ sở dữ liệu và dữ liệu cá nhân được lưu trữ tại Việt Nam trên máy chủ của Công ty TNHH Lưu Trữ Số (123HOST, MST 0312088232) (trung tâm dữ liệu của 123HOST tại TP. Hồ Chí Minh, địa chỉ IP 103.97.127.39).
+
+Máy chủ Web/API sử dụng VPS Hostinger International Ltd., IP 72.62.72.165 tại Kuala Lumpur, Malaysia và chỉ truy cập cơ sở dữ liệu 123HOST qua mạng riêng Tailscale. Hạ tầng suy luận AI có thể sử dụng RunPod, OpenRouter/Featherless, OpenAI, Anthropic hoặc nhà cung cấp tương tự; việc chuyển dữ liệu cần thiết cho suy luận được quản lý theo hồ sơ đánh giá tác động chuyển dữ liệu cá nhân ra nước ngoài.
 
 ## 8. Thay đổi
 Thông báo trước ít nhất 30 ngày. Pháp luật Việt Nam điều chỉnh.
@@ -139,7 +143,7 @@ ${FULL_TEXT}/mau-hop-dong-cung-cap-dich-vu-nguoi-ban`,
 
 - Kiểm tra nhãn **Bán bởi sàn** hoặc **Bán bởi người bán**, giá và đơn vị tính trước khi đặt hàng.
 - Mọi đơn hàng được thanh toán bằng số dư ví; nạp ví bằng chuyển khoản ngân hàng (mã QR VietQR) vào tài khoản thanh toán của Công ty (web), Apple IAP hoặc Google Play Billing (ứng dụng). Giá hiển thị theo VNĐ, USD hoặc CNY; mã giảm giá của sàn hiển thị là “Giảm giá nền tảng” trong giỏ hàng và được trừ trước khi tính phí sàn.
-- Người mua được rút số dư ví sau khi xác minh danh tính (eKYC) bằng CCCD/hộ chiếu.
+- Tín dụng dịch vụ của Người mua không hỗ trợ rút tiền mặt, chuyển nhượng hoặc chuyển khoản nội bộ; khoản hoàn đủ điều kiện được trả về phương thức thanh toán ban đầu.
 - Dịch vụ chuyên môn (làm web, làm app, marketing, SEO, creator, tự động hóa) bán theo gói giá cố định, thanh toán như sản phẩm khác.
 - Giỏ hàng, yêu thích đồng bộ giữa web và ứng dụng khi đăng nhập.
 - Thuê GPU: trả trước tối thiểu 1 giờ, tính theo phút, cảnh báo trước 10 phút khi sắp hết số dư, tự dừng khi hết tiền, xóa sau 24 giờ.
@@ -361,7 +365,7 @@ async function ensureAffiliateDocument() {
 }
 
 async function ensureLegalDocuments() {
-  const version = '2026.10.05';
+  const version = '2026.11.06';
   const effectiveAt = new Date('2026-10-05T00:00:00.000Z');
   let created = 0;
   let skipped = 0;
