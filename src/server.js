@@ -21,6 +21,8 @@ const {
   startAgentSubscriptionWorker,
   stopAgentSubscriptionWorker,
 } = require('./finance/agent-subscription-worker');
+const { startTenantIdleSweeper, stopTenantIdleSweeper } = require('./services/tenant-launch');
+const { unpublishSpacebotListings } = require('./services/spacebot-listing');
 const { startVoteCycleWorker, stopVoteCycleWorker } = require('./community/vote-cycle-worker');
 const { warmExchangeRates } = require('./finance/exchange-rate');
 const User = require('./models/User');
@@ -57,6 +59,12 @@ connectDb()
   .then((fx) => {
     if (fx) console.log(`[exchange-rate] ${fx.source} VND/USD=${fx.vndPerUsd} CNY/USD=${fx.cnyPerUsd}`);
   })
+  .then(() => unpublishSpacebotListings({ Product: require('./models/Product'), AgentTemplate: require('./models/AgentTemplate') }))
+  .then((spacebot) => {
+    if (spacebot && (spacebot.products || spacebot.templates)) {
+      console.log(`[catalog] unpublished SpaceBot listings products=${spacebot.products} templates=${spacebot.templates}`);
+    }
+  })
   .then(() => syncSalesCountsFromOrders())
   .then((stats) => {
     if (stats) {
@@ -76,6 +84,7 @@ attachGpuWorkspaceProxy(server);
 if (process.env.GPU_RENTAL_WORKER !== 'off') startBillingWorker();
 if (process.env.GAME_BILLING_WORKER !== 'off') startGameBillingWorker();
 if (process.env.AGENT_SUBSCRIPTION_WORKER !== 'off') startAgentSubscriptionWorker();
+if (process.env.TENANT_IDLE_SWEEPER !== 'off') startTenantIdleSweeper();
 if (process.env.VOTE_CYCLE_WORKER !== 'off') startVoteCycleWorker();
 require('./routes/studio').startStudioPoller();
 server.listen(config.port, () => {
@@ -105,6 +114,7 @@ async function shutdown(signal) {
   stopBillingWorker();
   stopGameBillingWorker();
   stopAgentSubscriptionWorker();
+  stopTenantIdleSweeper();
   stopVoteCycleWorker();
 
   server.close(async () => {

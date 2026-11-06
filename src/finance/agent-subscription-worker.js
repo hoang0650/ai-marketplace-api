@@ -83,6 +83,22 @@ function purgeUrl(agentId, userId) {
   return /^https:\/\//i.test(url) ? url : '';
 }
 
+async function purgeTenantVolume(agentId, userId) {
+  const flag = process.env[`${ENV_PREFIX[agentId]}_BUYER_RUNTIME_ENABLED`] === '1';
+  if (!flag || !String(process.env.TENANT_DOCKER_HOST || '').trim()) return null;
+  try {
+    const { tenantDockerFromEnv } = require('../services/tenant-docker');
+    const { purgeTenant } = require('../services/tenant-runtime');
+    const docker = tenantDockerFromEnv();
+    if (!docker) return null;
+    await purgeTenant({ agentId, userId: String(userId).toLowerCase(), docker });
+    return { status: 'done' };
+  } catch (err) {
+    console.warn('[agent-subscription] tenant purge', agentId, userId, err.message);
+    return { status: 'failed', error: String(err.message || err).slice(0, 300) };
+  }
+}
+
 function purgeWebhookConfigured(agentId) {
   const sample = '000000000000000000000000';
   return Boolean(purgeUrl(agentId, sample) && (ssoSecret(ENV_PREFIX[agentId]) || expectedServiceSecret()));
@@ -103,6 +119,11 @@ async function purgeAgentData(doc, now = new Date()) {
   const hiredIds = hired.filter((h) => normalizeAgentId(h.agentId) === agentId).map((h) => h._id);
   if (hiredIds.length) {
     await HiredAgent.updateMany({ _id: { $in: hiredIds } }, { $set: { status: 'archived', archivedAt: now } });
+  }
+
+  if (agentId === 'hermes' || agentId === 'nanoclaw') {
+    const tenant = await purgeTenantVolume(agentId, userId);
+    if (tenant) return tenant;
   }
 
   const url = purgeUrl(agentId, userId);
@@ -145,6 +166,8 @@ async function processSubscription(doc, now = new Date(), cfg = workerConfig()) 
   const agentId = doc.agentId;
   // Do not bill, expire or purge a buyer's workspace during operator maintenance.
   if (!runtimeAvailability(agentId).available) return 'maintenance';
+  // SpaceBot stays in the database. Do not renew it and do not purge its data.
+  if (agentId === 'spacebot') return 'skip';
   const fee = monthlyFee(agentId);
   if (fee.amount <= 0 || doc.purgedAt) return 'skip';
   const user = await User.findById(doc.user).select('role email name').lean();

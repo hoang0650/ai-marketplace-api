@@ -1,0 +1,132 @@
+From d185addffd4b3cc50ed277f6b2e067383497d809 Mon Sep 17 00:00:00 2001
+From: Cursor Agent <cursoragent@cursor.com>
+Date: Sat, 31 Oct 2026 14:32:40 +0000
+Subject: [PATCH] Read the injected secret file and allow tools only inside a
+ tenant container.
+
+The secret file is refused when its userId does not match the profile. Shared-process tool calls stay blocked until HERMES_AIMARKETS_TENANT_ISOLATED=1.
+---
+ plugins/dashboard_auth/aimarkets/__init__.py  | 39 +++++++++++++++++--
+ .../hermes_cli/test_byok_profile_isolation.py | 35 ++++++++++++++++-
+ 2 files changed, 69 insertions(+), 5 deletions(-)
+
+diff --git a/plugins/dashboard_auth/aimarkets/__init__.py b/plugins/dashboard_auth/aimarkets/__init__.py
+index 02c7ca5..4b99f72 100644
+--- a/plugins/dashboard_auth/aimarkets/__init__.py
++++ b/plugins/dashboard_auth/aimarkets/__init__.py
+@@ -253,13 +253,40 @@ class AimarketsAuthProvider(DashboardAuthProvider):
+             with urllib.request.urlopen(req, timeout=8) as resp:
+                 data = json.loads(resp.read().decode() or "{}")
+         except Exception as exc:
+-            logger.warning("dashboard-auth-aimarkets: byok resolve failed: %s", exc)
++            logger.warning("dashboard-auth-aimarkets: byok resolve failed: %s", type(exc).__name__)
+             return None
+-        if not isinstance(data, dict) or data.get("userId") != user_id:
++        if not isinstance(data, dict) or str(data.get("userId") or "").lower() != user_id.lower():
+             raise InvalidCredentialsError("Buyer credential owner mismatch")
+         conn = data.get("connection")
+         return conn if isinstance(conn, dict) else None
+ 
++    @staticmethod
++    def _read_injected_secret(user_id: str) -> Optional[dict[str, Any]]:
++        """Credential file injected at container start. Absent file means use the API."""
++        from pathlib import Path
++
++        path = (os.environ.get("AIMARKETS_SECRET_FILE") or "/run/secrets/byok.json").strip()
++        if not path or not os.path.isfile(path):
++            return None
++        try:
++            data = json.loads(Path(path).read_text(encoding="utf-8"))
++        except Exception as exc:
++            raise InvalidCredentialsError("Buyer credential file is unreadable") from exc
++        if not isinstance(data, dict):
++            raise InvalidCredentialsError("Buyer credential file is invalid")
++        file_user = str(data.get("userId") or "").lower()
++        file_agent = str(data.get("agent") or "hermes").lower()
++        if file_user != user_id.lower() or file_agent != "hermes":
++            raise InvalidCredentialsError("Buyer credential owner mismatch")
++        if data.get("keySource") not in ("buyer", "platform"):
++            raise InvalidCredentialsError("Buyer credential file is invalid")
++        return {
++            "provider": data.get("provider"),
++            "apiKey": data.get("apiKey"),
++            "baseUrl": data.get("baseUrl"),
++            "model": data.get("model"),
++        }
++
+     @staticmethod
+     def _apply_buyer_credentials(profile: str) -> None:
+         """Drop platform keys copied into this profile and write the buyer's BYOK key."""
+@@ -275,7 +302,8 @@ class AimarketsAuthProvider(DashboardAuthProvider):
+         user_id = profile[len("market-") :] if profile.startswith("market-") else ""
+         if not re.fullmatch(r"[a-f0-9]{24}", user_id):
+             raise ValueError("Invalid buyer profile")
+-        connection = AimarketsAuthProvider._fetch_buyer_connection(user_id)
++        injected = AimarketsAuthProvider._read_injected_secret(user_id)
++        connection = injected if injected is not None else AimarketsAuthProvider._fetch_buyer_connection(user_id)
+         profile_dir = Path(profiles_mod.get_profile_dir(profile))
+         profile_dir.mkdir(parents=True, exist_ok=True)
+         env_path = profile_dir / ".env"
+@@ -416,9 +444,12 @@ class AimarketsAuthProvider(DashboardAuthProvider):
+         return None
+ 
+ 
+-def _block_shared_runtime_tools(**_: Any) -> dict[str, str]:
++def _block_shared_runtime_tools(**_: Any) -> dict[str, str] | None:
+     # Profiles are not an OS boundary. A local shell/file tool could read
+     # another buyer's credentials or the controller's service secret.
++    # A container started with HERMES_AIMARKETS_TENANT_ISOLATED=1 is that boundary.
++    if _buyer_runtime_ready():
++        return None
+     return {
+         "action": "block",
+         "message": "Tool execution is unavailable until this shared runtime has isolated buyer sandboxes. Text chat remains available with your own API key.",
+diff --git a/tests/hermes_cli/test_byok_profile_isolation.py b/tests/hermes_cli/test_byok_profile_isolation.py
+index cff89d3..fae9e9b 100644
+--- a/tests/hermes_cli/test_byok_profile_isolation.py
++++ b/tests/hermes_cli/test_byok_profile_isolation.py
+@@ -39,7 +39,40 @@ def test_buyer_keys_use_real_profile_files_without_global_environment_mutation(t
+         assert load_config()['model']['api_key'] == 'aimarkets-byok-required'
+         assert load_config()['model']['base_url'] == 'https://byok-not-configured.invalid/v1'
+     finally:
+-        reset_hermes_home_override(token)
++        reset_hermes_home_override(token)
++
++
++def test_secret_file_is_not_readable_by_another_buyer(tmp_path, monkeypatch):
++    import json
++    import pytest
++    from hermes_cli.dashboard_auth import InvalidCredentialsError
++
++    user_a = "a" * 24
++    user_b = "b" * 24
++    secret = tmp_path / "byok.json"
++    secret.write_text(json.dumps({
++        "v": 1,
++        "userId": user_a,
++        "agent": "hermes",
++        "keySource": "buyer",
++        "provider": "openai",
++        "apiKey": "fake-only-a",
++        "baseUrl": "https://api.openai.com/v1",
++        "model": "gpt-test",
++    }))
++    monkeypatch.setenv("AIMARKETS_SECRET_FILE", str(secret))
++    own = AimarketsAuthProvider._read_injected_secret(user_a)
++    assert own["apiKey"] == "fake-only-a"
++    with pytest.raises(InvalidCredentialsError, match="owner mismatch"):
++        AimarketsAuthProvider._read_injected_secret(user_b)
++    assert "fake-only-a" not in json.dumps(AimarketsAuthProvider._read_injected_secret(user_a) | {"apiKey": ""})
++
++
++def test_isolated_container_allows_tools(monkeypatch):
++    from plugins.dashboard_auth.aimarkets import _block_shared_runtime_tools
++
++    monkeypatch.setenv("HERMES_AIMARKETS_TENANT_ISOLATED", "1")
++    assert _block_shared_runtime_tools(tool_name="terminal", args={}) is None
+ 
+ 
+ def test_shared_runtime_tools_are_blocked():
+-- 
+2.43.0
+

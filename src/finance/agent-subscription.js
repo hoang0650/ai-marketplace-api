@@ -9,6 +9,7 @@ const { getExchangeRates, fxAudit, publicQuote } = require('./exchange-rate');
 const { isAdmin } = require('../utils/roles');
 const { notifyUser } = require('../utils/notify');
 const { assertRuntimeAvailable } = require('../utils/agent-runtime-availability');
+const { spacebotListingFields, spacebotUnlistedError } = require('../services/spacebot-listing');
 
 /**
  * Platform-hosted agents are rented per month (prepaid from the wallet).
@@ -77,6 +78,7 @@ function describe(agentId, doc, { exempt = false, now = new Date() } = {}) {
     purgedAt: iso(doc?.purgedAt),
     retentionDays: retentionDays(),
     fee,
+    ...spacebotListingFields(agentId),
   };
 }
 
@@ -168,6 +170,7 @@ async function subscribeAgent(user, agentId, { now = new Date(), source = 'manua
   }
   assertRuntimeAvailable(id);
   await getExchangeRates();
+  if (id === 'spacebot') throw spacebotUnlistedError();
   const fee = monthlyFee(id);
   if (isAdmin(user) || fee.amount <= 0) {
     return { ...(await getSubscriptionStatus(user, id)), charged: false };

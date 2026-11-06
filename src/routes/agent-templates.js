@@ -29,7 +29,15 @@ const SEED = [
 
 async function ensureTemplates() {
   for (const row of SEED) {
-    await AgentTemplate.updateOne({ slug: row.slug }, { $setOnInsert: row }, { upsert: true });
+    if (row.slug === 'spacebot') {
+      await AgentTemplate.updateOne(
+        { slug: 'spacebot' },
+        { $set: { ...row, published: false } },
+        { upsert: true },
+      );
+      continue;
+    }
+    await AgentTemplate.updateOne({ slug: row.slug }, { $setOnInsert: { ...row, published: true } }, { upsert: true });
   }
 }
 
