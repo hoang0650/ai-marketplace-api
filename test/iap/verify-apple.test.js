@@ -1,6 +1,12 @@
 const { describe, test } = require('node:test');
 const assert = require('node:assert/strict');
-const { decodeJwsPayload, looksLikeJws, matchApplePayload } = require('../../src/iap/verify-apple');
+const crypto = require('crypto');
+const {
+  decodeJwsPayload,
+  looksLikeJws,
+  matchApplePayload,
+  verifyEs256Signature,
+} = require('../../src/iap/verify-apple');
 
 describe('Apple IAP payload', () => {
   test('looksLikeJws requires three segments', () => {
@@ -17,6 +23,19 @@ describe('Apple IAP payload', () => {
       productId: 'aimarkets.wallet.5',
       bundleId: 'app.phgroup.ai-market-vn',
     });
+  });
+
+  test('verifies the IEEE-P1363 signature format used by Apple StoreKit JWS', () => {
+    const { privateKey, publicKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+    const signingInput = 'eyJhbGciOiJFUzI1NiJ9.eyJwcm9kdWN0SWQiOiJhaW1hcmtldHMud2FsbGV0LjUifQ';
+    const signature = crypto.sign('sha256', Buffer.from(signingInput), {
+      key: privateKey,
+      dsaEncoding: 'ieee-p1363',
+    });
+
+    assert.equal(signature.length, 64);
+    assert.equal(verifyEs256Signature(signingInput, signature, publicKey), true);
+    assert.equal(verifyEs256Signature(`${signingInput}x`, signature, publicKey), false);
   });
 
   test('rejects revoked or wrong bundle / sku / tx', () => {
