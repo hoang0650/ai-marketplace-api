@@ -104,7 +104,7 @@ async function ensureAiProviderProducts() {
       avatarUrl: CREATOR.avatarUrl,
       coverUrl: CREATOR.coverUrl,
       verified: true,
-      affiliateCode: 'PHAI-GATEWAYS',
+      affiliateCode: '',
     });
   } else {
     creator.bio = CREATOR.bio;

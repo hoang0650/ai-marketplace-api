@@ -23,8 +23,12 @@ const {
 } = require('./finance/agent-subscription-worker');
 const { startVoteCycleWorker, stopVoteCycleWorker } = require('./community/vote-cycle-worker');
 const { warmExchangeRates } = require('./finance/exchange-rate');
+const User = require('./models/User');
+const { backfillAffiliateCodes } = require('./utils/affiliate-code');
 
 connectDb()
+  .then(() => backfillAffiliateCodes(User))
+  .then((stats) => console.log(`[affiliate] codes scanned=${stats.scanned} updated=${stats.updated}`))
   .then(() => ensureLegalDocuments())
   .then((legal) => {
     if (legal) {

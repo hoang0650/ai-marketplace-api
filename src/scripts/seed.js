@@ -115,7 +115,7 @@ async function seed() {
       bio: u.bio || profile?.bio || '',
       coverUrl: profile?.coverUrl || '',
       verified: !!profile?.verified,
-      affiliateCode: `PHAI-${(u.name || 'USER').replace(/\s+/g, '').slice(0, 8).toUpperCase()}`,
+      affiliateCode: '',
       affiliateClicks: mock.affiliate?.clicks || 120,
       affiliateConversions: mock.affiliate?.conversions || 8,
       affiliateEarnings: mock.affiliate?.earnings || 240,

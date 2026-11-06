@@ -24,7 +24,7 @@ async function ensureTalentUser(talent) {
         avatarUrl: talent.avatarUrl || '',
         bio: String(talent.bio || '').slice(0, 500),
         role: 'talent',
-        affiliateCode: `PHAI-T-${slugify(slug).slice(0, 10).toUpperCase() || 'TALENT'}`,
+        affiliateCode: '',
       });
     } catch (err) {
       if (err.code !== 11000) throw err;

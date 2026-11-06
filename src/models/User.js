@@ -111,7 +111,16 @@ const userSchema = new mongoose.Schema(
     coverUrl: { type: String, default: '' },
     verified: { type: Boolean, default: false },
     wishlist: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Product' }],
-    affiliateCode: { type: String, default: '' },
+    affiliateCode: {
+      type: String,
+      default: '',
+      trim: true,
+      uppercase: true,
+      validate: {
+        validator: (value) => !value || /^[A-Z]{2}\d{4}$/.test(value),
+        message: 'Affiliate code must contain exactly 2 letters followed by 4 digits',
+      },
+    },
     affiliateClicks: { type: Number, default: 0 },
     affiliateConversions: { type: Number, default: 0 },
     affiliateEarnings: { type: Number, default: 0 },
@@ -161,6 +170,14 @@ const userSchema = new mongoose.Schema(
     tokenVersion: { type: Number, default: 0 },
   },
   { timestamps: { createdAt: true, updatedAt: true } },
+);
+
+userSchema.index(
+  { affiliateCode: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { affiliateCode: { $type: 'string', $regex: '^[A-Z]{2}[0-9]{4}$' } },
+  },
 );
 
 userSchema.virtual('id').get(function idVirtual() {

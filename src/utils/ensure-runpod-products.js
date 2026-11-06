@@ -71,7 +71,7 @@ async function ensureRunpodMarketplaceProducts() {
       avatarUrl: CREATOR.avatarUrl,
       coverUrl: CREATOR.coverUrl,
       verified: true,
-      affiliateCode: 'PHAI-AIMARKETS',
+      affiliateCode: '',
     });
     console.log('[aimarkets] created creator', CREATOR.creatorSlug);
   } else {

@@ -58,7 +58,7 @@ async function ensureUser(spec, passwordHash) {
     bio: spec.bio || '',
     avatarUrl: `https://api.dicebear.com/9.x/shapes/svg?seed=${spec.creatorSlug || spec.email}`,
     verified: spec.role === 'seller',
-    affiliateCode: `PHAI-${(spec.name || 'USER').replace(/\s+/g, '').slice(0, 8).toUpperCase()}`,
+    affiliateCode: '',
   });
 }
 

@@ -22,7 +22,7 @@ async function ensureCreator() {
       avatarUrl: CREATOR.avatarUrl,
       coverUrl: CREATOR.coverUrl,
       verified: true,
-      affiliateCode: 'PHAI-AIMARKETS',
+      affiliateCode: '',
     });
     console.log('[compute-test] created creator', CREATOR.creatorSlug);
   }

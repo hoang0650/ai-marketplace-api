@@ -1,4 +1,3 @@
-const crypto = require('crypto');
 const express = require('express');
 const mongoose = require('mongoose');
 const User = require('../models/User');
@@ -15,6 +14,7 @@ const { isCommissionHeld, reverseAffiliateCommission } = require('../finance/aff
 const { roundMoney } = require('../finance/constants');
 const { deleteCachePattern } = require('../utils/cache');
 const { writeAuditLog } = require('../utils/audit');
+const { ensureAffiliateCode, isAffiliateCode } = require('../utils/affiliate-code');
 
 const router = express.Router();
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -55,13 +55,8 @@ async function ensureCode(userId) {
   const user = await User.findById(userId);
   if (!user) return null;
   if (!isKycVerified(user)) return user;
-  if (!user.affiliateCode) {
-    let code = `PHAI-${String(user.name || 'USER').replace(/[^A-Za-z0-9]/g, '').slice(0, 8).toUpperCase() || 'USER'}`;
-    if (await User.exists({ affiliateCode: code, _id: { $ne: user._id } })) {
-      code = `${code}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
-    }
-    user.affiliateCode = code;
-    await user.save();
+  if (!isAffiliateCode(user.affiliateCode)) {
+    await ensureAffiliateCode(user);
     await invalidateAuthUserCache(user._id);
   }
   return user;

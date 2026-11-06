@@ -193,7 +193,8 @@ router.post('/register', async (req, res, next) => {
       avatarUrl:
         String(req.body?.avatarUrl || '').trim() ||
         `https://api.dicebear.com/9.x/shapes/svg?seed=${encodeURIComponent(email)}`,
-      affiliateCode: `PHAI-${slugify(name).slice(0, 8).toUpperCase() || 'USER'}`,
+      // Assigned after eKYC when the user first opens Affiliate.
+      affiliateCode: '',
     });
 
     if (asSeller) {
