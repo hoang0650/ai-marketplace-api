@@ -64,7 +64,9 @@ router.post('/verify', authenticate, async (req, res, next) => {
     const { duplicate } = await claimEvent({
       eventId,
       provider: platform === 'ios' ? 'app_store' : 'google_play',
-      kind: 'iap_credit',
+      // PaymentEvent only accepts the canonical payment lifecycle kinds.
+      // The provider and eventId already identify this as an IAP credit.
+      kind: 'payment',
     });
 
     const existing = await WalletTx.findOne({ iapTransactionId: storeTxId });
