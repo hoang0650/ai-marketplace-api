@@ -32,6 +32,25 @@ function decodeJwsPayload(jws) {
   }
 }
 
+function verifyEs256Signature(signingInput, signature, key) {
+  const signatureBuffer = Buffer.isBuffer(signature)
+    ? signature
+    : Buffer.from(String(signature || ''), 'base64url');
+  // JWS ES256 encodes ECDSA signatures as the fixed-width r || s pair
+  // (IEEE-P1363), while Node's crypto verifier defaults to ASN.1 DER.
+  if (signatureBuffer.length !== 64) return false;
+  try {
+    return crypto.verify(
+      'sha256',
+      Buffer.from(String(signingInput), 'utf8'),
+      { key, dsaEncoding: 'ieee-p1363' },
+      signatureBuffer,
+    );
+  } catch {
+    return false;
+  }
+}
+
 function verifyJwsSignature(jws) {
   const parts = String(jws).split('.');
   if (parts.length !== 3) return false;
@@ -44,11 +63,7 @@ function verifyJwsSignature(jws) {
   const leaf = header?.x5c?.[0];
   if (!leaf) return false;
   const pem = `-----BEGIN CERTIFICATE-----\n${leaf.match(/.{1,64}/g).join('\n')}\n-----END CERTIFICATE-----\n`;
-  try {
-    return crypto.createVerify('SHA256').update(`${parts[0]}.${parts[1]}`).verify(pem, parts[2], 'base64url');
-  } catch {
-    return false;
-  }
+  return verifyEs256Signature(`${parts[0]}.${parts[1]}`, parts[2], pem);
 }
 
 function matchApplePayload(payload, { productId, transactionId }) {
@@ -177,6 +192,7 @@ module.exports = {
   decodeJwsPayload,
   looksLikeJws,
   matchApplePayload,
+  verifyEs256Signature,
   verifyAppleIap,
   verifyJwsSignature,
 };
