@@ -213,20 +213,48 @@ function pickPrimary(personas) {
 }
 
 /**
+ * Which payout persona a request is allowed to use.
+ * An ineligible persona (including employer spoofing and a buyer claim on a seller account)
+ * does not open the pooled wallet. Omitted persona uses the primary eligible one.
+ */
+function selectPayoutPersona(personas, requested, { isAdmin = false } = {}) {
+  const list = Array.isArray(personas) ? personas : [];
+  const wanted = String(requested || '').trim();
+  if (isAdmin) {
+    if (wanted === 'affiliate') return 'affiliate';
+    if (wanted === 'buyer') return 'buyer';
+    if (SELLER_LIKE.has(wanted)) return wanted;
+    return 'admin';
+  }
+  const sellerLike = list.some((p) => SELLER_LIKE.has(p));
+  const allowed = wanted && list.includes(wanted) && !(wanted === 'buyer' && sellerLike);
+  return allowed ? wanted : pickPrimary(list);
+}
+
+/**
  * Resolve persona for a withdrawal.
  * `requested` must be one of the user's eligible personas, otherwise primary wins.
  */
 async function resolvePayoutPersona(user, requested) {
   const personas = await detectPersonas(user);
-  if (user && user.role === 'admin') {
-    return { personas, persona: 'admin', policy: { ...policyFor('employer'), persona: 'admin', platformFeeRate: 0, taxRate: 0, totalFeeRate: 0, minAmount: 0, minAmountVnd: 0 } };
+  const persona = selectPayoutPersona(personas, requested, { isAdmin: user?.role === 'admin' });
+  if (persona === 'admin') {
+    return {
+      personas,
+      persona,
+      policy: {
+        ...policyFor('seller'),
+        persona: 'admin',
+        platformFeeRate: 0,
+        taxRate: 0,
+        totalFeeRate: 0,
+        minAmount: 0,
+        minAmountVnd: 0,
+        canWithdraw: true,
+        chargeAtWithdraw: false,
+      },
+    };
   }
-  const wanted = String(requested || '').trim();
-  // Sellers share one wallet ledger with their buyer persona; never let 'buyer' be used
-  // to bypass the seller verification gate on seller earnings.
-  const sellerLike = personas.some((p) => SELLER_LIKE.has(p));
-  const allowed = wanted && personas.includes(wanted) && !(wanted === 'buyer' && sellerLike);
-  const persona = allowed ? wanted : pickPrimary(personas);
   let sellerType;
   let sellerTypeKnown = false;
   let productKinds = [];
@@ -320,6 +348,7 @@ module.exports = {
   sellerTaxSummary,
   detectPersonas,
   pickPrimary,
+  selectPayoutPersona,
   resolvePayoutPersona,
   quoteWithdrawal,
   mapPolicy,

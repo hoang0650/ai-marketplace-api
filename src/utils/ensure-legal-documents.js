@@ -34,7 +34,7 @@ Dữ liệu cá nhân được xử lý theo Luật Bảo vệ dữ liệu cá n
 - Ảnh giấy tờ tùy thân khi xác minh người bán là dữ liệu nhạy cảm, được giới hạn truy cập.
 - Nội dung trao đổi với AI không dùng để huấn luyện mô hình; được chuyển tới nhà cung cấp mô hình để xử lý yêu cầu.
 - Cơ sở dữ liệu và dữ liệu cá nhân được lưu trữ tại Việt Nam trên máy chủ của Công ty TNHH Lưu Trữ Số (123HOST, MST 0312088232) (trung tâm dữ liệu của 123HOST tại TP. Hồ Chí Minh, địa chỉ IP 103.97.127.39); chỉ chuyển ra nước ngoài trong phạm vi cần thiết để cung cấp dịch vụ (ví dụ nhà cung cấp mô hình AI) theo quy định pháp luật.
-- Giấy chứng nhận đăng ký kinh doanh và hồ sơ eKYC của người bán được giới hạn truy cập. Người mua không phải xác minh danh tính để rút ví vì tín dụng dịch vụ của Người mua không hỗ trợ rút hoặc chuyển nhượng.
+- Giấy chứng nhận đăng ký kinh doanh và hồ sơ eKYC của người bán, và hồ sơ định danh affiliate đã nộp, được giới hạn truy cập. Người mua thông thường không phải nộp CCCD hay hoàn tất eKYC để duyệt, mua, nạp ví, dùng dịch vụ đã mua hoặc gửi khiếu nại và yêu cầu hoàn. Hồ sơ đã nộp không bị xóa khi người mua không còn bắt buộc xác minh.
 - Không bán dữ liệu cá nhân.
 - Người dùng thực hiện quyền của chủ thể dữ liệu trong Cài đặt hoặc qua support@aimarkets.vn.
 
@@ -138,12 +138,13 @@ ${FULL_TEXT}/mau-hop-dong-cung-cap-dich-vu-nguoi-ban`,
   {
     documentType: 'buyer-policy',
     title: 'Chính sách người mua',
-    summary: 'Quyền, nghĩa vụ người mua; thanh toán bằng ví, rút số dư sau eKYC, GPU, chơi game, thuê bao agent.',
+    summary: 'Quyền, nghĩa vụ người mua; thanh toán bằng ví; không bắt buộc eKYC để mua, nạp và khiếu nại; tín dụng nạp trước không rút hoặc chuyển.',
     content: `# Chính sách người mua
 
 - Kiểm tra nhãn **Bán bởi sàn** hoặc **Bán bởi người bán**, giá và đơn vị tính trước khi đặt hàng.
 - Mọi đơn hàng được thanh toán bằng số dư ví; nạp ví bằng chuyển khoản ngân hàng (mã QR VietQR) vào tài khoản thanh toán của Công ty (web), Apple IAP hoặc Google Play Billing (ứng dụng). Giá hiển thị theo VNĐ, USD hoặc CNY; mã giảm giá của sàn hiển thị là “Giảm giá nền tảng” trong giỏ hàng và được trừ trước khi tính phí sàn.
-- Tín dụng dịch vụ của Người mua không hỗ trợ rút tiền mặt, chuyển nhượng hoặc chuyển khoản nội bộ; khoản hoàn đủ điều kiện được trả về phương thức thanh toán ban đầu.
+- Người mua thông thường không phải nộp CCCD hoặc hoàn tất eKYC để duyệt sản phẩm, mua, nạp ví qua kênh được hỗ trợ, dùng dịch vụ đã mua, gửi khiếu nại hoặc gửi yêu cầu hoàn đủ điều kiện. Xác minh danh tính vẫn bắt buộc đối với người bán và affiliate. Tài khoản vừa mua vừa bán không được dùng tư cách người mua để bỏ qua các yêu cầu đó.
+- Tín dụng dịch vụ của Người mua không hỗ trợ rút tiền mặt, chuyển nhượng hoặc chuyển khoản nội bộ, kể cả sau khi đã eKYC. Khoản hoàn đủ điều kiện được xem xét theo quy tắc đơn hàng và nguồn thanh toán; hoàn về ví là tín dụng để dùng tiếp, không phải khoản được rút.
 - Dịch vụ chuyên môn (làm web, làm app, marketing, SEO, creator, tự động hóa) bán theo gói giá cố định, thanh toán như sản phẩm khác.
 - Giỏ hàng, yêu thích đồng bộ giữa web và ứng dụng khi đăng nhập.
 - Thuê GPU: trả trước tối thiểu 1 giờ, tính theo phút, cảnh báo trước 10 phút khi sắp hết số dư, tự dừng khi hết tiền, xóa sau 24 giờ.
@@ -156,14 +157,14 @@ ${FULL_TEXT}/chinh-sach-nguoi-mua`,
   {
     documentType: 'payment-policy',
     title: 'Chính sách thanh toán và đối soát',
-    summary: 'Thanh toán bằng ví; chuyển khoản ngân hàng (VietQR), Apple/Google IAP chỉ để nạp ví; rút ví sau eKYC; đối soát.',
+    summary: 'Thanh toán bằng ví; VietQR, Apple/Google IAP chỉ để nạp ví; tín dụng người mua không rút; đối soát.',
     content: `# Chính sách thanh toán và đối soát
 
 ## Phương thức
 Mọi đơn hàng được thanh toán bằng **số dư ví AI Markets**. Chuyển khoản ngân hàng (mã QR VietQR) vào tài khoản thanh toán của Công ty (web), Apple In-App Purchase và Google Play Billing (ứng dụng) chỉ dùng để nạp tiền vào ví. Số dư hiển thị theo VNĐ, USD hoặc CNY.
 
 ## Ví người mua
-Dùng để thanh toán trên sàn; được **rút về tài khoản ngân hàng đứng tên mình sau khi xác minh danh tính (eKYC)**. Tiền hoàn trả về ví hoặc phương thức thanh toán ban đầu.
+Dùng để thanh toán trên sàn. Số dư nạp trước không rút về ngân hàng và không chuyển cho người khác, kể cả khi tài khoản đã eKYC. Người mua thông thường không phải xác minh danh tính để mua, nạp hoặc gửi yêu cầu hoàn. Khoản hoàn đủ điều kiện được xem xét theo đơn hàng và nguồn thanh toán; ghi có vào ví là tín dụng sử dụng tiếp, không phải khoản chi trả.
 
 ## Sổ cái
 Mỗi đơn ghi giá, giảm giá (trừ trước phí sàn), phí dịch vụ sàn 20%, loại người bán, thuế khấu trừ theo loại người bán (cá nhân 7%/1,5%, hộ kinh doanh và doanh nghiệp 0%) và phần người bán được nhận; đơn đã chốt không bị tính lại khi tỷ lệ thay đổi.

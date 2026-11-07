@@ -17,7 +17,7 @@ const DELETED_NAME = 'Tài khoản đã xóa';
 const BALANCE_EPSILON = 0.01;
 
 const BLOCKER_MESSAGES = {
-  WALLET_BALANCE: 'Ví còn số dư. Hãy rút số dư (cần eKYC) hoặc liên hệ hỗ trợ trước khi xóa tài khoản.',
+  WALLET_BALANCE: 'Ví còn số dư. Tín dụng nạp trước của người mua không rút được. Doanh thu người bán hoặc hoa hồng affiliate đủ điều kiện có thể rút; nếu không, liên hệ hỗ trợ trước khi xóa tài khoản.',
   PENDING_WITHDRAWAL: 'Có yêu cầu rút tiền đang xử lý. Vui lòng chờ hoàn tất.',
   OPEN_ORDERS: 'Có đơn hàng đã thanh toán nhưng chưa hoàn tất. Vui lòng chờ đơn hoàn tất hoặc hủy.',
   OPEN_DISPUTES: 'Có khiếu nại/tranh chấp đơn hàng đang mở.',

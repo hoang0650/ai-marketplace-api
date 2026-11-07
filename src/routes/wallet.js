@@ -37,11 +37,13 @@ router.get('/summary', authenticate, async (req, res, next) => {
     const summary = await getAvailableBalance(req.user._id);
     const { personas, persona, policy } = await resolvePayoutPersona(req.user, req.query.persona);
     let affiliate = null;
-    if (personas.includes('affiliate')) {
+    let affiliateAvailable = 0;
+    if (personas.includes('affiliate') || persona === 'affiliate') {
       const { affiliateConfig } = require('../config/affiliate');
       const { affiliateCanWithdraw } = require('../finance/affiliate-engine');
       const cfg = affiliateConfig();
       const slice = await affiliateSlice(req.user._id);
+      affiliateAvailable = slice.available;
       const identityVerified = req.user?.role === 'admin' || (req.user?.kyc?.status || req.user?.kycStatus) === 'verified';
       affiliate = {
         ...slice,
@@ -50,6 +52,20 @@ router.get('/summary', authenticate, async (req, res, next) => {
         canWithdraw: affiliateCanWithdraw({ available: slice.available, identityVerified }),
       };
     }
+    const { summaryPayable, loadSellerEarnedAvailable } = require('../finance/withdrawable-balance');
+    const poolForPersona = persona === 'affiliate'
+      ? summary.available
+      : Math.max(0, Math.round((summary.available - affiliateAvailable) * 100) / 100);
+    const earned = persona === 'buyer' || persona === 'affiliate'
+      ? { available: 0 }
+      : await loadSellerEarnedAvailable(req.user._id);
+    const payable = summaryPayable({
+      persona,
+      poolAvailable: poolForPersona,
+      earnedAvailable: earned.available,
+      affiliateAvailable,
+      walletBalance: summary.balance,
+    });
     res.json({
       affiliate,
       currency: 'USD',
@@ -58,6 +74,11 @@ router.get('/summary', authenticate, async (req, res, next) => {
       persona,
       personas,
       policy: mapPolicy(policy),
+      payableAmount: payable.payableAmount,
+      payableCode: payable.payableCode,
+      buyerIdentityRequired: false,
+      buyerCashoutAllowed: false,
+      prepaidWithdrawable: false,
     });
   } catch (err) {
     next(err);
@@ -283,12 +304,37 @@ router.post('/withdraw', authenticate, async (req, res, next) => {
     const summaryNow = await getAvailableBalance(req.user._id);
     const { held, balance } = summaryNow;
     let available = summaryNow.available;
-    if (persona !== 'affiliate' && req.user.role !== 'admin') {
+    if (persona !== 'affiliate') {
       // Reserve the affiliate slice: it can only leave through the affiliate persona (PIT applies).
       const slice = await affiliateSlice(req.user._id);
       available = Math.max(0, Math.round((available - slice.available) * 100) / 100);
     }
-    if (amount > available) {
+    if (persona !== 'affiliate') {
+      const { payoutCap, loadSellerEarnedAvailable, PREPAID_MESSAGE } = require('../finance/withdrawable-balance');
+      const earned = await loadSellerEarnedAvailable(req.user._id);
+      const cap = payoutCap({ persona, amount, poolAvailable: available, earnedAvailable: earned.available });
+      if (!cap.ok && cap.code === 'PREPAID_NOT_WITHDRAWABLE') {
+        return res.status(403).json({
+          message: cap.message || PREPAID_MESSAGE,
+          code: 'PREPAID_NOT_WITHDRAWABLE',
+          persona,
+          payable: cap.payable,
+          balance,
+          held,
+          available,
+        });
+      }
+      if (!cap.ok && cap.code === 'PAYOUT_HELD') {
+        return res.status(400).json({
+          message: `Insufficient available balance. Ledger ${balance.toFixed(2)}, held ${held.toFixed(2)} (48h protection or open dispute on those orders only), available ${available.toFixed(2)}.`,
+          code: 'PAYOUT_HELD',
+          payable: cap.payable,
+          balance,
+          held,
+          available,
+        });
+      }
+    } else if (amount > available) {
       return res.status(400).json({
         message: `Insufficient available balance. Ledger ${balance.toFixed(2)}, held ${held.toFixed(2)} (48h protection or open dispute on those orders only), available ${available.toFixed(2)}.`,
         code: 'PAYOUT_HELD',
@@ -298,7 +344,7 @@ router.post('/withdraw', authenticate, async (req, res, next) => {
       });
     }
 
-    // Seller-like personas additionally need a VERIFIED seller profile (buyers only need eKYC).
+    // Seller-like personas additionally need a VERIFIED seller profile. Buyer persona cannot cash out.
     const needsSellerProfile = persona !== 'employer' && persona !== 'buyer' && persona !== 'affiliate' && req.user.role !== 'admin';
     if (needsSellerProfile) {
       const SellerProfile = require('../models/SellerProfile');
