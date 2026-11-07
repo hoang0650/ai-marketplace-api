@@ -6,7 +6,7 @@ const CLAWBACK = /^(Refund clawback|Chargeback)\b/;
 const PREPAID_MESSAGE =
   'Topped-up and prepaid marketplace credit cannot be withdrawn or transferred. Only approved seller earnings or affiliate commissions can be paid out.';
 const BUYER_MESSAGE =
-  'Buyer marketplace credit cannot be withdrawn or transferred. Eligible refunds are returned to the original payment method.';
+  'Buyer prepaid credit cannot be withdrawn or transferred. Eligible refund requests are handled separately under the refund policy.';
 
 /**
  * Seller/talent earnings that are eligible to leave the pooled wallet.

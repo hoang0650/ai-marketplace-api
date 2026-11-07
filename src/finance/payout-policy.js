@@ -6,8 +6,9 @@ const { currentVndPerUsd } = require('./exchange-rate');
 /**
  * Withdrawal policy per marketplace persona.
  *
- * - buyer        : cannot withdraw or transfer marketplace credit; refunds go back to the
- *                  original payment method
+ * - buyer        : cannot withdraw or transfer prepaid credit. Refund requests are a
+ *                  separate policy. The implemented refund path credits the wallet; it does
+ *                  not return money to the original payment method.
  * - seller       : product/creator earnings — 20% platform commission + tax by seller type
  *                  (individual 7% digital / 1.5% goods withheld; household business & company 0%)
  * - talent       : talent profile earnings — same as seller

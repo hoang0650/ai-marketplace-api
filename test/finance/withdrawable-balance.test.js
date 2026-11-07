@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { selectPayoutPersona, EMPLOYER_MIN_VND, policyFor } = require('../../src/finance/payout-policy');
-const { sellerEarnedAvailable, payoutCap, summaryPayable } = require('../../src/finance/withdrawable-balance');
+const { sellerEarnedAvailable, payoutCap, summaryPayable, BUYER_MESSAGE } = require('../../src/finance/withdrawable-balance');
 const { affiliateConfig } = require('../../src/config/affiliate');
 const { mapKyc } = require('../../src/utils/kyc');
 
@@ -48,7 +48,13 @@ test('seller earnings are payable and topped-up balance is not', () => {
   const topupOnly = payoutCap({ persona: 'seller', amount: 50, poolAvailable: 100, earnedAvailable: 0 });
   assert.equal(topupOnly.code, 'PREPAID_NOT_WITHDRAWABLE');
   assert.equal(topupOnly.payable, 0);
-  assert.equal(payoutCap({ persona: 'buyer', amount: 10, poolAvailable: 100, earnedAvailable: 0 }).code, 'BUYER_CREDIT_NON_WITHDRAWABLE');
+  const buyer = payoutCap({ persona: 'buyer', amount: 10, poolAvailable: 100, earnedAvailable: 0 });
+  assert.equal(buyer.code, 'BUYER_CREDIT_NON_WITHDRAWABLE');
+  assert.equal(buyer.message, BUYER_MESSAGE);
+  assert.equal(
+    BUYER_MESSAGE,
+    'Buyer prepaid credit cannot be withdrawn or transferred. Eligible refund requests are handled separately under the refund policy.',
+  );
 });
 
 test('holds, clawbacks, affiliate withdrawals and buyer refund credits stay out of seller cashout', () => {
@@ -87,6 +93,29 @@ test('holds, clawbacks, affiliate withdrawals and buyer refund credits stay out 
     now,
   });
   assert.equal(legacy.available, 0);
+});
+
+test('a pending cashout reduces earnings once, and a clawback is not subtracted twice', () => {
+  const first = sellerEarnedAvailable({ orders: [order(20), order(15)], now });
+  assert.equal(first.available, 35);
+  const second = sellerEarnedAvailable({
+    orders: [order(20), order(15)],
+    walletTxs: [{ type: 'withdraw', amount: 20, status: 'pending', meta: { persona: 'seller' } }],
+    now,
+  });
+  assert.equal(second.available, 15);
+  assert.equal(payoutCap({ persona: 'seller', amount: 20, poolAvailable: 15, earnedAvailable: second.available }).code, 'PAYOUT_HELD');
+  const partialClawback = sellerEarnedAvailable({
+    orders: [order(20), order(15)],
+    walletTxs: [{ type: 'debit', amount: 8, status: 'completed', note: 'Refund clawback rf1 order abc' }],
+    now,
+  });
+  assert.equal(partialClawback.available, 27);
+  const released = payoutCap({ persona: 'seller', amount: 20, poolAvailable: 20, earnedAvailable: 20 });
+  assert.equal(released.ok, true);
+  assert.equal(released.payable, 20);
+  const affiliateReserved = payoutCap({ persona: 'seller', amount: 20, poolAvailable: 120, earnedAvailable: 20 });
+  assert.equal(affiliateReserved.payable, 20);
 });
 
 test('affiliate cashout stays on the commission slice and has no commercial minimum', () => {

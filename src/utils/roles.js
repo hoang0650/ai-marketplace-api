@@ -2,8 +2,9 @@
  * Marketplace roles — single source of truth for role names and capabilities.
  *
  * Active roles (Quy chế 2.1, policy 2026-10):
- * - buyer  : buys with non-withdrawable, non-transferable marketplace credit; eligible refunds
- *            return to the original payment method
+ * - buyer  : buys with non-withdrawable, non-transferable prepaid credit. Refund requests
+ *            are handled under the refund policy. Wallet credit from an admin refund is not
+ *            a return to the original payment method.
  * - seller : third-party seller; seller type is mandatory (INDIVIDUAL / HOUSEHOLD_BUSINESS / COMPANY)
  *            with MST (and ĐKKD for household business / company) — see utils/seller-compliance.js
  * - admin  : ban quản trị (full platform ops, bypasses capability gates)

@@ -70,7 +70,7 @@ Mô hình và API AI, agent, gói kỹ năng, phần mềm, mẫu website/ứng 
 - Thay đổi phí được thông báo trước ít nhất 30 ngày và chỉ áp dụng cho đơn hàng mới.
 
 ## 5. Thanh toán và chi trả
-Mọi đơn hàng được thanh toán bằng tín dụng dịch vụ AI Markets. Chuyển khoản ngân hàng (mã QR VietQR) vào tài khoản thanh toán của Công ty, Apple IAP và Google Play Billing chỉ dùng để nạp tín dụng. Tín dụng của Người mua không hỗ trợ rút tiền mặt hoặc chuyển khoản nội bộ; khoản hoàn đủ điều kiện được trả về phương thức thanh toán ban đầu. Tiền của Người bán được giữ 48 giờ và được chi trả bằng VNĐ vào tài khoản ngân hàng đã đăng ký trong vòng 03 ngày làm việc sau khi kết thúc thời hạn giữ, khi không có tranh chấp và Người bán đã xác minh. Cấm giao dịch ngoài sàn.
+Mọi đơn hàng được thanh toán bằng tín dụng dịch vụ AI Markets. Chuyển khoản ngân hàng (mã QR VietQR) vào tài khoản thanh toán của Công ty, Apple IAP và Google Play Billing chỉ dùng để nạp tín dụng. Tín dụng nạp trước của Người mua không rút và không chuyển. Yêu cầu hoàn được xử lý theo chính sách hoàn tiền. Cách hoàn đang có là ghi có vào ví để dùng tiếp, không phải hoàn tự động về ngân hàng, Apple, Google hay phương thức nạp gốc. Tiền của Người bán được giữ 48 giờ và được chi trả bằng VNĐ vào tài khoản ngân hàng đã đăng ký trong vòng 03 ngày làm việc sau khi kết thúc thời hạn giữ, khi không có tranh chấp và Người bán đã xác minh. Cấm giao dịch ngoài sàn.
 
 ## 6. Khiếu nại
 Xác nhận tiếp nhận trong 24 giờ; xác minh sơ bộ trong 01 ngày làm việc; người bán phản hồi trong 02 ngày làm việc; ra quyết định trong 07 ngày làm việc kể từ khi đủ hồ sơ. Khiếu nại lại trong 07 ngày kể từ khi có quyết định, được trả lời trong 07 ngày làm việc.
@@ -144,7 +144,7 @@ ${FULL_TEXT}/mau-hop-dong-cung-cap-dich-vu-nguoi-ban`,
 - Kiểm tra nhãn **Bán bởi sàn** hoặc **Bán bởi người bán**, giá và đơn vị tính trước khi đặt hàng.
 - Mọi đơn hàng được thanh toán bằng số dư ví; nạp ví bằng chuyển khoản ngân hàng (mã QR VietQR) vào tài khoản thanh toán của Công ty (web), Apple IAP hoặc Google Play Billing (ứng dụng). Giá hiển thị theo VNĐ, USD hoặc CNY; mã giảm giá của sàn hiển thị là “Giảm giá nền tảng” trong giỏ hàng và được trừ trước khi tính phí sàn.
 - Người mua thông thường không phải nộp CCCD hoặc hoàn tất eKYC để duyệt sản phẩm, mua, nạp ví qua kênh được hỗ trợ, dùng dịch vụ đã mua, gửi khiếu nại hoặc gửi yêu cầu hoàn đủ điều kiện. Xác minh danh tính vẫn bắt buộc đối với người bán và affiliate. Tài khoản vừa mua vừa bán không được dùng tư cách người mua để bỏ qua các yêu cầu đó.
-- Tín dụng dịch vụ của Người mua không hỗ trợ rút tiền mặt, chuyển nhượng hoặc chuyển khoản nội bộ, kể cả sau khi đã eKYC. Khoản hoàn đủ điều kiện được xem xét theo quy tắc đơn hàng và nguồn thanh toán; hoàn về ví là tín dụng để dùng tiếp, không phải khoản được rút.
+- Tín dụng nạp trước của Người mua không rút tiền mặt, không chuyển nhượng và không chuyển khoản nội bộ, kể cả sau khi đã eKYC. Yêu cầu hoàn đủ điều kiện được xử lý riêng theo chính sách hoàn tiền. Cách hoàn đang có là ghi có vào ví để dùng tiếp. Đó không phải hoàn tiền tự động về phương thức nạp gốc.
 - Dịch vụ chuyên môn (làm web, làm app, marketing, SEO, creator, tự động hóa) bán theo gói giá cố định, thanh toán như sản phẩm khác.
 - Giỏ hàng, yêu thích đồng bộ giữa web và ứng dụng khi đăng nhập.
 - Thuê GPU: trả trước tối thiểu 1 giờ, tính theo phút, cảnh báo trước 10 phút khi sắp hết số dư, tự dừng khi hết tiền, xóa sau 24 giờ.
@@ -164,7 +164,7 @@ ${FULL_TEXT}/chinh-sach-nguoi-mua`,
 Mọi đơn hàng được thanh toán bằng **số dư ví AI Markets**. Chuyển khoản ngân hàng (mã QR VietQR) vào tài khoản thanh toán của Công ty (web), Apple In-App Purchase và Google Play Billing (ứng dụng) chỉ dùng để nạp tiền vào ví. Số dư hiển thị theo VNĐ, USD hoặc CNY.
 
 ## Ví người mua
-Dùng để thanh toán trên sàn. Số dư nạp trước không rút về ngân hàng và không chuyển cho người khác, kể cả khi tài khoản đã eKYC. Người mua thông thường không phải xác minh danh tính để mua, nạp hoặc gửi yêu cầu hoàn. Khoản hoàn đủ điều kiện được xem xét theo đơn hàng và nguồn thanh toán; ghi có vào ví là tín dụng sử dụng tiếp, không phải khoản chi trả.
+Dùng để thanh toán trên sàn. Số dư nạp trước không rút về ngân hàng và không chuyển cho người khác, kể cả khi tài khoản đã eKYC. Người mua thông thường không phải xác minh danh tính để mua, nạp hoặc gửi yêu cầu hoàn. Yêu cầu hoàn được xử lý theo chính sách hoàn tiền. Cách hoàn đang có là ghi có vào ví để dùng tiếp, không phải hoàn tự động về phương thức nạp gốc.
 
 ## Sổ cái
 Mỗi đơn ghi giá, giảm giá (trừ trước phí sàn), phí dịch vụ sàn 20%, loại người bán, thuế khấu trừ theo loại người bán (cá nhân 7%/1,5%, hộ kinh doanh và doanh nghiệp 0%) và phần người bán được nhận; đơn đã chốt không bị tính lại khi tỷ lệ thay đổi.
@@ -189,7 +189,9 @@ Không áp dụng đổi trả chung 30 ngày cho sản phẩm số.
 - Dịch vụ tính theo mức dùng, GPU, phút chơi game đã sử dụng: không hoàn.
 - Thuê bao agent: không hoàn theo tỷ lệ ngày còn lại; hoàn khi lỗi từ nền tảng; phí token đã dùng không hoàn.
 - Dịch vụ chuyên môn trọn gói: hoàn khi không bàn giao hoặc không đúng mô tả gói.
-- Nạp ví qua Apple/Google: hoàn giao dịch nạp theo chính sách của cửa hàng.
+- Nạp ví qua Apple/Google: nếu cửa hàng hoàn giao dịch nạp, đó là thủ tục của Apple hoặc Google, không phải lệnh hoàn tự động của sàn.
+
+Yêu cầu hoàn được tiếp nhận và xem xét theo chính sách này. Cách xử lý hoàn đang chạy trên hệ thống, khi được duyệt, ghi có vào ví AI Markets để dùng tiếp. Ghi có đó không phải hoàn tiền về ngân hàng, thẻ, Apple, Google hay phương thức nạp gốc. Quy trình trả tiền về phương thức thanh toán gốc chưa được triển khai.
 
 Nên gửi yêu cầu trong 48 giờ để tiền của người bán được tạm giữ trong lúc xem xét; yêu cầu sau thời hạn này vẫn được tiếp nhận. Xác nhận tiếp nhận trong 24 giờ, ra quyết định trong 07 ngày làm việc kể từ khi đủ hồ sơ.
 
@@ -202,7 +204,7 @@ ${FULL_TEXT}/chinh-sach-hoan-tien`,
     content: `# Chính sách tranh chấp
 
 Loại tranh chấp: người mua – người bán, người mua – nền tảng, người bán – nền tảng.
-Tranh chấp mở trong 48 giờ sau khi đơn hoàn tất sẽ tạm giữ tiền của người bán. Sàn xem xét bằng chứng của các bên và quyết định trong 07 ngày làm việc: hoàn tiền, giải phóng tiền cho người bán hoặc hòa giải. Các bên được khiếu nại lại trong 07 ngày kể từ khi có quyết định; sàn trả lời trong 07 ngày làm việc. Mọi quyết định được ghi nhật ký.
+Tranh chấp mở trong 48 giờ sau khi đơn hoàn tất sẽ tạm giữ tiền của người bán. Sàn xem xét bằng chứng của các bên và quyết định trong 07 ngày làm việc: hoàn theo chính sách hoàn tiền (hiện là ghi có vào ví, không phải trả về phương thức nạp gốc), giải phóng tiền cho người bán hoặc hòa giải. Các bên được khiếu nại lại trong 07 ngày kể từ khi có quyết định; sàn trả lời trong 07 ngày làm việc. Mọi quyết định được ghi nhật ký.
 
 ${FULL_TEXT}/chinh-sach-khieu-nai-tranh-chap`,
   },
