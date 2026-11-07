@@ -58,4 +58,7 @@ test('mapKyc hides org fields for individuals and masks the personal tax code pu
   assert.equal(pub.personalTaxCode, undefined);
   assert.equal(mapKyc(user, { includeSensitive: true }).personalTaxCode, '8012345678');
   assert.equal(mapKyc({ kyc: {} }).subjectType, 'individual');
+  const buyer = mapKyc({ role: 'buyer', kyc: { status: 'none' } });
+  assert.equal(buyer.buyerIdentityRequired, false);
+  assert.equal(buyer.buyerCashoutAllowed, false);
 });

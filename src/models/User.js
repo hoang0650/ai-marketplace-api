@@ -136,7 +136,7 @@ const userSchema = new mongoose.Schema(
     deletedAt: { type: Date, default: null },
     statusReason: { type: String, default: '', maxlength: 500 },
     statusChangedAt: { type: Date, default: null },
-    /** Personal eKYC — required for withdraw (all roles except admin). */
+    /** Seller and affiliate identity record. Ordinary buyers are not required to submit it. Existing documents are kept. */
     kyc: { type: kycSchema, default: () => ({}) },
     /** Saved VAT invoice details for reuse (order invoice choice). */
     invoiceProfile: {

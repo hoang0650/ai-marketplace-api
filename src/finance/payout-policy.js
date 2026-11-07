@@ -6,14 +6,15 @@ const { currentVndPerUsd } = require('./exchange-rate');
 /**
  * Withdrawal policy per marketplace persona.
  *
- * - buyer        : cannot withdraw or transfer marketplace credit; refunds go back to the
- *                  original payment method
+ * - buyer        : cannot withdraw or transfer prepaid credit. Refund requests are a
+ *                  separate policy. The implemented refund path credits the wallet; it does
+ *                  not return money to the original payment method.
  * - seller       : product/creator earnings — 20% platform commission + tax by seller type
  *                  (individual 7% digital / 1.5% goods withheld; household business & company 0%)
  * - talent       : talent profile earnings — same as seller
  * - freelancer   : accepted job applicant — same as seller
- * - affiliate    : affiliate commissions — withdrawable only when the affiliate balance and the
- *                  withdrawal are >= 2,000,000 VND; 10% PIT withheld per withdrawal, 0% with an
+ * - affiliate    : affiliate commissions — no commercial minimum; any positive eligible balance
+ *                  (USD, 2 decimals); configured PIT rate per withdrawal (default 10%), 0% with an
  *                  approved Mẫu 08/CK-TNCN
  * - employer / HR: job poster — 1% fee, minimum balance before withdrawal
  * - admin        : bypass (ops)
@@ -111,9 +112,9 @@ function policyFor(persona, { sellerType, sellerTypeKnown, productKinds, pitComm
       taxRate,
       totalFeeRate: taxRate,
       chargeAtWithdraw: true,
-      minAmount: roundMoney(cfg.pit.minWithdrawVnd / cfg.pit.vndPerUsd),
+      minAmount: 0,
       minAmountCurrency: 'USD',
-      minAmountVnd: cfg.pit.minWithdrawVnd,
+      minAmountVnd: 0,
       holdHours: Number(process.env.PAYOUT_HOLD_HOURS || 48) || 48,
       requiresNoDispute: true,
       pitRule: !cfg.pit.enabled ? '' : exempt ? 'EXEMPT_CAM_KET_08_CK_TNCN' : 'VN_PIT_10PCT_AFFILIATE_WITHDRAWAL',
@@ -213,20 +214,48 @@ function pickPrimary(personas) {
 }
 
 /**
+ * Which payout persona a request is allowed to use.
+ * An ineligible persona (including employer spoofing and a buyer claim on a seller account)
+ * does not open the pooled wallet. Omitted persona uses the primary eligible one.
+ */
+function selectPayoutPersona(personas, requested, { isAdmin = false } = {}) {
+  const list = Array.isArray(personas) ? personas : [];
+  const wanted = String(requested || '').trim();
+  if (isAdmin) {
+    if (wanted === 'affiliate') return 'affiliate';
+    if (wanted === 'buyer') return 'buyer';
+    if (SELLER_LIKE.has(wanted)) return wanted;
+    return 'admin';
+  }
+  const sellerLike = list.some((p) => SELLER_LIKE.has(p));
+  const allowed = wanted && list.includes(wanted) && !(wanted === 'buyer' && sellerLike);
+  return allowed ? wanted : pickPrimary(list);
+}
+
+/**
  * Resolve persona for a withdrawal.
  * `requested` must be one of the user's eligible personas, otherwise primary wins.
  */
 async function resolvePayoutPersona(user, requested) {
   const personas = await detectPersonas(user);
-  if (user && user.role === 'admin') {
-    return { personas, persona: 'admin', policy: { ...policyFor('employer'), persona: 'admin', platformFeeRate: 0, taxRate: 0, totalFeeRate: 0, minAmount: 0, minAmountVnd: 0 } };
+  const persona = selectPayoutPersona(personas, requested, { isAdmin: user?.role === 'admin' });
+  if (persona === 'admin') {
+    return {
+      personas,
+      persona,
+      policy: {
+        ...policyFor('seller'),
+        persona: 'admin',
+        platformFeeRate: 0,
+        taxRate: 0,
+        totalFeeRate: 0,
+        minAmount: 0,
+        minAmountVnd: 0,
+        canWithdraw: true,
+        chargeAtWithdraw: false,
+      },
+    };
   }
-  const wanted = String(requested || '').trim();
-  // Sellers share one wallet ledger with their buyer persona; never let 'buyer' be used
-  // to bypass the seller verification gate on seller earnings.
-  const sellerLike = personas.some((p) => SELLER_LIKE.has(p));
-  const allowed = wanted && personas.includes(wanted) && !(wanted === 'buyer' && sellerLike);
-  const persona = allowed ? wanted : pickPrimary(personas);
   let sellerType;
   let sellerTypeKnown = false;
   let productKinds = [];
@@ -320,6 +349,7 @@ module.exports = {
   sellerTaxSummary,
   detectPersonas,
   pickPrimary,
+  selectPayoutPersona,
   resolvePayoutPersona,
   quoteWithdrawal,
   mapPolicy,

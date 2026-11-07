@@ -34,7 +34,7 @@ Dữ liệu cá nhân được xử lý theo Luật Bảo vệ dữ liệu cá n
 - Ảnh giấy tờ tùy thân khi xác minh người bán là dữ liệu nhạy cảm, được giới hạn truy cập.
 - Nội dung trao đổi với AI không dùng để huấn luyện mô hình; được chuyển tới nhà cung cấp mô hình để xử lý yêu cầu.
 - Cơ sở dữ liệu và dữ liệu cá nhân được lưu trữ tại Việt Nam trên máy chủ của Công ty TNHH Lưu Trữ Số (123HOST, MST 0312088232) (trung tâm dữ liệu của 123HOST tại TP. Hồ Chí Minh, địa chỉ IP 103.97.127.39); chỉ chuyển ra nước ngoài trong phạm vi cần thiết để cung cấp dịch vụ (ví dụ nhà cung cấp mô hình AI) theo quy định pháp luật.
-- Giấy chứng nhận đăng ký kinh doanh và hồ sơ eKYC của người bán được giới hạn truy cập. Người mua không phải xác minh danh tính để rút ví vì tín dụng dịch vụ của Người mua không hỗ trợ rút hoặc chuyển nhượng.
+- Giấy chứng nhận đăng ký kinh doanh và hồ sơ eKYC của người bán, và hồ sơ định danh affiliate đã nộp, được giới hạn truy cập. Người mua thông thường không phải nộp CCCD hay hoàn tất eKYC để duyệt, mua, nạp ví, dùng dịch vụ đã mua hoặc gửi khiếu nại và yêu cầu hoàn. Hồ sơ đã nộp không bị xóa khi người mua không còn bắt buộc xác minh.
 - Không bán dữ liệu cá nhân.
 - Người dùng thực hiện quyền của chủ thể dữ liệu trong Cài đặt hoặc qua support@aimarkets.vn.
 
@@ -70,7 +70,7 @@ Mô hình và API AI, agent, gói kỹ năng, phần mềm, mẫu website/ứng 
 - Thay đổi phí được thông báo trước ít nhất 30 ngày và chỉ áp dụng cho đơn hàng mới.
 
 ## 5. Thanh toán và chi trả
-Mọi đơn hàng được thanh toán bằng tín dụng dịch vụ AI Markets. Chuyển khoản ngân hàng (mã QR VietQR) vào tài khoản thanh toán của Công ty, Apple IAP và Google Play Billing chỉ dùng để nạp tín dụng. Tín dụng của Người mua không hỗ trợ rút tiền mặt hoặc chuyển khoản nội bộ; khoản hoàn đủ điều kiện được trả về phương thức thanh toán ban đầu. Tiền của Người bán được giữ 48 giờ và được chi trả bằng VNĐ vào tài khoản ngân hàng đã đăng ký trong vòng 03 ngày làm việc sau khi kết thúc thời hạn giữ, khi không có tranh chấp và Người bán đã xác minh. Cấm giao dịch ngoài sàn.
+Mọi đơn hàng được thanh toán bằng tín dụng dịch vụ AI Markets. Chuyển khoản ngân hàng (mã QR VietQR) vào tài khoản thanh toán của Công ty, Apple IAP và Google Play Billing chỉ dùng để nạp tín dụng. Tín dụng nạp trước của Người mua không rút và không chuyển. Yêu cầu hoàn được xử lý theo chính sách hoàn tiền. Cách hoàn đang có là ghi có vào ví để dùng tiếp, không phải hoàn tự động về ngân hàng, Apple, Google hay phương thức nạp gốc. Tiền của Người bán được giữ 48 giờ và được chi trả bằng VNĐ vào tài khoản ngân hàng đã đăng ký trong vòng 03 ngày làm việc sau khi kết thúc thời hạn giữ, khi không có tranh chấp và Người bán đã xác minh. Cấm giao dịch ngoài sàn.
 
 ## 6. Khiếu nại
 Xác nhận tiếp nhận trong 24 giờ; xác minh sơ bộ trong 01 ngày làm việc; người bán phản hồi trong 02 ngày làm việc; ra quyết định trong 07 ngày làm việc kể từ khi đủ hồ sơ. Khiếu nại lại trong 07 ngày kể từ khi có quyết định, được trả lời trong 07 ngày làm việc.
@@ -138,12 +138,13 @@ ${FULL_TEXT}/mau-hop-dong-cung-cap-dich-vu-nguoi-ban`,
   {
     documentType: 'buyer-policy',
     title: 'Chính sách người mua',
-    summary: 'Quyền, nghĩa vụ người mua; thanh toán bằng ví, rút số dư sau eKYC, GPU, chơi game, thuê bao agent.',
+    summary: 'Quyền, nghĩa vụ người mua; thanh toán bằng ví; không bắt buộc eKYC để mua, nạp và khiếu nại; tín dụng nạp trước không rút hoặc chuyển.',
     content: `# Chính sách người mua
 
 - Kiểm tra nhãn **Bán bởi sàn** hoặc **Bán bởi người bán**, giá và đơn vị tính trước khi đặt hàng.
 - Mọi đơn hàng được thanh toán bằng số dư ví; nạp ví bằng chuyển khoản ngân hàng (mã QR VietQR) vào tài khoản thanh toán của Công ty (web), Apple IAP hoặc Google Play Billing (ứng dụng). Giá hiển thị theo VNĐ, USD hoặc CNY; mã giảm giá của sàn hiển thị là “Giảm giá nền tảng” trong giỏ hàng và được trừ trước khi tính phí sàn.
-- Tín dụng dịch vụ của Người mua không hỗ trợ rút tiền mặt, chuyển nhượng hoặc chuyển khoản nội bộ; khoản hoàn đủ điều kiện được trả về phương thức thanh toán ban đầu.
+- Người mua thông thường không phải nộp CCCD hoặc hoàn tất eKYC để duyệt sản phẩm, mua, nạp ví qua kênh được hỗ trợ, dùng dịch vụ đã mua, gửi khiếu nại hoặc gửi yêu cầu hoàn đủ điều kiện. Xác minh danh tính vẫn bắt buộc đối với người bán và affiliate. Tài khoản vừa mua vừa bán không được dùng tư cách người mua để bỏ qua các yêu cầu đó.
+- Tín dụng nạp trước của Người mua không rút tiền mặt, không chuyển nhượng và không chuyển khoản nội bộ, kể cả sau khi đã eKYC. Yêu cầu hoàn đủ điều kiện được xử lý riêng theo chính sách hoàn tiền. Cách hoàn đang có là ghi có vào ví để dùng tiếp. Đó không phải hoàn tiền tự động về phương thức nạp gốc.
 - Dịch vụ chuyên môn (làm web, làm app, marketing, SEO, creator, tự động hóa) bán theo gói giá cố định, thanh toán như sản phẩm khác.
 - Giỏ hàng, yêu thích đồng bộ giữa web và ứng dụng khi đăng nhập.
 - Thuê GPU: trả trước tối thiểu 1 giờ, tính theo phút, cảnh báo trước 10 phút khi sắp hết số dư, tự dừng khi hết tiền, xóa sau 24 giờ.
@@ -156,14 +157,14 @@ ${FULL_TEXT}/chinh-sach-nguoi-mua`,
   {
     documentType: 'payment-policy',
     title: 'Chính sách thanh toán và đối soát',
-    summary: 'Thanh toán bằng ví; chuyển khoản ngân hàng (VietQR), Apple/Google IAP chỉ để nạp ví; rút ví sau eKYC; đối soát.',
+    summary: 'Thanh toán bằng ví; VietQR, Apple/Google IAP chỉ để nạp ví; tín dụng người mua không rút; đối soát.',
     content: `# Chính sách thanh toán và đối soát
 
 ## Phương thức
 Mọi đơn hàng được thanh toán bằng **số dư ví AI Markets**. Chuyển khoản ngân hàng (mã QR VietQR) vào tài khoản thanh toán của Công ty (web), Apple In-App Purchase và Google Play Billing (ứng dụng) chỉ dùng để nạp tiền vào ví. Số dư hiển thị theo VNĐ, USD hoặc CNY.
 
 ## Ví người mua
-Dùng để thanh toán trên sàn; được **rút về tài khoản ngân hàng đứng tên mình sau khi xác minh danh tính (eKYC)**. Tiền hoàn trả về ví hoặc phương thức thanh toán ban đầu.
+Dùng để thanh toán trên sàn. Số dư nạp trước không rút về ngân hàng và không chuyển cho người khác, kể cả khi tài khoản đã eKYC. Người mua thông thường không phải xác minh danh tính để mua, nạp hoặc gửi yêu cầu hoàn. Yêu cầu hoàn được xử lý theo chính sách hoàn tiền. Cách hoàn đang có là ghi có vào ví để dùng tiếp, không phải hoàn tự động về phương thức nạp gốc.
 
 ## Sổ cái
 Mỗi đơn ghi giá, giảm giá (trừ trước phí sàn), phí dịch vụ sàn 20%, loại người bán, thuế khấu trừ theo loại người bán (cá nhân 7%/1,5%, hộ kinh doanh và doanh nghiệp 0%) và phần người bán được nhận; đơn đã chốt không bị tính lại khi tỷ lệ thay đổi.
@@ -188,7 +189,9 @@ Không áp dụng đổi trả chung 30 ngày cho sản phẩm số.
 - Dịch vụ tính theo mức dùng, GPU, phút chơi game đã sử dụng: không hoàn.
 - Thuê bao agent: không hoàn theo tỷ lệ ngày còn lại; hoàn khi lỗi từ nền tảng; phí token đã dùng không hoàn.
 - Dịch vụ chuyên môn trọn gói: hoàn khi không bàn giao hoặc không đúng mô tả gói.
-- Nạp ví qua Apple/Google: hoàn giao dịch nạp theo chính sách của cửa hàng.
+- Nạp ví qua Apple/Google: nếu cửa hàng hoàn giao dịch nạp, đó là thủ tục của Apple hoặc Google, không phải lệnh hoàn tự động của sàn.
+
+Yêu cầu hoàn được tiếp nhận và xem xét theo chính sách này. Cách xử lý hoàn đang chạy trên hệ thống, khi được duyệt, ghi có vào ví AI Markets để dùng tiếp. Ghi có đó không phải hoàn tiền về ngân hàng, thẻ, Apple, Google hay phương thức nạp gốc. Quy trình trả tiền về phương thức thanh toán gốc chưa được triển khai.
 
 Nên gửi yêu cầu trong 48 giờ để tiền của người bán được tạm giữ trong lúc xem xét; yêu cầu sau thời hạn này vẫn được tiếp nhận. Xác nhận tiếp nhận trong 24 giờ, ra quyết định trong 07 ngày làm việc kể từ khi đủ hồ sơ.
 
@@ -201,7 +204,7 @@ ${FULL_TEXT}/chinh-sach-hoan-tien`,
     content: `# Chính sách tranh chấp
 
 Loại tranh chấp: người mua – người bán, người mua – nền tảng, người bán – nền tảng.
-Tranh chấp mở trong 48 giờ sau khi đơn hoàn tất sẽ tạm giữ tiền của người bán. Sàn xem xét bằng chứng của các bên và quyết định trong 07 ngày làm việc: hoàn tiền, giải phóng tiền cho người bán hoặc hòa giải. Các bên được khiếu nại lại trong 07 ngày kể từ khi có quyết định; sàn trả lời trong 07 ngày làm việc. Mọi quyết định được ghi nhật ký.
+Tranh chấp mở trong 48 giờ sau khi đơn hoàn tất sẽ tạm giữ tiền của người bán. Sàn xem xét bằng chứng của các bên và quyết định trong 07 ngày làm việc: hoàn theo chính sách hoàn tiền (hiện là ghi có vào ví, không phải trả về phương thức nạp gốc), giải phóng tiền cho người bán hoặc hòa giải. Các bên được khiếu nại lại trong 07 ngày kể từ khi có quyết định; sàn trả lời trong 07 ngày làm việc. Mọi quyết định được ghi nhật ký.
 
 ${FULL_TEXT}/chinh-sach-khieu-nai-tranh-chap`,
   },
@@ -261,7 +264,7 @@ ${FULL_TEXT}/chinh-sach-luu-tru-va-cung-cap-du-lieu`,
   {
     documentType: 'tax-policy',
     title: 'Chính sách thuế AI Markets',
-    summary: 'Thuế theo loại người bán: cá nhân kinh doanh 7% (dịch vụ, sản phẩm số) hoặc 1,5% (hàng hóa) do sàn khấu trừ, nộp thay; hộ kinh doanh và doanh nghiệp 0%; affiliate rút tối thiểu 2.000.000 đ, khấu trừ 10% TNCN mỗi lần rút; báo cáo quý và chứng từ khấu trừ cuối năm.',
+    summary: 'Thuế theo loại người bán: cá nhân kinh doanh 7% (dịch vụ, sản phẩm số) hoặc 1,5% (hàng hóa) do sàn khấu trừ, nộp thay; hộ kinh doanh và doanh nghiệp 0%; affiliate không có mức rút tối thiểu, khấu trừ 10% TNCN mỗi lần rút; báo cáo quý và chứng từ khấu trừ cuối năm.',
     content: `# Chính sách thuế
 
 ## Phí dịch vụ sàn không phải thuế
@@ -285,7 +288,7 @@ Cá nhân kinh doanh có doanh thu trong năm dương lịch không vượt ngư
 Ví dụ đơn 1.000.000 đ có affiliate 25%: cá nhân — phí sàn 200.000 đ, thuế 70.000 đ, hoa hồng 250.000 đ, người bán nhận 480.000 đ; hộ kinh doanh/doanh nghiệp — phí sàn 200.000 đ, thuế 0 đ, hoa hồng 250.000 đ, người bán nhận 550.000 đ.
 
 ## Affiliate
-Hoa hồng được ghi có đủ (chưa khấu trừ thuế). Người giới thiệu chỉ rút được khi số dư hoa hồng khả dụng từ 2.000.000 đ trở lên và mỗi lần rút tối thiểu 2.000.000 đ; sàn khấu trừ 10% thuế TNCN trên mỗi lần rút, không khấu trừ nếu người giới thiệu đã nộp Cam kết Mẫu 08/CK-TNCN được sàn duyệt. Ví dụ rút 2.500.000 đ: thuế TNCN 250.000 đ, thực nhận 2.250.000 đ.
+Hoa hồng được ghi có đủ (chưa khấu trừ thuế). Người giới thiệu rút được mọi số dư hoa hồng khả dụng lớn hơn 0 (không có mức rút tối thiểu); sàn khấu trừ 10% thuế TNCN trên mỗi lần rút, không khấu trừ nếu người giới thiệu đã nộp Cam kết Mẫu 08/CK-TNCN được sàn duyệt. Ví dụ rút 2.500.000 đ: thuế TNCN 250.000 đ, thực nhận 2.250.000 đ. Ví dụ rút 10.000 đ: thuế TNCN 1.000 đ, thực nhận 9.000 đ.
 
 ## Nghĩa vụ báo cáo của sàn
 - Báo cáo quý cho cơ quan thuế (nộp trong tháng 1, 4, 7, 10) doanh thu của cá nhân kinh doanh, hộ kinh doanh và số thuế đã khấu trừ (kể cả TNCN của affiliate).
@@ -317,19 +320,19 @@ ${FULL_TEXT}/chinh-sach-hoa-don`,
   },
 ];
 
-/** Own version: added 12/10/2026 without bumping the 2026.10.05 set. */
-const AFFILIATE_DOC_VERSION = '2026.10.12';
+/** 2026.11.07 removes the 2,000,000 VND payout floor. The 2026.10.12 document is left in place. */
+const AFFILIATE_DOC_VERSION = '2026.11.07';
 const AFFILIATE_DOC = {
   documentType: 'affiliate-policy',
   title: 'Chính sách chương trình Affiliate AI Markets',
-  summary: 'Hoa hồng 0–25% giá trị đơn (giá sau giảm giá) do người bán chi trả; last-click 30 ngày; giữ 48 giờ; eKYC trước khi tạo liên kết; rút tối thiểu 2.000.000 đ, khấu trừ 10% thuế TNCN mỗi lần rút (trừ khi có Cam kết Mẫu 08/CK-TNCN được duyệt); hành vi cấm và thu hồi hoa hồng.',
+  summary: 'Hoa hồng 0–25% giá trị đơn (giá sau giảm giá) do người bán chi trả; last-click 30 ngày; giữ 48 giờ; eKYC trước khi tạo liên kết; không có mức rút tối thiểu, khấu trừ 10% thuế TNCN mỗi lần rút (trừ khi có Cam kết Mẫu 08/CK-TNCN được duyệt); hành vi cấm và thu hồi hoa hồng.',
   content: `# Chính sách chương trình Affiliate
 
 - **Tham gia**: người dùng đã đăng nhập và đã xác minh danh tính (eKYC) mới được tạo mã giới thiệu và lấy liên kết cho từng sản phẩm hoặc gian hàng; liên kết của tài khoản chưa xác minh không được ghi nhận. Người bán tự nguyện tham gia; mặc định 0% là không tham gia.
 - **Tỷ lệ**: người bán đặt từ 0% đến 25% giá trị đơn hàng (giá sau giảm giá) cho từng sản phẩm hoặc làm mặc định gian hàng; tỷ lệ được chốt khi đặt hàng.
 - **Người chịu chi phí**: hoa hồng trừ vào phần doanh thu của người bán, không trừ vào phí sàn và không thay đổi thuế. Người bán thực nhận = giá trị đơn − 20% phí sàn − thuế theo loại người bán (cá nhân 7%; hộ kinh doanh, doanh nghiệp 0%) − tỷ lệ affiliate × giá trị đơn. Ví dụ đơn 1.000.000 đ, tỷ lệ 25%: người bán cá nhân — phí sàn 200.000 đ, thuế 70.000 đ, hoa hồng 250.000 đ, nhận 480.000 đ; hộ kinh doanh/doanh nghiệp — phí sàn 200.000 đ, thuế 0 đ, hoa hồng 250.000 đ, nhận 550.000 đ.
 - **Ghi nhận**: nhấp chuột cuối cùng (last-click) trong 30 ngày; không ghi nhận khi người mua là người giới thiệu hoặc người giới thiệu là người bán.
-- **Ghi có**: hoa hồng vào ví người giới thiệu, tạm giữ 48 giờ (hoặc đến khi giải quyết xong khiếu nại), sau đó rút được về tài khoản đã xác minh khi số dư hoa hồng khả dụng từ 2.000.000 đ trở lên (mỗi lần rút tối thiểu 2.000.000 đ).
+- **Ghi có**: hoa hồng vào ví người giới thiệu, tạm giữ 48 giờ (hoặc đến khi giải quyết xong khiếu nại), sau đó rút được về tài khoản đã xác minh mọi số dư hoa hồng khả dụng lớn hơn 0 (không có mức rút tối thiểu).
 - **Thuế TNCN**: hoa hồng được ghi có đủ; sàn khấu trừ 10% thuế TNCN trên mỗi lần rút (Luật Thuế TNCN), ví dụ rút 2.500.000 đ: thuế 250.000 đ, thực nhận 2.250.000 đ. Người giới thiệu chỉ có thu nhập thuộc diện khấu trừ nhưng ước tính tổng thu nhập trong năm chưa đến mức phải nộp thuế có thể tải lên Cam kết Mẫu 08/CK-TNCN (Thông tư 80/2021/TT-BTC); sau khi sàn duyệt, không khấu trừ cho năm cam kết. Cuối năm sàn cấp chứng từ khấu trừ thuế TNCN; số thuế đã khấu trừ được báo cáo cơ quan thuế theo quý.
 - **Hành vi cấm**: thư rác; quảng cáo sai sự thật, gây nhầm lẫn; đặt giá thầu từ khóa thương hiệu khi chưa được chấp thuận; đơn hàng ảo; nhồi cookie; tự giới thiệu.
 - **Thu hồi**: đơn hoàn tiền/hủy đảo ngược hoa hồng theo tỷ lệ; gian lận bị thu hồi toàn bộ hoa hồng liên quan, kể cả số đã khả dụng, và xử lý theo Quy trình xử lý vi phạm.
@@ -357,7 +360,7 @@ async function ensureAffiliateDocument() {
     ...AFFILIATE_DOC,
     version: AFFILIATE_DOC_VERSION,
     locale: 'vi',
-    effectiveAt: new Date('2026-10-12T00:00:00.000Z'),
+    effectiveAt: new Date('2026-11-07T00:00:00.000Z'),
     publishedAt: new Date(),
     status: 'published',
   });

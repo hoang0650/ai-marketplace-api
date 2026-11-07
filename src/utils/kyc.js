@@ -108,7 +108,16 @@ function mapKyc(user, { includeSensitive = false, includeObjectKeys = false } = 
     rejectReason: k.rejectReason || '',
     canSubmit: canSubmit(k, status),
     canEdit: status === 'none' || status === 'draft' || status === 'rejected',
+    /**
+     * Identity gate for seller approval/payout and affiliate links/payout.
+     * A verified buyer still cannot cash out topped-up credit.
+     */
     withdrawAllowed: status === 'verified' || user?.role === 'admin',
+    payoutIdentityVerified: status === 'verified' || user?.role === 'admin',
+    buyerIdentityRequired: false,
+    buyerCashoutAllowed: false,
+    prepaidWithdrawable: false,
+    identityRequiredFor: ['seller_approval', 'seller_payout', 'affiliate_link', 'affiliate_payout'],
   };
   if (!includeSensitive) return base;
   const out = {

@@ -1,7 +1,7 @@
 /**
  * Affiliate PIT commitment (Cam kết Mẫu 08/CK-TNCN). Pure helpers shared by routes and the
  * affiliate service. A commitment is per tax year; only an APPROVED one for the payment's year
- * exempts the affiliate from the 10% withholding on commission payments >= 2,000,000 VND.
+ * exempts the affiliate from the configured PIT withholding on each withdrawal.
  */
 const PIT_COMMITMENT_SIDE = 'pit-commitment';
 const PIT_COMMITMENT_MIMES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'application/pdf'];

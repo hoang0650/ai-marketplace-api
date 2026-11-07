@@ -2,14 +2,15 @@
  * Marketplace roles — single source of truth for role names and capabilities.
  *
  * Active roles (Quy chế 2.1, policy 2026-10):
- * - buyer  : buys with non-withdrawable, non-transferable marketplace credit; eligible refunds
- *            return to the original payment method
+ * - buyer  : buys with non-withdrawable, non-transferable prepaid credit. Refund requests
+ *            are handled under the refund policy. Wallet credit from an admin refund is not
+ *            a return to the original payment method.
  * - seller : third-party seller; seller type is mandatory (INDIVIDUAL / HOUSEHOLD_BUSINESS / COMPANY)
  *            with MST (and ĐKKD for household business / company) — see utils/seller-compliance.js
  * - admin  : ban quản trị (full platform ops, bypasses capability gates)
  *
  * Affiliate (người tiếp thị liên kết) is a CAPABILITY of any eKYC-verified account, not a role
- * (routes/affiliate.js): seller-funded 0–25%, withdrawals >= 2,000,000 VND with 10% PIT or Mẫu 08.
+ * (routes/affiliate.js): seller-funded 0–25%, any positive eligible withdrawal, configured PIT or Mẫu 08.
  *
  * Least-privilege admin permissions (`User.adminPermissions`): a non-admin account (e.g. kế toán
  * thuế) can be granted only `finance.tax` (tax exports + Mẫu 08/CK-TNCN queue). Admins keep full access.

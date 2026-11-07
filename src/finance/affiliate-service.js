@@ -233,7 +233,7 @@ function computeAffiliateBalance({ earned = 0, held = 0, withdrawn = 0 } = {}) {
 
 /**
  * Affiliate wallet slice. The wallet is shared, so this amount is reserved for affiliate withdrawals
- * (min 2,000,000 VND, 10% PIT) and excluded from buyer/seller withdrawals.
+ * (no commercial minimum, configured PIT rate) and excluded from buyer/seller withdrawals.
  */
 async function getAffiliateBalance(userId, now = new Date()) {
   const rows = await AffiliateCommission.find({ affiliate: userId, status: 'active' }).select('netAmount reversedAmount').lean();

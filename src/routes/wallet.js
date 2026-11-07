@@ -16,7 +16,7 @@ const router = express.Router();
 
 /**
  * Affiliate commissions sit in the same wallet but are withdrawn only under the affiliate persona
- * (min 2,000,000 VND, 10% PIT). Other personas cannot spend that slice on withdrawal.
+ * (no commercial minimum, configured PIT rate). Other personas cannot spend that slice on withdrawal.
  */
 async function affiliateSlice(userId) {
   const { getAffiliateBalance } = require('../finance/affiliate-service');
@@ -37,17 +37,35 @@ router.get('/summary', authenticate, async (req, res, next) => {
     const summary = await getAvailableBalance(req.user._id);
     const { personas, persona, policy } = await resolvePayoutPersona(req.user, req.query.persona);
     let affiliate = null;
-    if (personas.includes('affiliate')) {
+    let affiliateAvailable = 0;
+    if (personas.includes('affiliate') || persona === 'affiliate') {
       const { affiliateConfig } = require('../config/affiliate');
+      const { affiliateCanWithdraw } = require('../finance/affiliate-engine');
       const cfg = affiliateConfig();
       const slice = await affiliateSlice(req.user._id);
+      affiliateAvailable = slice.available;
+      const identityVerified = req.user?.role === 'admin' || (req.user?.kyc?.status || req.user?.kycStatus) === 'verified';
       affiliate = {
         ...slice,
-        minWithdrawVnd: cfg.pit.minWithdrawVnd,
+        minWithdrawVnd: 0,
         availableVnd: Math.round(slice.available * cfg.pit.vndPerUsd),
-        canWithdraw: slice.available * cfg.pit.vndPerUsd >= cfg.pit.minWithdrawVnd,
+        canWithdraw: affiliateCanWithdraw({ available: slice.available, identityVerified }),
       };
     }
+    const { summaryPayable, loadSellerEarnedAvailable } = require('../finance/withdrawable-balance');
+    const poolForPersona = persona === 'affiliate'
+      ? summary.available
+      : Math.max(0, Math.round((summary.available - affiliateAvailable) * 100) / 100);
+    const earned = persona === 'buyer' || persona === 'affiliate'
+      ? { available: 0 }
+      : await loadSellerEarnedAvailable(req.user._id);
+    const payable = summaryPayable({
+      persona,
+      poolAvailable: poolForPersona,
+      earnedAvailable: earned.available,
+      affiliateAvailable,
+      walletBalance: summary.balance,
+    });
     res.json({
       affiliate,
       currency: 'USD',
@@ -56,6 +74,11 @@ router.get('/summary', authenticate, async (req, res, next) => {
       persona,
       personas,
       policy: mapPolicy(policy),
+      payableAmount: payable.payableAmount,
+      payableCode: payable.payableCode,
+      buyerIdentityRequired: false,
+      buyerCashoutAllowed: false,
+      prepaidWithdrawable: false,
     });
   } catch (err) {
     next(err);
@@ -176,18 +199,23 @@ router.put('/payout-account', authenticate, async (req, res, next) => {
 
 router.post('/withdraw', authenticate, async (req, res, next) => {
   try {
-    const amount = normalizeAmount(req.body?.amount);
-    if (amount === null) {
-      return res.status(400).json({ message: `Invalid amount (0 < amount <= ${MAX_TX_AMOUNT})` });
-    }
-
     const { personas, persona, policy } = await resolvePayoutPersona(req.user, req.body?.persona);
+
+    // Affiliate amounts are checked by quoteAffiliateWithdrawal (precision, not a commercial minimum).
+    // Other personas keep the shared USD normalizer, including seller and employer minimums below.
+    let amount = null;
+    if (persona !== 'affiliate') {
+      amount = normalizeAmount(req.body?.amount);
+      if (amount === null) {
+        return res.status(400).json({ message: `Invalid amount (0 < amount <= ${MAX_TX_AMOUNT})` });
+      }
+    }
 
     if (!policy.canWithdraw) {
       return res.status(403).json({
         message:
           persona === 'buyer'
-            ? 'Buyer marketplace credit cannot be withdrawn or transferred. Eligible refunds are returned to the original payment method.'
+            ? require('../finance/withdrawable-balance').BUYER_MESSAGE
             : 'Withdrawal is not available for this account.',
         code: policy.unavailableCode || 'WITHDRAW_UNAVAILABLE',
         persona: pickPrimary(personas),
@@ -225,140 +253,201 @@ router.post('/withdraw', authenticate, async (req, res, next) => {
       } else payoutAccount = resolved.account;
     }
 
-    // Affiliate persona: min balance + min withdrawal 2,000,000 VND, 10% PIT per withdrawal.
-    let affiliateQuote = null;
-    if (persona === 'affiliate') {
-      const { quoteAffiliateWithdrawal } = require('../finance/affiliate-engine');
-      const slice = await affiliateSlice(req.user._id);
-      const overall = await getAvailableBalance(req.user._id);
-      affiliateQuote = quoteAffiliateWithdrawal({
-        amount,
-        available: Math.min(slice.available, overall.available),
-        currency: 'USD',
-        pitCommitmentApproved: !!policy.pitCommitmentApproved,
-      });
-      if (!affiliateQuote.ok) {
-        return res.status(affiliateQuote.code === 'AFFILIATE_INSUFFICIENT' ? 400 : 403).json({
-          message: affiliateQuote.message,
-          code: affiliateQuote.code,
-          persona,
-          minAmountVnd: affiliateQuote.minWithdrawVnd,
-          amountVnd: affiliateQuote.amountVnd,
-          availableVnd: affiliateQuote.availableVnd,
-          available: affiliateQuote.available,
+    // One lock covers the earnings read and the withdraw insert. A second request
+    // waits until the pending withdraw is stored, so the same earnings are not paid twice.
+    const { withWalletLock } = require('../utils/wallet-lock');
+    const settled = await withWalletLock(req.user._id, async () => {
+      // Affiliate persona: no commercial minimum. USD with 2 decimals; sub-cent amounts are precision.
+      // PIT uses the configured rate unless an approved Mẫu 08/CK-TNCN applies.
+      let affiliateQuote = null;
+      let payAmount = amount;
+      if (persona === 'affiliate') {
+        const { quoteAffiliateWithdrawal } = require('../finance/affiliate-engine');
+        const slice = await affiliateSlice(req.user._id);
+        const overall = await getAvailableBalance(req.user._id);
+        affiliateQuote = quoteAffiliateWithdrawal({
+          amount: req.body?.amount,
+          available: Math.min(slice.available, overall.available),
+          currency: 'USD',
+          digits: 2,
+          pitCommitmentApproved: !!policy.pitCommitmentApproved,
         });
-      }
-    }
-
-    // Employer / HR minimum balance (VND threshold, quoted in USD for the ledger).
-    const minAmount = persona === 'affiliate' ? 0 : Number(policy.minAmount || 0);
-    if (minAmount > 0) {
-      const { balance } = await getAvailableBalance(req.user._id);
-      if (balance < minAmount) {
-        return res.status(403).json({
-          message: `Minimum balance ${policy.minAmountVnd.toLocaleString('vi-VN')} VND (~$${minAmount.toFixed(2)}) required to withdraw.`,
-          code: 'MIN_BALANCE_REQUIRED',
-          persona,
-          minAmount,
-          minAmountVnd: policy.minAmountVnd,
-          minAmountCurrency: policy.minAmountCurrency,
-          balance,
-        });
-      }
-    }
-
-    const summaryNow = await getAvailableBalance(req.user._id);
-    const { held, balance } = summaryNow;
-    let available = summaryNow.available;
-    if (persona !== 'affiliate' && req.user.role !== 'admin') {
-      // Reserve the affiliate slice: it can only leave through the affiliate persona (PIT applies).
-      const slice = await affiliateSlice(req.user._id);
-      available = Math.max(0, Math.round((available - slice.available) * 100) / 100);
-    }
-    if (amount > available) {
-      return res.status(400).json({
-        message: `Insufficient available balance. Ledger ${balance.toFixed(2)}, held ${held.toFixed(2)} (48h protection or open dispute on those orders only), available ${available.toFixed(2)}.`,
-        code: 'PAYOUT_HELD',
-        balance,
-        held,
-        available,
-      });
-    }
-
-    // Seller-like personas additionally need a VERIFIED seller profile (buyers only need eKYC).
-    const needsSellerProfile = persona !== 'employer' && persona !== 'buyer' && persona !== 'affiliate' && req.user.role !== 'admin';
-    if (needsSellerProfile) {
-      const SellerProfile = require('../models/SellerProfile');
-      const profile = await SellerProfile.findOne({ user: req.user._id }).lean();
-      const { canPayoutSeller } = require('../finance/payout-engine');
-      const gate = canPayoutSeller(profile);
-      if (!gate.ok) {
-        return res.status(403).json({
-          message: 'Payout on hold until seller verification/compliance is complete.',
-          code: gate.holdReason || 'PAYOUT_ON_HOLD',
-        });
-      }
-    }
-
-    const quote = affiliateQuote
-      ? { gross: affiliateQuote.gross, platformFee: 0, tax: affiliateQuote.pitAmount, net: affiliateQuote.net, totalFee: affiliateQuote.pitAmount, chargeAtWithdraw: true }
-      : quoteWithdrawal(amount, policy);
-    const { createPayout } = require('../finance/payout-engine');
-    const { getExchangeRates, fxAudit } = require('../finance/exchange-rate');
-    const fx = await getExchangeRates();
-    const { payout } = await createPayout({
-      sellerId: req.user._id,
-      payableAmount: quote.net,
-      taxAmount: quote.tax,
-      commissionAmount: quote.platformFee,
-      currency: 'USD',
-      actorId: req.user._id,
-      idempotencyKey: `wd_${req.user._id}_${amount}_${Date.now()}`,
-      requireSellerProfile: persona !== 'buyer' && persona !== 'affiliate',
-    });
-    if (payout.status === 'ON_HOLD' && needsSellerProfile) {
-      return res.status(403).json({
-        message: payout.holdReason || 'Payout on hold',
-        code: payout.holdReason,
-        payoutId: payout.payoutId,
-      });
-    }
-
-    const tx = await WalletTx.create({
-      user: req.user._id,
-      type: 'withdraw',
-      amount: quote.gross,
-      currency: 'USD',
-      status: 'pending',
-      payoutId: payout.payoutId,
-      note: `Payout ${payout.payoutId} · ${persona} · gross ${quote.gross} − fee ${quote.platformFee} − tax ${quote.tax} = net ${quote.net}`,
-      meta: {
-        ...fxAudit(fx),
-        channel: 'payout',
-        persona,
-        grossAmount: quote.gross,
-        platformFeeRate: policy.platformFeeRate,
-        platformFee: quote.platformFee,
-        taxRate: policy.taxRate,
-        tax: quote.tax,
-        netAmount: quote.net,
-        ...(payoutAccount ? { payoutAccount } : {}),
-        ...(affiliateQuote
-          ? {
-              pitRule: affiliateQuote.pitRule,
-              pitRate: affiliateQuote.pitRate,
-              pitAmount: affiliateQuote.pitAmount,
+        if (!affiliateQuote.ok) {
+          return {
+            status: 400,
+            body: {
+              message: affiliateQuote.message,
+              code: affiliateQuote.code,
+              persona,
+              minAmountVnd: 0,
               amountVnd: affiliateQuote.amountVnd,
-              pitAmountVnd: affiliateQuote.pitAmountVnd,
-              pitCommitmentApplied: affiliateQuote.pitCommitmentApplied,
-            }
-          : {}),
-      },
+              availableVnd: affiliateQuote.availableVnd,
+              available: affiliateQuote.available,
+            },
+          };
+        }
+        payAmount = affiliateQuote.gross;
+        if (!(payAmount > 0) || payAmount > MAX_TX_AMOUNT) {
+          return { status: 400, body: { message: `Invalid amount (0 < amount <= ${MAX_TX_AMOUNT})` } };
+        }
+      }
+
+      // Employer / HR minimum balance (VND threshold, quoted in USD for the ledger).
+      const minAmount = persona === 'affiliate' ? 0 : Number(policy.minAmount || 0);
+      if (minAmount > 0) {
+        const { balance } = await getAvailableBalance(req.user._id);
+        if (balance < minAmount) {
+          return {
+            status: 403,
+            body: {
+              message: `Minimum balance ${policy.minAmountVnd.toLocaleString('vi-VN')} VND (~$${minAmount.toFixed(2)}) required to withdraw.`,
+              code: 'MIN_BALANCE_REQUIRED',
+              persona,
+              minAmount,
+              minAmountVnd: policy.minAmountVnd,
+              minAmountCurrency: policy.minAmountCurrency,
+              balance,
+            },
+          };
+        }
+      }
+
+      const summaryNow = await getAvailableBalance(req.user._id);
+      const { held, balance } = summaryNow;
+      let available = summaryNow.available;
+      if (persona !== 'affiliate') {
+        // Reserve the affiliate slice: it can only leave through the affiliate persona (PIT applies).
+        // Seller net snapshots are already net of affiliate commission, so this does not subtract those earnings again.
+        const slice = await affiliateSlice(req.user._id);
+        available = Math.max(0, Math.round((available - slice.available) * 100) / 100);
+      }
+      if (persona !== 'affiliate') {
+        const { payoutCap, loadSellerEarnedAvailable, PREPAID_MESSAGE } = require('../finance/withdrawable-balance');
+        const earned = await loadSellerEarnedAvailable(req.user._id);
+        const cap = payoutCap({ persona, amount: payAmount, poolAvailable: available, earnedAvailable: earned.available });
+        if (!cap.ok && cap.code === 'PREPAID_NOT_WITHDRAWABLE') {
+          return {
+            status: 403,
+            body: {
+              message: cap.message || PREPAID_MESSAGE,
+              code: 'PREPAID_NOT_WITHDRAWABLE',
+              persona,
+              payable: cap.payable,
+              balance,
+              held,
+              available,
+            },
+          };
+        }
+        if (!cap.ok && cap.code === 'PAYOUT_HELD') {
+          return {
+            status: 400,
+            body: {
+              message: `Insufficient available balance. Ledger ${balance.toFixed(2)}, held ${held.toFixed(2)} (48h protection or open dispute on those orders only), available ${available.toFixed(2)}.`,
+              code: 'PAYOUT_HELD',
+              payable: cap.payable,
+              balance,
+              held,
+              available,
+            },
+          };
+        }
+      } else if (payAmount > available) {
+        return {
+          status: 400,
+          body: {
+            message: `Insufficient available balance. Ledger ${balance.toFixed(2)}, held ${held.toFixed(2)} (48h protection or open dispute on those orders only), available ${available.toFixed(2)}.`,
+            code: 'PAYOUT_HELD',
+            balance,
+            held,
+            available,
+          },
+        };
+      }
+
+      // Seller-like personas additionally need a VERIFIED seller profile. Buyer persona cannot cash out.
+      const needsSellerProfile = persona !== 'employer' && persona !== 'buyer' && persona !== 'affiliate' && req.user.role !== 'admin';
+      if (needsSellerProfile) {
+        const SellerProfile = require('../models/SellerProfile');
+        const profile = await SellerProfile.findOne({ user: req.user._id }).lean();
+        const { canPayoutSeller } = require('../finance/payout-engine');
+        const gate = canPayoutSeller(profile);
+        if (!gate.ok) {
+          return {
+            status: 403,
+            body: {
+              message: 'Payout on hold until seller verification/compliance is complete.',
+              code: gate.holdReason || 'PAYOUT_ON_HOLD',
+            },
+          };
+        }
+      }
+
+      const quote = affiliateQuote
+        ? { gross: affiliateQuote.gross, platformFee: 0, tax: affiliateQuote.pitAmount, net: affiliateQuote.net, totalFee: affiliateQuote.pitAmount, chargeAtWithdraw: true }
+        : quoteWithdrawal(payAmount, policy);
+      const { createPayout } = require('../finance/payout-engine');
+      const { getExchangeRates, fxAudit } = require('../finance/exchange-rate');
+      const fx = await getExchangeRates();
+      const { payout } = await createPayout({
+        sellerId: req.user._id,
+        payableAmount: quote.net,
+        taxAmount: quote.tax,
+        commissionAmount: quote.platformFee,
+        currency: 'USD',
+        actorId: req.user._id,
+        idempotencyKey: `wd_${req.user._id}_${payAmount}_${Date.now()}`,
+        requireSellerProfile: persona !== 'buyer' && persona !== 'affiliate',
+      });
+      if (payout.status === 'ON_HOLD' && needsSellerProfile) {
+        return {
+          status: 403,
+          body: {
+            message: payout.holdReason || 'Payout on hold',
+            code: payout.holdReason,
+            payoutId: payout.payoutId,
+          },
+        };
+      }
+
+      const tx = await WalletTx.create({
+        user: req.user._id,
+        type: 'withdraw',
+        amount: quote.gross,
+        currency: 'USD',
+        status: 'pending',
+        payoutId: payout.payoutId,
+        note: `Payout ${payout.payoutId} · ${persona} · gross ${quote.gross} − fee ${quote.platformFee} − tax ${quote.tax} = net ${quote.net}`,
+        meta: {
+          ...fxAudit(fx),
+          channel: 'payout',
+          persona,
+          grossAmount: quote.gross,
+          platformFeeRate: policy.platformFeeRate,
+          platformFee: quote.platformFee,
+          taxRate: policy.taxRate,
+          tax: quote.tax,
+          netAmount: quote.net,
+          ...(payoutAccount ? { payoutAccount } : {}),
+          ...(affiliateQuote
+            ? {
+                pitRule: affiliateQuote.pitRule,
+                pitRate: affiliateQuote.pitRate,
+                pitAmount: affiliateQuote.pitAmount,
+                amountVnd: affiliateQuote.amountVnd,
+                pitAmountVnd: affiliateQuote.pitAmountVnd,
+                pitCommitmentApplied: affiliateQuote.pitCommitmentApplied,
+              }
+            : {}),
+        },
+      });
+      return { status: 201, tx, payout, quote };
     });
+    if (settled.status !== 201) return res.status(settled.status).json(settled.body);
     res.status(201).json({
-      ...mapWallet(tx),
-      payoutId: payout.payoutId,
-      quote,
+      ...mapWallet(settled.tx),
+      payoutId: settled.payout.payoutId,
+      quote: settled.quote,
       policy: mapPolicy(policy),
     });
   } catch (err) {
