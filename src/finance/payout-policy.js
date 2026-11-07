@@ -12,8 +12,8 @@ const { currentVndPerUsd } = require('./exchange-rate');
  *                  (individual 7% digital / 1.5% goods withheld; household business & company 0%)
  * - talent       : talent profile earnings — same as seller
  * - freelancer   : accepted job applicant — same as seller
- * - affiliate    : affiliate commissions — withdrawable only when the affiliate balance and the
- *                  withdrawal are >= 2,000,000 VND; 10% PIT withheld per withdrawal, 0% with an
+ * - affiliate    : affiliate commissions — no commercial minimum; any positive eligible balance
+ *                  (USD, 2 decimals); configured PIT rate per withdrawal (default 10%), 0% with an
  *                  approved Mẫu 08/CK-TNCN
  * - employer / HR: job poster — 1% fee, minimum balance before withdrawal
  * - admin        : bypass (ops)
@@ -111,9 +111,9 @@ function policyFor(persona, { sellerType, sellerTypeKnown, productKinds, pitComm
       taxRate,
       totalFeeRate: taxRate,
       chargeAtWithdraw: true,
-      minAmount: roundMoney(cfg.pit.minWithdrawVnd / cfg.pit.vndPerUsd),
+      minAmount: 0,
       minAmountCurrency: 'USD',
-      minAmountVnd: cfg.pit.minWithdrawVnd,
+      minAmountVnd: 0,
       holdHours: Number(process.env.PAYOUT_HOLD_HOURS || 48) || 48,
       requiresNoDispute: true,
       pitRule: !cfg.pit.enabled ? '' : exempt ? 'EXEMPT_CAM_KET_08_CK_TNCN' : 'VN_PIT_10PCT_AFFILIATE_WITHDRAWAL',

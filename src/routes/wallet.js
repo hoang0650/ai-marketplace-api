@@ -16,7 +16,7 @@ const router = express.Router();
 
 /**
  * Affiliate commissions sit in the same wallet but are withdrawn only under the affiliate persona
- * (min 2,000,000 VND, 10% PIT). Other personas cannot spend that slice on withdrawal.
+ * (no commercial minimum, configured PIT rate). Other personas cannot spend that slice on withdrawal.
  */
 async function affiliateSlice(userId) {
   const { getAffiliateBalance } = require('../finance/affiliate-service');
@@ -39,13 +39,15 @@ router.get('/summary', authenticate, async (req, res, next) => {
     let affiliate = null;
     if (personas.includes('affiliate')) {
       const { affiliateConfig } = require('../config/affiliate');
+      const { affiliateCanWithdraw } = require('../finance/affiliate-engine');
       const cfg = affiliateConfig();
       const slice = await affiliateSlice(req.user._id);
+      const identityVerified = req.user?.role === 'admin' || (req.user?.kyc?.status || req.user?.kycStatus) === 'verified';
       affiliate = {
         ...slice,
-        minWithdrawVnd: cfg.pit.minWithdrawVnd,
+        minWithdrawVnd: 0,
         availableVnd: Math.round(slice.available * cfg.pit.vndPerUsd),
-        canWithdraw: slice.available * cfg.pit.vndPerUsd >= cfg.pit.minWithdrawVnd,
+        canWithdraw: affiliateCanWithdraw({ available: slice.available, identityVerified }),
       };
     }
     res.json({
@@ -176,12 +178,17 @@ router.put('/payout-account', authenticate, async (req, res, next) => {
 
 router.post('/withdraw', authenticate, async (req, res, next) => {
   try {
-    const amount = normalizeAmount(req.body?.amount);
-    if (amount === null) {
-      return res.status(400).json({ message: `Invalid amount (0 < amount <= ${MAX_TX_AMOUNT})` });
-    }
-
     const { personas, persona, policy } = await resolvePayoutPersona(req.user, req.body?.persona);
+
+    // Affiliate amounts are checked by quoteAffiliateWithdrawal (precision, not a commercial minimum).
+    // Other personas keep the shared USD normalizer, including seller and employer minimums below.
+    let amount = null;
+    if (persona !== 'affiliate') {
+      amount = normalizeAmount(req.body?.amount);
+      if (amount === null) {
+        return res.status(400).json({ message: `Invalid amount (0 < amount <= ${MAX_TX_AMOUNT})` });
+      }
+    }
 
     if (!policy.canWithdraw) {
       return res.status(403).json({
@@ -225,28 +232,34 @@ router.post('/withdraw', authenticate, async (req, res, next) => {
       } else payoutAccount = resolved.account;
     }
 
-    // Affiliate persona: min balance + min withdrawal 2,000,000 VND, 10% PIT per withdrawal.
+    // Affiliate persona: no commercial minimum. USD with 2 decimals; sub-cent amounts are precision.
+    // PIT uses the configured rate unless an approved Mẫu 08/CK-TNCN applies.
     let affiliateQuote = null;
     if (persona === 'affiliate') {
       const { quoteAffiliateWithdrawal } = require('../finance/affiliate-engine');
       const slice = await affiliateSlice(req.user._id);
       const overall = await getAvailableBalance(req.user._id);
       affiliateQuote = quoteAffiliateWithdrawal({
-        amount,
+        amount: req.body?.amount,
         available: Math.min(slice.available, overall.available),
         currency: 'USD',
+        digits: 2,
         pitCommitmentApproved: !!policy.pitCommitmentApproved,
       });
       if (!affiliateQuote.ok) {
-        return res.status(affiliateQuote.code === 'AFFILIATE_INSUFFICIENT' ? 400 : 403).json({
+        return res.status(400).json({
           message: affiliateQuote.message,
           code: affiliateQuote.code,
           persona,
-          minAmountVnd: affiliateQuote.minWithdrawVnd,
+          minAmountVnd: 0,
           amountVnd: affiliateQuote.amountVnd,
           availableVnd: affiliateQuote.availableVnd,
           available: affiliateQuote.available,
         });
+      }
+      amount = affiliateQuote.gross;
+      if (!(amount > 0) || amount > MAX_TX_AMOUNT) {
+        return res.status(400).json({ message: `Invalid amount (0 < amount <= ${MAX_TX_AMOUNT})` });
       }
     }
 

@@ -31,9 +31,10 @@ function publicConfig() {
     pit: {
       enabled: cfg.pit.enabled,
       rate: cfg.pit.rate,
-      thresholdVnd: cfg.pit.minWithdrawVnd,
-      /** Withdraw only when the affiliate balance and the amount are >= minWithdrawVnd; 10% PIT per withdrawal, 0% with an approved Mẫu 08/CK-TNCN. */
-      minWithdrawVnd: cfg.pit.minWithdrawVnd,
+      /** Retired alias of the old commercial minimum. Always 0. Not a tax threshold and not a payout floor. */
+      thresholdVnd: 0,
+      /** Retired commercial minimum. Always 0. Any strictly positive eligible balance may be withdrawn. */
+      minWithdrawVnd: 0,
       rule: 'AT_WITHDRAWAL',
       commitmentForm: 'Mẫu 08/CK-TNCN',
       commitmentExempts: cfg.pit.commitmentExempts,
@@ -146,6 +147,7 @@ router.get('/', authenticate, async (req, res, next) => {
     const byId = new Map(orders.map((o) => [String(o._id), o]));
     const commission = summarize(rows, byId);
     const { getAffiliateBalance } = require('../finance/affiliate-service');
+    const { affiliateCanWithdraw } = require('../finance/affiliate-engine');
     const { isPitCommitmentApproved } = require('../utils/pit-commitment');
     const cfg = affiliateConfig();
     const slice = await getAffiliateBalance(user._id).catch(() => ({ balance: 0, available: 0, withdrawn: 0, held: 0, earned: 0 }));
@@ -156,11 +158,12 @@ router.get('/', authenticate, async (req, res, next) => {
       .lean()
       .catch(() => []);
     commission.pitWithheld = roundMoney(commission.pitWithheld + wds.reduce((t, w) => t + (Number(w.meta?.pitAmount) || 0), 0));
+    const identityVerified = user.role === 'admin' || (user.kyc?.status || 'none') === 'verified';
     const withdrawal = {
       ...slice,
-      minWithdrawVnd: cfg.pit.minWithdrawVnd,
+      minWithdrawVnd: 0,
       availableVnd: Math.round(slice.available * cfg.pit.vndPerUsd),
-      canWithdraw: slice.available * cfg.pit.vndPerUsd >= cfg.pit.minWithdrawVnd && (user.kyc?.status || 'none') === 'verified',
+      canWithdraw: affiliateCanWithdraw({ available: slice.available, identityVerified }),
       pitRate: cfg.pit.enabled && !exempt ? cfg.pit.rate : 0,
       pitCommitmentApplied: exempt,
       persona: 'affiliate',

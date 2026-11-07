@@ -7,10 +7,12 @@ const {
   effectiveAffiliateRate,
   calculateAffiliateCommission,
   quoteAffiliateWithdrawal,
+  affiliateCanWithdraw,
 } = require('../../src/finance/affiliate-engine');
 const { pickAttribution, isCommissionHeld, computeAffiliateBalance } = require('../../src/finance/affiliate-service');
-const { policyFor } = require('../../src/finance/payout-policy');
+const { policyFor, EMPLOYER_MIN_VND } = require('../../src/finance/payout-policy');
 const { affiliateConfig, AFFILIATE_MAX_RATE } = require('../../src/config/affiliate');
+const { taxConfig } = require('../../src/config/tax');
 
 const RULES = [{ rate: 0.2, status: 'ACTIVE', appliesTo: 'THIRD_PARTY_SELLER' }];
 const sale = (extra = {}) =>
@@ -99,17 +101,24 @@ describe('settlement with affiliate commission (borne by the seller)', () => {
   });
 });
 
-describe('affiliate PIT at withdrawal: min 2,000,000 VND, 10% per withdrawal, 0% with Mẫu 08/CK-TNCN', () => {
+describe('affiliate PIT at withdrawal: no commercial minimum, configured rate, 0% with Mẫu 08/CK-TNCN', () => {
   const cfg = affiliateConfig({});
+  const usdCfg = affiliateConfig({ AFFILIATE_VND_PER_USD: '25000', AFFILIATE_MIN_WITHDRAW_VND: '2000000' });
   const q = (o) => quoteAffiliateWithdrawal({ currency: 'VND', digits: 0, config: cfg, ...o });
-  test('defaults: 30 days, 10%, minimum withdrawal 2,000,000 VND', () => {
+  const usd = (o) => quoteAffiliateWithdrawal({ currency: 'USD', digits: 2, config: usdCfg, ...o });
+  test('defaults: 30 days, configured 10% PIT, no withdrawal minimum', () => {
     assert.equal(cfg.attributionDays, 30);
     assert.equal(cfg.pit.rate, 0.1);
-    assert.equal(cfg.pit.minWithdrawVnd, 2_000_000);
-    assert.equal(cfg.pit.thresholdVnd, 2_000_000);
+    assert.equal(cfg.pit.enabled, true);
+    assert.equal(cfg.pit.minWithdrawVnd, 0);
+    assert.equal(cfg.pit.thresholdVnd, 0);
     assert.equal(cfg.pit.commitmentExempts, true);
     assert.equal(affiliateConfig({ AFFILIATE_ATTRIBUTION_DAYS: '7' }).attributionDays, 7);
-    assert.equal(affiliateConfig({ AFFILIATE_MIN_WITHDRAW_VND: '3000000' }).pit.minWithdrawVnd, 3_000_000);
+    assert.equal(affiliateConfig({ AFFILIATE_PIT_RATE: '0.1' }).pit.rate, 0.1);
+    const persisted = affiliateConfig({ AFFILIATE_MIN_WITHDRAW_VND: '3000000' });
+    assert.equal(persisted.pit.minWithdrawVnd, 0);
+    assert.equal(persisted.pit.thresholdVnd, 0);
+    assert.equal(persisted.pit.rate, 0.1);
   });
   test('commissions are credited gross - no PIT at credit time', () => {
     const c = calculateAffiliateCommission({ baseAmount: 10_000_000, rate: 0.25, currency: 'VND', digits: 0, config: cfg });
@@ -126,33 +135,139 @@ describe('affiliate PIT at withdrawal: min 2,000,000 VND, 10% per withdrawal, 0%
     assert.equal(w.pitAmount, 250_000);
     assert.equal(w.net, 2_250_000);
     assert.equal(w.pitRule, 'VN_PIT_10PCT_AFFILIATE_WITHDRAWAL');
+    assert.equal(w.minWithdrawVnd, 0);
   });
-  test('balance below 2,000,000 VND cannot withdraw; amount below 2,000,000 is rejected; exactly 2M is ok', () => {
-    assert.equal(q({ amount: 1_500_000, available: 1_999_999 }).code, 'AFFILIATE_MIN_BALANCE');
-    assert.equal(q({ amount: 1_999_999, available: 5_000_000 }).code, 'AFFILIATE_MIN_WITHDRAWAL');
-    assert.equal(q({ amount: 6_000_000, available: 5_000_000 }).code, 'AFFILIATE_INSUFFICIENT');
+  test('below 2,000,000 VND and exactly 2,000,000 VND are allowed when available', () => {
+    const below = q({ amount: 1_500_000, available: 1_999_999 });
+    assert.equal(below.ok, true);
+    assert.equal(below.code, undefined);
+    assert.equal(below.pitAmount, 150_000);
+    assert.equal(below.net, 1_350_000);
+    assert.notEqual(below.code, 'AFFILIATE_MIN_BALANCE');
+    const partial = q({ amount: 1_999_999, available: 5_000_000 });
+    assert.equal(partial.ok, true);
+    assert.notEqual(partial.code, 'AFFILIATE_MIN_WITHDRAWAL');
     const at = q({ amount: 2_000_000, available: 2_000_000 });
     assert.equal(at.ok, true);
     assert.equal(at.pitAmount, 200_000);
     assert.equal(at.net, 1_800_000);
+    const one = q({ amount: 1, available: 1 });
+    assert.equal(one.ok, true);
+    assert.equal(one.amountVnd, 1);
   });
-  test('approved Mẫu 08/CK-TNCN -> 0% PIT (minimum still applies)', () => {
+  test('zero, negative, and non-finite amounts are rejected', () => {
+    for (const amount of [0, -1, -1_500_000, -0]) {
+      const w = q({ amount, available: 5_000_000 });
+      assert.equal(w.ok, false);
+      assert.equal(w.code, 'AFFILIATE_AMOUNT_INVALID');
+      assert.equal(w.message, 'Affiliate withdrawal amount must be greater than 0.');
+    }
+    for (const amount of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, 'nope', null, undefined]) {
+      const w = q({ amount, available: 5_000_000 });
+      assert.equal(w.ok, false);
+      assert.equal(w.code, 'AFFILIATE_AMOUNT_INVALID');
+      assert.equal(w.message, 'Affiliate withdrawal amount must be a finite number greater than 0.');
+    }
+  });
+  test('invalid precision is not a commercial minimum', () => {
+    const fractional = q({ amount: 1_500_000.5, available: 5_000_000 });
+    assert.equal(fractional.ok, false);
+    assert.equal(fractional.code, 'AFFILIATE_AMOUNT_PRECISION');
+    assert.equal(fractional.message, 'Affiliate withdrawal must be a whole number of VND.');
+    const dust = usd({ amount: 0.004, available: 100 });
+    assert.equal(dust.ok, false);
+    assert.equal(dust.code, 'AFFILIATE_AMOUNT_PRECISION');
+    assert.equal(dust.message, 'Affiliate withdrawal amount rounds to 0.00 USD. This is below wallet precision, not a minimum payout.');
+    assert.equal(dust.message.includes('2,000,000'), false);
+    const cents = usd({ amount: 10.129, available: 100 });
+    assert.equal(cents.code, 'AFFILIATE_AMOUNT_PRECISION');
+    assert.equal(cents.message, 'Affiliate withdrawal amount must be in USD with at most 2 decimal places.');
+    const oneDong = usd({ amount: 0.00004, available: 80 });
+    assert.equal(oneDong.code, 'AFFILIATE_AMOUNT_PRECISION');
+  });
+  test('amount above the available balance is rejected; the full available USD balance is accepted', () => {
+    assert.equal(q({ amount: 6_000_000, available: 5_000_000 }).code, 'AFFILIATE_INSUFFICIENT');
+    assert.equal(usd({ amount: 80.01, available: 80 }).code, 'AFFILIATE_INSUFFICIENT');
+    const full = usd({ amount: 4.01, available: 4.01 });
+    assert.equal(full.ok, true);
+    assert.equal(full.gross, 4.01);
+    assert.equal(full.pitRate, 0.1);
+  });
+  test('approved Mẫu 08/CK-TNCN -> 0% PIT, including amounts below 2,000,000 VND', () => {
     const w = q({ amount: 2_500_000, available: 2_500_000, pitCommitmentApproved: true });
     assert.equal(w.pitAmount, 0);
     assert.equal(w.net, 2_500_000);
     assert.equal(w.pitRule, 'EXEMPT_CAM_KET_08_CK_TNCN');
     assert.equal(w.pitCommitmentApplied, true);
-    assert.equal(q({ amount: 1_000_000, available: 1_000_000, pitCommitmentApproved: true }).code, 'AFFILIATE_MIN_BALANCE');
+    const small = q({ amount: 10_000, available: 10_000, pitCommitmentApproved: true });
+    assert.equal(small.ok, true);
+    assert.equal(small.pitAmount, 0);
+    assert.equal(small.net, 10_000);
   });
-  test('USD wallet amounts are converted to VND for the minimum; PIT can be disabled', () => {
-    const usdCfg = affiliateConfig({ AFFILIATE_VND_PER_USD: '25000' });
-    assert.equal(quoteAffiliateWithdrawal({ amount: 70, available: 100, config: usdCfg }).code, 'AFFILIATE_MIN_WITHDRAWAL');
-    const ok = quoteAffiliateWithdrawal({ amount: 100, available: 100, config: usdCfg });
-    assert.equal(ok.amountVnd, 2_500_000);
-    assert.equal(ok.pitAmount, 10);
-    assert.equal(ok.net, 90);
-    const off = quoteAffiliateWithdrawal({ amount: 2_500_000, available: 2_500_000, currency: 'VND', digits: 0, config: affiliateConfig({ AFFILIATE_PIT_ENABLED: 'false' }) });
+  test('USD amounts below and at 2,000,000 VND use the configured PIT rate; PIT can be disabled', () => {
+    const below = usd({ amount: 40, available: 60 });
+    assert.equal(below.ok, true);
+    assert.equal(below.amountVnd, 1_000_000);
+    assert.equal(below.pitAmount, 4);
+    assert.equal(below.net, 36);
+    assert.equal(below.minWithdrawVnd, 0);
+    const exact = usd({ amount: 80, available: 80 });
+    assert.equal(exact.ok, true);
+    assert.equal(exact.amountVnd, 2_000_000);
+    assert.equal(exact.pitAmount, 8);
+    assert.equal(exact.net, 72);
+    const cent = usd({ amount: 0.01, available: 0.01 });
+    assert.equal(cent.ok, true);
+    assert.equal(cent.gross, 0.01);
+    assert.equal(cent.pitRate, 0.1);
+    assert.equal(cent.pitAmount, 0);
+    assert.equal(cent.net, 0.01);
+    const fullBalance = usd({ amount: '4.01', available: 4.01 });
+    assert.equal(fullBalance.ok, true);
+    assert.equal(fullBalance.gross, 4.01);
+    const off = quoteAffiliateWithdrawal({
+      amount: 2_500_000,
+      available: 2_500_000,
+      currency: 'VND',
+      digits: 0,
+      config: affiliateConfig({ AFFILIATE_PIT_ENABLED: 'false', AFFILIATE_MIN_WITHDRAW_VND: '2000000' }),
+    });
+    assert.equal(off.ok, true);
     assert.equal(off.pitAmount, 0);
+    assert.equal(off.pitRate, 0);
+  });
+  test('a stored 2,000,000 VND minimum does not reject a smaller withdrawal and is not deleted', () => {
+    const stale = {
+      pit: {
+        enabled: true,
+        rate: 0.1,
+        minWithdrawVnd: 2_000_000,
+        thresholdVnd: 2_000_000,
+        commitmentExempts: true,
+        vndPerUsd: 25000,
+      },
+    };
+    const w = quoteAffiliateWithdrawal({ amount: 40, available: 80, currency: 'USD', digits: 2, config: stale });
+    assert.equal(w.ok, true);
+    assert.equal(w.minWithdrawVnd, 0);
+    assert.equal(w.pitAmount, 4);
+    assert.equal(stale.pit.minWithdrawVnd, 2_000_000);
+    assert.equal(stale.pit.thresholdVnd, 2_000_000);
+    const prev = process.env.AFFILIATE_MIN_WITHDRAW_VND;
+    process.env.AFFILIATE_MIN_WITHDRAW_VND = '2000000';
+    try {
+      const live = affiliateConfig();
+      assert.equal(live.pit.minWithdrawVnd, 0);
+      assert.equal(live.pit.thresholdVnd, 0);
+      assert.equal(process.env.AFFILIATE_MIN_WITHDRAW_VND, '2000000');
+      const policy = policyFor('affiliate');
+      assert.equal(policy.minAmountVnd, 0);
+      assert.equal(policy.minAmount, 0);
+      assert.equal(policy.taxRate, 0.1);
+    } finally {
+      if (prev === undefined) delete process.env.AFFILIATE_MIN_WITHDRAW_VND;
+      else process.env.AFFILIATE_MIN_WITHDRAW_VND = prev;
+    }
   });
   test('affiliate balance = live commissions - affiliate withdrawals; held commissions not withdrawable', () => {
     const b = computeAffiliateBalance({ earned: 3_000_000, held: 500_000, withdrawn: 1_000_000 });
@@ -160,13 +275,32 @@ describe('affiliate PIT at withdrawal: min 2,000,000 VND, 10% per withdrawal, 0%
     assert.equal(b.available, 1_500_000);
     assert.equal(computeAffiliateBalance({ earned: 100, held: 0, withdrawn: 200 }).available, 0);
   });
-  test('affiliate persona policy: no platform fee, 10% PIT, min 2,000,000 VND; 0% with Mẫu 08', () => {
+  test('withdrawal.canWithdraw is identity plus a positive eligible balance', () => {
+    assert.equal(affiliateCanWithdraw({ available: 40, identityVerified: true }), true);
+    assert.equal(affiliateCanWithdraw({ available: 0.01, identityVerified: true }), true);
+    assert.equal(affiliateCanWithdraw({ available: 80, identityVerified: false }), false);
+    assert.equal(affiliateCanWithdraw({ available: 0, identityVerified: true }), false);
+    assert.equal(affiliateCanWithdraw({ available: 0.004, identityVerified: true }), false);
+    assert.equal(affiliateCanWithdraw({ available: -10, identityVerified: true }), false);
+    assert.equal(affiliateCanWithdraw({ available: Number.NaN, identityVerified: true }), false);
+  });
+  test('affiliate persona policy: no platform fee, configured PIT, no minimum; seller and employer minimums stay', () => {
     const p = policyFor('affiliate');
     assert.equal(p.platformFeeRate, 0);
     assert.equal(p.taxRate, 0.1);
-    assert.equal(p.minAmountVnd, 2_000_000);
+    assert.equal(p.minAmountVnd, 0);
+    assert.equal(p.minAmount, 0);
     assert.equal(p.chargeAtWithdraw, true);
+    assert.equal(p.canWithdraw, true);
     assert.equal(policyFor('affiliate', { pitCommitmentApproved: true }).taxRate, 0);
+    assert.equal(policyFor('seller', { sellerType: 'INDIVIDUAL', sellerTypeKnown: true }).minAmountVnd, 0);
+    assert.equal(policyFor('employer').minAmountVnd, EMPLOYER_MIN_VND);
+    if (!process.env.WITHDRAW_EMPLOYER_MIN_VND) assert.equal(EMPLOYER_MIN_VND, 2_000_000);
+    assert.equal(taxConfig({}).individual.annualThresholdVnd, 100_000_000);
+    assert.equal(
+      taxConfig({ AFFILIATE_MIN_WITHDRAW_VND: '2000000' }).individual.annualThresholdVnd,
+      100_000_000,
+    );
   });
 });
 

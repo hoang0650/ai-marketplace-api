@@ -12,27 +12,32 @@ const AFFILIATE_MAX_RATE = 0.25;
 /**
  * Affiliate settings. Everything except the 25% ceiling is configurable by env.
  *
- * Affiliate payout + PIT (Luật Thuế TNCN), policy 2026-10 rev. 2:
+ * Affiliate payout + PIT (Luật Thuế TNCN), policy 2026-10 rev. 3:
  * - commissions are credited GROSS (no PIT at credit time);
- * - an affiliate can withdraw only when the withdrawable affiliate balance is >= 2,000,000 VND and
- *   each withdrawal is >= 2,000,000 VND (AFFILIATE_MIN_WITHDRAW_VND);
- * - every affiliate withdrawal (= one payment of income) has 10% PIT withheld, unless the affiliate has
- *   an APPROVED Mẫu 08/CK-TNCN for that year (then 0%).
+ * - there is no commercial withdrawal minimum. Any strictly positive eligible balance
+ *   (wallet USD, 2 decimal places) can be withdrawn. AFFILIATE_MIN_WITHDRAW_VND is retired:
+ *   a value still present in the environment or an old deploy config is ignored and is not deleted;
+ * - every affiliate withdrawal has the configured PIT rate withheld (default 10%), unless the
+ *   affiliate has an APPROVED Mẫu 08/CK-TNCN for that year (then 0%).
  * Year-end the platform issues PIT withholding certificates (chứng từ khấu trừ thuế TNCN).
  * Pending legal review.
+ *
+ * `thresholdVnd` used to alias the commercial minimum. It is always 0. It is not the seller
+ * annual revenue threshold (TAX_INDIVIDUAL_ANNUAL_THRESHOLD_VND) and it is not a payout floor.
  */
 function affiliateConfig(env = process.env) {
-  const minWithdrawVnd = Math.max(0, num(env.AFFILIATE_MIN_WITHDRAW_VND, 2_000_000));
+  // Read so a persisted deploy value is observed and then discarded. Do not delete the env entry.
+  void env.AFFILIATE_MIN_WITHDRAW_VND;
   return {
     maxRate: AFFILIATE_MAX_RATE,
     attributionDays: Math.max(1, Math.min(365, Math.floor(num(env.AFFILIATE_ATTRIBUTION_DAYS, 30)))),
     pit: {
       enabled: String(env.AFFILIATE_PIT_ENABLED ?? 'true').toLowerCase() !== 'false',
       rate: Math.max(0, Math.min(1, num(env.AFFILIATE_PIT_RATE, 0.1))),
-      /** Minimum withdrawable balance AND minimum single withdrawal, in VND. */
-      minWithdrawVnd,
-      /** Kept for API compatibility: equals minWithdrawVnd (PIT is applied at withdrawal). */
-      thresholdVnd: minWithdrawVnd,
+      /** Retired commercial minimum. Always 0; never read from AFFILIATE_MIN_WITHDRAW_VND. */
+      minWithdrawVnd: 0,
+      /** Retired alias of minWithdrawVnd. Always 0. Not a tax threshold and not a hidden floor. */
+      thresholdVnd: 0,
       /** An approved Mẫu 08/CK-TNCN commitment exempts the affiliate from withholding. */
       commitmentExempts: String(env.AFFILIATE_PIT_COMMITMENT_EXEMPTS ?? 'true').toLowerCase() !== 'false',
       vndPerUsd: vndRate(env, 'AFFILIATE_VND_PER_USD'),
