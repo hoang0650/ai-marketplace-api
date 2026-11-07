@@ -52,10 +52,11 @@ describe('buyer-usage', () => {
   it('summarizes items', () => {
     const s = summarizeUsageItems([
       { amount: 1.2, inputTokens: 10, outputTokens: 5, tokens: 15 },
-      { amount: 0.3, inputTokens: 2, outputTokens: 3, tokens: 5 },
+      { amount: 0.3, inputTokens: 2, outputTokens: 3, cachedTokens: 2, tokens: 5 },
     ]);
     assert.equal(s.requests, 2);
     assert.equal(s.totalCharged, 1.5);
     assert.equal(s.totalTokens, 20);
+    assert.equal(s.totalCachedTokens, 2);
   });
 });

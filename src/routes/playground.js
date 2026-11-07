@@ -34,6 +34,7 @@ const {
 } = require('../utils/license-keys');
 const LicenseKey = require('../models/LicenseKey');
 const aimxTts = require('../utils/aimx-tts');
+const { notifyUser } = require('../utils/notify');
 
 const router = express.Router();
 const history = require('../utils/inference-history');
@@ -289,7 +290,7 @@ router.post('/run', authenticate, history.recordRequest, async (req, res, next) 
         cost,
         holdId: hold?._id || null,
         funds: 'cap',
-        note: `Playground: ${product.name}`,
+        note: `Playground: ${product.name} · ${Number(usage.quantity) || 0} ${usage.unit || 'tokens'} · in ${inputTokens} / out ${outputTokens}`,
       });
       hold = null;
       platformFee = billed.platformFee;
@@ -308,6 +309,7 @@ router.post('/run', authenticate, history.recordRequest, async (req, res, next) 
       seller: sellerId,
       inputTokens,
       outputTokens,
+      cachedTokens: Number(usage.cached_tokens) || 0,
       cost: charged,
       platformFee,
       sellerNet,
@@ -331,6 +333,17 @@ router.post('/run', authenticate, history.recordRequest, async (req, res, next) 
       },
       { upsert: true }
     ).catch(() => {});
+
+    void notifyUser(buyerId, 'usage.completed', {
+      product: product.name,
+      quantity: Number(usage.quantity) || 0,
+      unit: usage.unit || 'tokens',
+      input: inputTokens,
+      output: outputTokens,
+      cache: Number(usage.cached_tokens) || 0,
+      amount: String(Number(Number(charged || 0).toFixed(6))),
+      currency: 'USD',
+    }, '/usage').catch(() => {});
 
     const output = buildOutput(data, {
       kind: voice ? 'audio' : ai.raw?.kind,
@@ -458,16 +471,28 @@ async function runGpuVoice(req, product, inferInput) {
     let charged = 0; let sellerNet = 0; let platformFee = 0;
     if (cost > 0 && !selfUse) {
       const billed = await chargeUsage({
-        buyerId, sellerId: product.creator, product, cost, holdId: hold?._id || null, funds: 'cap', note: `Playground: ${product.name}`,
+        buyerId, sellerId: product.creator, product, cost, holdId: hold?._id || null, funds: 'cap',
+        note: `Playground: ${product.name} · ${usage.quantity} characters · in 0 / out 0`,
       });
       hold = null;
       ({ charged, sellerNet, platformFee } = billed);
     }
     const event = await UsageEvent.create({
       deployment: null, product: product._id, buyer: buyerId, seller: product.creator, inputTokens: 0, outputTokens: 0,
+      cachedTokens: 0,
       cost: charged, platformFee, sellerNet, provider: 'aimx_gpu', unit: 'characters', quantity: usage.quantity, rawUsage: usage,
       source: 'playground', usageType: 'VOICE_TTS',
     });
+    void notifyUser(buyerId, 'usage.completed', {
+      product: product.name,
+      quantity: usage.quantity,
+      unit: 'characters',
+      input: 0,
+      output: 0,
+      cache: 0,
+      amount: String(Number(Number(charged || 0).toFixed(6))),
+      currency: 'USD',
+    }, '/usage').catch(() => {});
     putVoiceAudio(event._id, audio.buffer, audio.contentType);
     return {
       eventId: event._id,

@@ -6,6 +6,8 @@ const express = require('express');
 // Swap the upstream client and auth before the routes destructure them.
 const denglish = require('../../src/utils/denglish-client');
 const auth = require('../../src/middleware/auth');
+const notifications = require('../../src/utils/notify');
+notifications.notifyUser = async () => null;
 let inferImpl = async () => ({ ok: true, data: { text: 'hi' }, usage: { input_tokens: 10, output_tokens: 10, total_tokens: 20, unit: 'tokens' } });
 const inferCalls = [];
 denglish.inferWithFallback = async (args) => {
@@ -21,9 +23,41 @@ auth.authenticate = (req, _res, next) => {
 const { installFakeLedger, restoreStubs } = require('../helpers/fake-ledger');
 const Product = require('../../src/models/Product');
 const LicenseKey = require('../../src/models/LicenseKey');
+const InferenceRequest = require('../../src/models/InferenceRequest');
 const aimxTts = require('../../src/utils/aimx-tts');
 const playground = require('../../src/routes/playground');
 const { meterAndInfer } = require('../../src/utils/gateway-infer');
+
+describe('provider usage normalization', () => {
+  test('normalizes OpenAI and nested RunPod token usage', () => {
+    const openai = denglish.normalizeInferenceResult({
+      choices: [{ message: { content: 'hello' } }],
+      usage: { prompt_tokens: 12, completion_tokens: 5, total_tokens: 17 },
+    }, { prompt: 'hi' });
+    assert.deepEqual(
+      { input: openai.usage.input_tokens, output: openai.usage.output_tokens, total: openai.usage.total_tokens, unit: openai.usage.unit },
+      { input: 12, output: 5, total: 17, unit: 'tokens' }
+    );
+
+    const runpod = denglish.normalizeInferenceResult({
+      output: { usage: { input_tokens: 20, output_tokens: 9 } },
+    }, { prompt: 'hi' });
+    assert.equal(runpod.usage.input_tokens, 20);
+    assert.equal(runpod.usage.output_tokens, 9);
+    assert.equal(runpod.usage.total_tokens, 29);
+    assert.equal(runpod.usage.quantity, 29);
+  });
+
+  test('marks text token fallback as estimated when provider omits usage', () => {
+    const result = denglish.normalizeInferenceResult(
+      { data: { text: '12345678', kind: 'text' } },
+      { prompt: '1234' }
+    );
+    assert.equal(result.usage.input_tokens, 1);
+    assert.equal(result.usage.output_tokens, 2);
+    assert.equal(result.usage.estimated, true);
+  });
+});
 
 const oid = () => new mongoose.Types.ObjectId();
 const seller = oid();
@@ -64,8 +98,18 @@ beforeEach(() => {
     saved.push([obj, key, obj[key]]);
     obj[key] = fn;
   };
-  s(Product, 'findById', async (id) => ([llm, voiceProduct].find((p) => String(p._id) === String(id)) || null));
+  s(Product, 'findById', (id) => {
+    const value = [llm, voiceProduct].find((p) => String(p._id) === String(id)) || null;
+    const query = {
+      select: () => query,
+      lean: async () => value,
+      then: (resolve, reject) => Promise.resolve(value).then(resolve, reject),
+    };
+    return query;
+  });
   s(Product, 'findOne', async () => null);
+  s(InferenceRequest, 'create', async (data) => ({ _id: oid(), ...data }));
+  s(InferenceRequest, 'updateOne', async () => ({ acknowledged: true }));
   const empty = { sort: () => empty, select: () => empty, limit: () => empty, lean: async () => [] };
   s(LicenseKey, 'find', () => empty);
   s(aimxTts, 'enabled', () => false);

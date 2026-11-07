@@ -20,6 +20,7 @@ const usageEventSchema = new mongoose.Schema(
     seller: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     inputTokens: { type: Number, required: true, min: 0 },
     outputTokens: { type: Number, required: true, min: 0 },
+    cachedTokens: { type: Number, default: 0, min: 0 },
     /** USD, rounded to 6 decimals (micro-billing) */
     cost: { type: Number, required: true, min: 0 },
     platformFee: { type: Number, required: true, min: 0 },

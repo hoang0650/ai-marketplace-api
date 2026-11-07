@@ -1,5 +1,91 @@
 const config = require('../config/env');
 
+function finiteUsageNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
+}
+
+function firstUsageObject(json) {
+  const candidates = [
+    json?.usage,
+    json?.data?.usage,
+    json?.output?.usage,
+    json?.result?.usage,
+    json?.response?.usage,
+    json?.data?.output?.usage,
+    json?.raw?.usage,
+    json?.raw?.output?.usage,
+  ];
+  return candidates.find((value) => value && typeof value === 'object' && !Array.isArray(value)) || {};
+}
+
+function outputText(json) {
+  const values = [
+    json?.data?.text,
+    json?.data?.output_text,
+    json?.output_text,
+    json?.result?.text,
+    json?.response?.text,
+    json?.choices?.[0]?.message?.content,
+    json?.data?.choices?.[0]?.message?.content,
+    json?.output?.choices?.[0]?.message?.content,
+  ];
+  return String(values.find((value) => typeof value === 'string' && value) || '');
+}
+
+/** Normalize OpenAI, RunPod and provider-specific usage shapes into one gateway contract. */
+function normalizeInferenceResult(json, input = {}) {
+  const result = json && typeof json === 'object' ? json : {};
+  const source = firstUsageObject(result);
+  let inputTokens = finiteUsageNumber(
+    source.input_tokens ?? source.prompt_tokens ?? source.inputTokens ?? source.promptTokens
+  );
+  let outputTokens = finiteUsageNumber(
+    source.output_tokens ?? source.completion_tokens ?? source.outputTokens ?? source.completionTokens
+  );
+  const inputDetails = source.input_tokens_details || source.prompt_tokens_details || {};
+  const cachedTokens = finiteUsageNumber(
+    source.cached_tokens ??
+      source.cachedTokens ??
+      inputDetails.cached_tokens ??
+      inputDetails.cachedTokens ??
+      source.cache_read_input_tokens
+  );
+  let estimated = false;
+
+  const kind = String(result?.data?.kind || result?.kind || result?.output?.kind || '').toLowerCase();
+  if (!inputTokens && !outputTokens && (!kind || kind === 'text')) {
+    const prompt = input?.messages || input?.prompt || input?.text || '';
+    const promptText = Array.isArray(prompt)
+      ? prompt.map((row) => (typeof row === 'string' ? row : row?.content || '')).join('\n')
+      : String(prompt || '');
+    const generated = outputText(result);
+    if (promptText || generated) {
+      inputTokens = Math.ceil(promptText.length / 4);
+      outputTokens = Math.ceil(generated.length / 4);
+      estimated = true;
+    }
+  }
+
+  const totalTokens = finiteUsageNumber(source.total_tokens ?? source.totalTokens) || inputTokens + outputTokens;
+  const unit = String(source.unit || (totalTokens > 0 ? 'tokens' : kind === 'video' ? 'seconds' : kind === 'image' ? 'images' : 'requests'));
+  const quantity = Number(source.quantity ?? source.units ?? source.count);
+  result.usage = {
+    ...source,
+    input_tokens: inputTokens,
+    output_tokens: outputTokens,
+    // Cached tokens are normally already included in input_tokens by
+    // OpenAI-compatible providers. Keep them separate for reporting, but do
+    // not add them to total_tokens and accidentally bill them twice.
+    cached_tokens: cachedTokens,
+    total_tokens: totalTokens,
+    unit,
+    quantity: Number.isFinite(quantity) && quantity >= 0 ? quantity : totalTokens || 1,
+    ...(estimated ? { estimated: true } : {}),
+  };
+  return result;
+}
+
 /**
  * Call denglish-api inference router.
  * @param {{ provider: string, model?: string, endpointId?: string, input: object, action?: string }} body
@@ -54,7 +140,7 @@ async function callDenglishInfer(body) {
       err.body = json;
       throw err;
     }
-    return json;
+    return normalizeInferenceResult(json, body.input || {});
   } finally {
     clearTimeout(timer);
   }
@@ -364,6 +450,7 @@ function fetchJobStatus(identifier, jobId) {
 }
 
 module.exports = {
+  normalizeInferenceResult,
   callDenglishInfer,
   localSandboxInfer,
   inferWithFallback,

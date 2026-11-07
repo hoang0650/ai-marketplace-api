@@ -11,6 +11,7 @@ const COPY = {
   'wallet.depositRejected': ['Yêu cầu nạp bị từ chối', 'Admin đã từ chối hoặc hủy yêu cầu nạp tiền.'],
   'wallet.withdrawCompleted': ['Rút tiền đã chuyển', 'Yêu cầu rút đã được thanh toán.'],
   'wallet.withdrawRejected': ['Yêu cầu rút bị từ chối', 'Số tiền đã được hoàn lại số dư khả dụng.'],
+  'usage.completed': ['Đã sử dụng public endpoint', '{product}: {quantity} {unit}; input {input}, cache {cache}, output {output} token; đã trừ {amount} {currency}.'],
   'kyc.verified': ['eKYC đã được duyệt', 'Hồ sơ xác minh của bạn đã được duyệt. Bạn có thể rút tiền.'],
   'kyc.rejected': ['eKYC bị từ chối', 'Hồ sơ xác minh bị từ chối: {reason} Vui lòng cập nhật và gửi lại.'],
   'chat.newMessage': ['Tin nhắn mới', '{sender}: {preview}'],

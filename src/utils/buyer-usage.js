@@ -47,6 +47,7 @@ function mapAgentWalletTx(tx) {
         model: String(meta.model || ''),
         inputTokens: Math.max(0, Math.floor(Number(meta.inputTokens) || 0)),
         outputTokens: Math.max(0, Math.floor(Number(meta.outputTokens) || 0)),
+        cachedTokens: Math.max(0, Math.floor(Number(meta.cachedTokens) || 0)),
         markup: Number.isFinite(Number(meta.markup)) ? Number(meta.markup) : null,
       }
     : parseAgentUsageNote(tx.note);
@@ -54,6 +55,7 @@ function mapAgentWalletTx(tx) {
   const channel = parsed?.channel || channelFromMeta || 'openclaw';
   const inputTokens = parsed?.inputTokens ?? 0;
   const outputTokens = parsed?.outputTokens ?? 0;
+  const cachedTokens = parsed?.cachedTokens ?? 0;
   return {
     id: String(tx._id || tx.id),
     createdAt: tx.createdAt ? new Date(tx.createdAt).toISOString() : new Date().toISOString(),
@@ -65,7 +67,11 @@ function mapAgentWalletTx(tx) {
     productSlug: '',
     inputTokens,
     outputTokens,
+    cachedTokens,
     tokens: inputTokens + outputTokens,
+    unit: 'tokens',
+    quantity: inputTokens + outputTokens,
+    usageLabel: `${inputTokens + outputTokens} tokens`,
     amount: Number(tx.amount) || 0,
     currency: tx.currency || 'USD',
     note: tx.note || '',
@@ -81,6 +87,9 @@ function mapUsageEvent(ev) {
   const product = ev.product && typeof ev.product === 'object' ? ev.product : null;
   const inputTokens = Math.max(0, Math.floor(Number(ev.inputTokens) || 0));
   const outputTokens = Math.max(0, Math.floor(Number(ev.outputTokens) || 0));
+  const cachedTokens = Math.max(0, Math.floor(Number(ev.cachedTokens) || 0));
+  const unit = String(ev.unit || (inputTokens + outputTokens > 0 ? 'tokens' : 'requests'));
+  const quantity = Math.max(0, Number(ev.quantity) || inputTokens + outputTokens || 0);
   return {
     id: String(ev._id || ev.id),
     createdAt: ev.createdAt ? new Date(ev.createdAt).toISOString() : new Date().toISOString(),
@@ -92,10 +101,16 @@ function mapUsageEvent(ev) {
     productSlug: product?.slug || '',
     inputTokens,
     outputTokens,
+    cachedTokens,
     tokens: inputTokens + outputTokens,
+    unit,
+    quantity,
+    usageLabel: `${quantity.toLocaleString('en-US')} ${unit}`,
     amount: Number(ev.cost) || 0,
     currency: ev.currency || 'USD',
-    note: product?.name ? `${ev.source || 'usage'}: ${product.name}` : String(ev.usageType || ev.source || 'usage'),
+    note: product?.name
+      ? `${ev.source || 'usage'}: ${product.name} · ${quantity.toLocaleString('en-US')} ${unit}`
+      : `${String(ev.usageType || ev.source || 'usage')} · ${quantity.toLocaleString('en-US')} ${unit}`,
     markup: null,
   };
 }
@@ -107,7 +122,9 @@ function summarizeUsageItems(items) {
       acc.totalCharged += Number(row.amount) || 0;
       acc.totalInputTokens += Number(row.inputTokens) || 0;
       acc.totalOutputTokens += Number(row.outputTokens) || 0;
+      acc.totalCachedTokens += Number(row.cachedTokens) || 0;
       acc.totalTokens += Number(row.tokens) || 0;
+      if (row.unit) acc.usageByUnit[row.unit] = (acc.usageByUnit[row.unit] || 0) + (Number(row.quantity) || 0);
       return acc;
     },
     {
@@ -115,7 +132,9 @@ function summarizeUsageItems(items) {
       totalCharged: 0,
       totalInputTokens: 0,
       totalOutputTokens: 0,
+      totalCachedTokens: 0,
       totalTokens: 0,
+      usageByUnit: {},
     },
   );
 }

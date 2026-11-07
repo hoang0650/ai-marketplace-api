@@ -12,6 +12,7 @@ const { getRunpodPublicEndpoint } = require('../data/runpod-public-endpoints');
 const { catalogProductSlug, canonicalProductSlug, catalogModelSlug } = require('./product-slug');
 const { rehostMediaDeep, requestOrigin } = require('./media-rehost');
 const { publicProvider } = require('./white-label');
+const { notifyUser } = require('./notify');
 
 function catalogInput(body) {
   if (!body || typeof body !== 'object') return {};
@@ -124,7 +125,7 @@ async function meterAndInfer(req, product, input, action = 'runsync') {
         cost,
         holdId: hold?._id || null,
         funds: 'cap',
-        note: `Gateway: ${product.name}`,
+        note: `Gateway: ${product.name} · ${Number(usage.quantity) || Number(usage.total_tokens) || 0} ${usage.unit || 'tokens'} · in=${Number(usage.input_tokens) || 0} out=${Number(usage.output_tokens) || 0}`,
       });
       hold = null;
       platformFee = billed.platformFee;
@@ -143,6 +144,7 @@ async function meterAndInfer(req, product, input, action = 'runsync') {
       seller: sellerId,
       inputTokens: Number(usage.input_tokens) || 0,
       outputTokens: Number(usage.output_tokens) || 0,
+      cachedTokens: Number(usage.cached_tokens) || 0,
       cost: charged,
       platformFee,
       sellerNet,
@@ -160,6 +162,22 @@ async function meterAndInfer(req, product, input, action = 'runsync') {
       { creator: sellerId, date: day },
       { $inc: { tokens: (usage.input_tokens || 0) + (usage.output_tokens || 0), requests: 1, revenue: sellerNet } },
       { upsert: true }
+    ).catch(() => {});
+
+    void notifyUser(
+      buyerId,
+      'usage.completed',
+      {
+        product: product.name,
+        quantity: Number(usage.quantity) || Number(usage.total_tokens) || 0,
+        unit: usage.unit || 'tokens',
+        input: Number(usage.input_tokens) || 0,
+        output: Number(usage.output_tokens) || 0,
+        cache: Number(usage.cached_tokens) || 0,
+        amount: Number(charged || 0).toFixed(6),
+        currency: 'USD',
+      },
+      '/usage'
     ).catch(() => {});
 
     await completeIdempotencyKey(
