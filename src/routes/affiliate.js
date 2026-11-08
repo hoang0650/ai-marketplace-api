@@ -9,13 +9,11 @@ const config = require('../config/env');
 const { affiliateConfig } = require('../config/affiliate');
 const { authenticate, optionalAuth, requireRoles, requireAdminPermission, invalidateAuthUserCache } = require('../middleware/auth');
 const { ADMIN_PERMISSION, hasAdminPermission } = require('../utils/roles');
-const { parseAffiliateRate, effectiveAffiliateRate } = require('../finance/affiliate-engine');
+const { parseAffiliateRate, effectiveAffiliateRate, affiliateParticipation } = require('../finance/affiliate-engine');
 const { isCommissionHeld, reverseAffiliateCommission } = require('../finance/affiliate-service');
 const { roundMoney } = require('../finance/constants');
 const { deleteCachePattern } = require('../utils/cache');
 const { writeAuditLog } = require('../utils/audit');
-const { ensureAffiliateCode, isAffiliateCode } = require('../utils/affiliate-code');
-
 const router = express.Router();
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** Repeat visits of one link from one device within this window count as one click. */
@@ -38,8 +36,10 @@ function publicConfig() {
       rule: 'AT_WITHDRAWAL',
       commitmentForm: 'Mẫu 08/CK-TNCN',
       commitmentExempts: cfg.pit.commitmentExempts,
+      commitmentFormIsCurrentStatutoryExemption: false,
       yearEndCertificate: true,
-      legalReview: true,
+      legalReview: false,
+      legalDetermination: 'unresolved',
     },
   };
 }
@@ -51,16 +51,10 @@ const KYC_REQUIRED = {
   message: 'Hoàn tất xác minh danh tính (eKYC) trước khi tạo liên kết affiliate.',
 };
 
-/** Creates the affiliate code only for eKYC-verified users; unverified users get no code. */
+/** Loads the user. Does not mint an affiliate code. */
 async function ensureCode(userId) {
   const user = await User.findById(userId);
-  if (!user) return null;
-  if (!isKycVerified(user)) return user;
-  if (!isAffiliateCode(user.affiliateCode)) {
-    await ensureAffiliateCode(user);
-    await invalidateAuthUserCache(user._id);
-  }
-  return user;
+  return user || null;
 }
 
 const isId = (v) => mongoose.Types.ObjectId.isValid(String(v || ''));
@@ -133,7 +127,7 @@ function mapCommission(c, order, now = new Date()) {
 
 router.get('/config', (_req, res) => res.json(publicConfig()));
 
-/** The signed-in user's affiliate dashboard. A code and links require eKYC (verified) first. */
+/** The signed-in user's affiliate dashboard. Existing codes stay. New codes are not minted. */
 router.get('/', authenticate, async (req, res, next) => {
   try {
     const user = await ensureCode(req.user._id);
@@ -168,13 +162,17 @@ router.get('/', authenticate, async (req, res, next) => {
       pitCommitmentApplied: exempt,
       persona: 'affiliate',
     };
-    const kycStatus = user.kyc?.status || 'none';
+    const participation = affiliateParticipation(user);
     res.json({
-      code: kycStatus === 'verified' ? user.affiliateCode : null,
-      kycStatus,
-      kycRequired: kycStatus !== 'verified',
-      linkReady: kycStatus === 'verified',
-      payoutReady: kycStatus === 'verified',
+      code: participation.code,
+      kycStatus: participation.kycStatus,
+      kycRequired: participation.kycStatus !== 'verified',
+      linkReady: participation.linkReady,
+      payoutReady: participation.kycStatus === 'verified',
+      electronicIdentityStatus: participation.electronicIdentityStatus,
+      electronicIdentitySatisfied: false,
+      codeIssuance: participation.codeIssuance,
+      participation,
       clicks,
       orders: rows.filter((r) => r.status === 'active').length,
       conversions: rows.filter((r) => r.status === 'active').length,
@@ -191,12 +189,20 @@ router.get('/', authenticate, async (req, res, next) => {
   }
 });
 
-/** Referral link for one product or one store. Only eKYC-verified users can create one (403 KYC_REQUIRED). */
+/** Referral link for one product or one store. Requires an existing code. Does not mint one. */
 router.get('/link', authenticate, async (req, res, next) => {
   try {
     const user = await ensureCode(req.user._id);
     if (!user) return res.status(401).json({ message: 'Unauthorized' });
     if (!isKycVerified(user)) return res.status(403).json(KYC_REQUIRED);
+    const participation = affiliateParticipation(user);
+    if (!participation.code) {
+      return res.status(403).json({
+        code: 'ELECTRONIC_IDENTITY_NOT_IMPLEMENTED',
+        message: 'A new affiliate code is not issued. Electronic identity for affiliates is not implemented, and a manual tax-code review does not replace it.',
+        electronicIdentityStatus: 'not_implemented',
+      });
+    }
     const target = await findTarget({
       productId: req.query.productId,
       productSlug: req.query.productSlug,

@@ -58,6 +58,9 @@ test('public summary matches the app gate and does not submit USD', () => {
   assert.equal(view.transferExecuted, false);
   assert.equal(view.legalAuthorization, 'unresolved');
   assert.equal(view.paymentAuthorization, 'unresolved');
+  assert.equal(view.paymentModel, 'authorized_holder_not_selected');
+  assert.equal(view.companyCollectionAccountIsNotPsp, true);
+  assert.equal(view.providerSelected, false);
   const closed = openView(150000, false);
   assert.equal(closed.enabled, false);
   assert.equal(closed.legalAuthorization, 'unresolved');
@@ -329,6 +332,8 @@ test('manual tax review is an admin attestation and does not replace eKYC', () =
   const ok = decideManualTaxReview({ actorRole: 'admin', status: 'approved', reason: 'Đã đối chiếu MST', lookupAttested: true });
   assert.equal(ok.ok, true);
   assert.equal(ok.lookupAttested, true);
+  assert.equal(ok.grantsElectronicIdentity, false);
+  assert.equal(ok.grantsAffiliateEligibility, false);
   assert.equal(sellerApprovalGate({
     sellerType: 'INDIVIDUAL',
     taxCode: '012345678901',
