@@ -11,8 +11,6 @@ const { publicApiBase } = require('../config/googleAuth');
 const config = require('../config/env');
 const { getExchangeRates, fxAudit } = require('../finance/exchange-rate');
 const {
-  gpayEnabled,
-  gpayFeatureEnabled,
   gpayPortalConfigured,
   gpayVaEnabled,
   gpayPortalEnabled,
@@ -73,14 +71,13 @@ function canSimulate(user) {
 }
 
 /**
- * GPAY_ENABLED feature flag (default OFF): reject creating new GPay payments.
- * Webhook / return / order-status routes are NOT gated so in-flight payments still settle.
+ * New GPay checkouts stay closed even when GPAY_ENABLED is set.
+ * Webhook / return / order-status routes are NOT gated, so an in-flight bill can still be reconciled.
  */
-function requireGpayEnabled(_req, res, next) {
-  if (gpayFeatureEnabled()) return next();
-  return res.status(503).json({
-    message: 'GPay top-up is temporarily disabled',
-    code: 'GPAY_DISABLED',
+function requireGpayEnabled(_req, res) {
+  return res.status(410).json({
+    message: 'GPay is not offered. Top up with VietQR to the company account. No replacement gateway is provided.',
+    code: 'GPAY_REMOVED',
   });
 }
 
@@ -125,18 +122,16 @@ async function cancelDeposit(tx, reason) {
  */
 router.get('/config', optionalAuth, async (req, res, next) => {
   try {
-    const portalEnabled = gpayPortalEnabled();
-    const qrEnabled = gpayEnabled() && gpayVaEnabled();
-    const enabled = portalEnabled || qrEnabled;
     const fx = await rateQuote();
     res.json({
-      available: gpayFeatureEnabled(),
-      featureEnabled: gpayFeatureEnabled(),
-      enabled,
-      portalEnabled,
-      qrEnabled,
-      sandbox: gpaySandbox(),
-      canSimulate: enabled && canSimulate(req.user),
+      removed: true,
+      available: false,
+      featureEnabled: false,
+      enabled: false,
+      portalEnabled: false,
+      qrEnabled: false,
+      sandbox: false,
+      canSimulate: false,
       bankCode: config.gpayVaBankCode,
       accountType: config.gpayAccountType,
       minTopupVnd: Number(config.gpayMinTopupVnd) || 0,

@@ -46,6 +46,18 @@ const sellerProfileSchema = new mongoose.Schema(
       enum: ['none', 'pending', 'verified', 'rejected'],
       default: 'none',
     },
+    /**
+     * Manual review of the tax code the supplier typed. Not user.kyc and not a
+     * licensed electronic-identity result. lookupAttested means an admin opened
+     * the public lookup; the server does not call that site.
+     */
+    manualTaxReview: {
+      status: { type: String, enum: ['none', 'pending', 'approved', 'rejected'], default: 'none' },
+      reason: { type: String, default: '', maxlength: 1000 },
+      reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+      reviewedAt: { type: Date, default: null },
+      lookupAttested: { type: Boolean, default: false },
+    },
     /** Bank metadata only — never store full account secrets plaintext for payouts. */
     bankAccountMetadata: {
       bankName: { type: String, default: '' },

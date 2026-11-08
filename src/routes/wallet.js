@@ -10,7 +10,9 @@ const {
   quoteWithdrawal,
   mapPolicy,
   pickPrimary,
+  SELLER_LIKE,
 } = require('../finance/payout-policy');
+const { isVietqrDepositWithdrawalRequest } = require('../finance/buyer-deposit-withdraw');
 
 const router = express.Router();
 
@@ -79,6 +81,7 @@ router.get('/summary', authenticate, async (req, res, next) => {
       buyerIdentityRequired: false,
       buyerCashoutAllowed: false,
       prepaidWithdrawable: false,
+      buyerDepositWithdraw: await buyerDepositWithdrawFor(req.user._id, req.user),
     });
   } catch (err) {
     next(err);
@@ -107,12 +110,9 @@ router.get('/payout-policy', authenticate, async (req, res, next) => {
  * orders are paid exclusively from the AI Markets wallet balance.
  */
 router.post('/deposit', authenticate, (_req, res) => {
-  const { gpayFeatureEnabled } = require('../utils/gpay-client');
   res.status(410).json({
     code: 'SEPAY_DISABLED',
-    message: gpayFeatureEnabled()
-      ? 'Bank transfer top-up is no longer available. Top up with GPay (ATM / card / VietQR) on the website, or in-app purchase in the iOS/Android app.'
-      : 'This top-up endpoint is no longer available. Top up from the wallet page, or with in-app purchase in the iOS/Android app.',
+    message: 'This top-up endpoint is no longer available. Top up with VietQR to the company bank account from the wallet page. In-app purchase is a separate channel.',
   });
 });
 
@@ -199,6 +199,9 @@ router.put('/payout-account', authenticate, async (req, res, next) => {
 
 router.post('/withdraw', authenticate, async (req, res, next) => {
   try {
+    if (isVietqrDepositWithdrawalRequest(req.body)) {
+      return withdrawVietqrCompanyBank(req, res, next);
+    }
     const { personas, persona, policy } = await resolvePayoutPersona(req.user, req.body?.persona);
 
     // Affiliate amounts are checked by quoteAffiliateWithdrawal (precision, not a commercial minimum).
@@ -422,6 +425,7 @@ router.post('/withdraw', authenticate, async (req, res, next) => {
           ...fxAudit(fx),
           channel: 'payout',
           persona,
+          ...(SELLER_LIKE.has(persona) ? require('../finance/payout-due').sellerPayoutDueMetadata({ requestedAt: new Date() }) : {}),
           grossAmount: quote.gross,
           platformFeeRate: policy.platformFeeRate,
           platformFee: quote.platformFee,
@@ -498,5 +502,232 @@ router.get('/seller-ledger', authenticate, async (req, res, next) => {
     next(err);
   }
 });
+
+/**
+ * Separated VietQR company-bank view. Missing affiliate evidence fails closed.
+ * payableUsd is an FX reference and is not a second balance the client may submit.
+ */
+async function buyerDepositWithdrawFor(userId, user) {
+  const { buyerVietqrSnapshot, publicBuyerDepositWithdraw, buyerVietqrWithdrawActivated } = require('../finance/buyer-deposit-withdraw');
+  const { kycStatus } = require('../utils/kyc');
+  const { getAffiliateBalance } = require('../finance/affiliate-service');
+  const { getExchangeRates } = require('../finance/exchange-rate');
+  const summary = await getAvailableBalance(userId);
+  let poolKnown = true;
+  let affiliateAvailable = 0;
+  try {
+    affiliateAvailable = Number((await getAffiliateBalance(userId)).available) || 0;
+  } catch {
+    poolKnown = false;
+  }
+  const pool = poolKnown ? Math.max(0, Math.round((summary.available - affiliateAvailable) * 100) / 100) : 0;
+  const rows = await WalletTx.find({ user: userId, type: { $in: ['deposit', 'debit', 'withdraw', 'credit'] } })
+    .select('type amount status paymentMethod createdAt meta')
+    .sort({ createdAt: 1, _id: 1 })
+    .lean();
+  let rate = 0;
+  try {
+    rate = Number((await getExchangeRates())?.vndPerUsd) || 0;
+  } catch {
+    rate = 0;
+  }
+  const snap = buyerVietqrSnapshot(rows, pool, rate);
+  return publicBuyerDepositWithdraw(snap, {
+    electronicIdentityStatus: kycStatus(user),
+    poolKnown,
+    activated: buyerVietqrWithdrawActivated(),
+  });
+}
+
+function vietqrResponseBody(tx, payout, replay) {
+  const raw = typeof tx.toObject === 'function' ? tx.toObject() : tx;
+  return {
+    ...mapWallet(tx),
+    payoutId: payout?.payoutId || raw.payoutId || '',
+    payoutStatus: payout?.status || '',
+    settlement: 'VND',
+    amountVnd: Number.isInteger(raw.meta?.amountVnd) ? raw.meta.amountVnd : null,
+    transferExecuted: false,
+    idempotentReplay: replay === true,
+  };
+}
+
+/**
+ * VietQR company-bank deposit withdrawal. Runs before the persona USD path, so a buyer
+ * request without `source` stays rejected. Electronic identity is user.kyc.status only.
+ * The payout row is a request record; it does not send a bank transfer.
+ */
+async function withdrawVietqrCompanyBank(req, res, next) {
+  try {
+    const User = require('../models/User');
+    const { withWalletLock } = require('../utils/wallet-lock');
+    const { getAffiliateBalance } = require('../finance/affiliate-service');
+    const { getExchangeRates, fxAudit } = require('../finance/exchange-rate');
+    const { createPayout } = require('../finance/payout-engine');
+    const {
+      SOURCE,
+      MESSAGES,
+      decideBuyerVietqrWithdrawal,
+      commitBuyerVietqrDraft,
+      buyerVietqrWithdrawActivated,
+    } = require('../finance/buyer-deposit-withdraw');
+    const activated = buyerVietqrWithdrawActivated();
+    if (req.body?.settlement != null && String(req.body.settlement) !== 'VND') {
+      return res.status(400).json({ message: 'This withdrawal settles in VND.', code: 'INVALID_AMOUNT' });
+    }
+    const amountVnd = Number(req.body?.amountVnd);
+    const idempotencyKey = req.get('Idempotency-Key') || req.body?.idempotencyKey;
+
+    const settled = await withWalletLock(req.user._id, async () => {
+      const lockedUser = await User.findById(req.user._id).select('role kyc payoutAccount');
+      if (!lockedUser) return { status: 404, body: { message: 'User not found' } };
+      const resolved = await resolveWithdrawAccount(req.user._id, req.body?.bankAccount, {
+        save: req.body?.saveAccount === true,
+      });
+      const account = resolved.ok ? resolved.account : null;
+      const summaryNow = await getAvailableBalance(req.user._id);
+      let poolKnown = true;
+      let affiliateAvailable = 0;
+      try {
+        affiliateAvailable = Number((await getAffiliateBalance(req.user._id)).available) || 0;
+      } catch {
+        poolKnown = false;
+      }
+      const pool = poolKnown
+        ? Math.max(0, Math.round((summaryNow.available - affiliateAvailable) * 100) / 100)
+        : 0;
+      const rows = await WalletTx.find({
+        user: req.user._id,
+        type: { $in: ['deposit', 'debit', 'withdraw', 'credit'] },
+      })
+        .select('type amount status paymentMethod createdAt payoutId meta')
+        .sort({ createdAt: 1, _id: 1 })
+        .lean();
+      let fx = null;
+      try {
+        fx = await getExchangeRates();
+      } catch {
+        fx = null;
+      }
+      const decision = decideBuyerVietqrWithdrawal({
+        user: lockedUser,
+        amountVnd,
+        idempotencyKey,
+        account,
+        rows,
+        poolAvailableUsd: pool,
+        vndPerUsd: Number(fx?.vndPerUsd) || 0,
+        fx: fx ? fxAudit(fx) : {},
+        activated,
+      });
+      if (!decision.ok) {
+        if (!resolved.ok && (decision.code === 'BANK_ACCOUNT_REQUIRED' || decision.code === 'ACCOUNT_NAME_MISMATCH')) {
+          return {
+            status: 400,
+            body: {
+              message: resolved.message,
+              code: resolved.code,
+              payableVnd: decision.payableVnd,
+              payableUsd: decision.payableUsd,
+              blockedSources: decision.blockedSources,
+            },
+          };
+        }
+        return {
+          status: decision.status,
+          body: {
+            message: decision.message,
+            code: decision.code,
+            payableVnd: decision.payableVnd,
+            payableUsd: decision.payableUsd,
+            blockedSources: decision.blockedSources,
+            ...(decision.electronicIdentityStatus ? { kycStatus: decision.electronicIdentityStatus, electronicIdentityStatus: decision.electronicIdentityStatus } : {}),
+          },
+        };
+      }
+      if (!poolKnown && decision.draft) {
+        return {
+          status: 400,
+          body: {
+            message: MESSAGES.SOURCE_NOT_SEPARATED,
+            code: 'SOURCE_NOT_SEPARATED',
+            payableVnd: 0,
+            payableUsd: 0,
+            blockedSources: ['unknown'],
+          },
+        };
+      }
+      const recordPayout = (draft, tx) => createPayout({
+        sellerId: req.user._id,
+        payableAmount: draft?.amountUsd ?? tx.amount,
+        currency: 'USD',
+        actorId: req.user._id,
+        idempotencyKey: `vietqr:${req.user._id}:${tx._id}`,
+        requireSellerProfile: false,
+        extraMeta: {
+          ...(draft?.fx || {}),
+          source: SOURCE,
+          persona: 'buyer',
+          settlement: 'VND',
+          amountVnd: draft?.amountVnd ?? tx.meta?.amountVnd,
+          transferExecuted: false,
+        },
+      }).then((result) => result.payout);
+
+      if (decision.replay) {
+        const full = await WalletTx.findById(decision.replay._id);
+        if (!full) {
+          return { status: 409, body: { message: MESSAGES.PENDING_WITHDRAWAL, code: 'PENDING_WITHDRAWAL', payableVnd: 0, payableUsd: 0, blockedSources: [] } };
+        }
+        let payout = null;
+        if (!full.payoutId) {
+          payout = await recordPayout(decision.draft, full);
+          full.payoutId = payout.payoutId;
+          await full.save();
+        }
+        return { status: 200, body: vietqrResponseBody(full, payout, true) };
+      }
+
+      const saved = await commitBuyerVietqrDraft(decision.draft, {
+        createTx: (draft) => WalletTx.create({
+          user: req.user._id,
+          type: 'withdraw',
+          amount: draft.amountUsd,
+          currency: 'USD',
+          status: 'pending',
+          note: `VietQR company-bank withdrawal request ${draft.amountVnd} VND`,
+          meta: {
+            ...draft.fx,
+            channel: 'payout',
+            persona: 'buyer',
+            source: SOURCE,
+            settlement: 'VND',
+            amountVnd: draft.amountVnd,
+            grossAmount: draft.amountUsd,
+            netAmount: draft.amountUsd,
+            payoutAccount: draft.account,
+            refundsSeparate: true,
+            idempotencyKey: draft.idempotencyKey || '',
+            transferExecuted: false,
+          },
+        }),
+        createPayout: recordPayout,
+        linkPayout: async (tx, payout) => {
+          tx.payoutId = payout.payoutId;
+          await tx.save();
+          return tx;
+        },
+        cancelTx: (tx) => WalletTx.updateOne(
+          { _id: tx._id, status: 'pending' },
+          { $set: { status: 'cancelled', note: 'VietQR withdrawal cancelled before the payout record was stored' } },
+        ),
+      });
+      return { status: 201, body: vietqrResponseBody(saved.tx, saved.payout, false) };
+    });
+    res.status(settled.status).json(settled.body);
+  } catch (err) {
+    next(err);
+  }
+}
 
 module.exports = router;

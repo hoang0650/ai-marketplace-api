@@ -4,7 +4,14 @@ const Order = require('../models/Order');
 const LegalDocument = require('../models/LegalDocument');
 const LegalAcceptance = require('../models/LegalAcceptance');
 const { authenticate, requireRoles } = require('../middleware/auth');
-const { getOrCreateSellerProfile, sellerApprovalGate, LICENSED_SELLER_TYPES, validateSellerTaxInfo } = require('../utils/seller-compliance');
+const {
+  getOrCreateSellerProfile,
+  sellerApprovalGate,
+  LICENSED_SELLER_TYPES,
+  validateSellerTaxInfo,
+  decideManualTaxReview,
+  manualReviewAfterApplication,
+} = require('../utils/seller-compliance');
 const { normalizeSellerType } = require('../finance/seller-types');
 const { writeAuditLog } = require('../utils/audit');
 const { PLATFORM_COMMISSION_RATE } = require('../finance/constants');
@@ -67,6 +74,14 @@ function mapSellerProfile(doc) {
     sellerAgreementAcceptedAt: o.sellerAgreementAcceptedAt
       ? new Date(o.sellerAgreementAcceptedAt).toISOString()
       : null,
+    manualTaxReview: {
+      status: o.manualTaxReview?.status || 'none',
+      reason: o.manualTaxReview?.reason || '',
+      reviewedAt: o.manualTaxReview?.reviewedAt ? new Date(o.manualTaxReview.reviewedAt).toISOString() : null,
+      lookupAttested: o.manualTaxReview?.lookupAttested === true,
+    },
+    /** Legacy profile flag. It is not user.kyc and must not be read as electronic identity. */
+    electronicIdentitySeparate: true,
     verifiedAt: o.verifiedAt ? new Date(o.verifiedAt).toISOString() : null,
     rejectedAt: o.rejectedAt ? new Date(o.rejectedAt).toISOString() : null,
     suspendedAt: o.suspendedAt ? new Date(o.suspendedAt).toISOString() : null,
@@ -106,6 +121,12 @@ router.post('/apply', authenticate, async (req, res, next) => {
       legalName: body.legalName,
       contactEmail: body.contactEmail,
     });
+    const beforeTax = {
+      taxCode: String(profile.taxCode || '').replace(/\s+/g, ''),
+      sellerType: normalizeSellerType(profile.sellerType),
+      legalName: profile.legalName || '',
+      businessRegistrationNumber: profile.businessRegistrationNumber || '',
+    };
 
     const fields = [
       'sellerType',
@@ -135,7 +156,29 @@ router.post('/apply', authenticate, async (req, res, next) => {
     if (profile.verificationStatus === 'PENDING') {
       profile.verificationStatus = 'VERIFICATION_REQUIRED';
     }
-    profile.identityVerificationStatus = 'pending';
+    const review = manualReviewAfterApplication({
+      before: beforeTax,
+      after: {
+        taxCode: String(profile.taxCode || '').replace(/\s+/g, ''),
+        sellerType: normalizeSellerType(profile.sellerType),
+        legalName: profile.legalName || '',
+        businessRegistrationNumber: profile.businessRegistrationNumber || '',
+        verificationStatus: profile.verificationStatus,
+      },
+      current: profile.manualTaxReview,
+    });
+    if (review.reset) {
+      profile.manualTaxReview = {
+        status: 'pending',
+        reason: '',
+        reviewedBy: null,
+        reviewedAt: null,
+        lookupAttested: false,
+      };
+    }
+    if (review.demoteVerified) {
+      profile.verificationStatus = 'VERIFICATION_REQUIRED';
+    }
     profile.complianceStatus = 'under_review';
     await profile.save();
     await syncSellerTaxProfile(req.user._id, profile).catch((err) => console.error('[seller tax profile]', err.message));
@@ -253,13 +296,11 @@ router.patch('/:id/status', authenticate, requireRoles('admin'), async (req, res
     if (status === 'VERIFIED') {
       profile.verifiedAt = new Date();
       profile.complianceStatus = 'compliant';
-      profile.identityVerificationStatus = 'verified';
       profile.rejectedAt = null;
       profile.suspendedAt = null;
     } else if (status === 'REJECTED') {
       profile.rejectedAt = new Date();
       profile.complianceStatus = 'non_compliant';
-      profile.identityVerificationStatus = 'rejected';
     } else if (status === 'SUSPENDED' || status === 'TERMINATED') {
       profile.suspendedAt = new Date();
       profile.complianceStatus = 'non_compliant';
@@ -279,6 +320,54 @@ router.patch('/:id/status', authenticate, requireRoles('admin'), async (req, res
       userAgent: req.get('user-agent') || '',
     });
 
+    res.json(mapSellerProfile(profile));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Manual review of the tax code the supplier declared.
+ * Does not read the public tax site, does not set user.kyc, and does not approve the seller record.
+ */
+router.patch('/:id/manual-review', authenticate, requireRoles('admin'), async (req, res, next) => {
+  try {
+    const decision = decideManualTaxReview({
+      actorRole: req.user.role,
+      status: req.body?.status,
+      reason: req.body?.reason,
+      lookupAttested: req.body?.lookupAttested === true,
+    });
+    if (!decision.ok) return res.status(decision.code === 'RBAC' ? 403 : 400).json({ message: decision.message, code: decision.code });
+
+    const profile = await SellerProfile.findById(req.params.id);
+    if (!profile) return res.status(404).json({ message: 'Seller profile not found' });
+    const previous = profile.manualTaxReview?.status || 'none';
+    const previousVerification = profile.verificationStatus;
+    profile.manualTaxReview = {
+      status: decision.status,
+      reason: decision.reason,
+      reviewedBy: req.user._id,
+      reviewedAt: new Date(),
+      lookupAttested: decision.lookupAttested,
+    };
+    await profile.save();
+    await writeAuditLog({
+      actorId: req.user._id,
+      actorRole: req.user.role,
+      action: 'SELLER_MANUAL_TAX_REVIEW',
+      resourceType: 'SellerProfile',
+      resourceId: profile._id,
+      oldValue: { manualTaxReviewStatus: previous, verificationStatus: previousVerification },
+      newValue: {
+        manualTaxReviewStatus: decision.status,
+        lookupAttested: decision.lookupAttested,
+        verificationStatus: profile.verificationStatus,
+      },
+      reason: decision.reason,
+      ip: req.ip,
+      userAgent: req.get('user-agent') || '',
+    });
     res.json(mapSellerProfile(profile));
   } catch (err) {
     next(err);

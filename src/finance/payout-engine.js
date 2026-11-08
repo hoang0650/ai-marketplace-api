@@ -33,6 +33,8 @@ async function createPayout({
   idempotencyKey = '',
   /** false when the payout account comes from the dedicated eligible-persona flow. */
   requireSellerProfile = true,
+  /** Merged into the payout record. Does not start a transfer. */
+  extraMeta = null,
 }) {
   if (idempotencyKey) {
     const existing = await SellerPayout.findOne({ idempotencyKey });
@@ -57,7 +59,7 @@ async function createPayout({
     status: gate.ok ? 'PENDING' : 'ON_HOLD',
     holdReason: gate.holdReason,
     idempotencyKey: idempotencyKey || payoutId,
-    meta: fxAudit(fx),
+    meta: { ...fxAudit(fx), ...(extraMeta && typeof extraMeta === 'object' ? extraMeta : {}) },
   });
 
   await writeAuditLog({
