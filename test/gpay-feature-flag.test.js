@@ -29,9 +29,10 @@ test('GPAY_ENABLED=false / 0 / empty → disabled', () => {
   }
 });
 
-test('GPAY_ENABLED=true / 1 → enabled', () => {
+test('GPAY_ENABLED cannot turn the removed channel back on', () => {
   for (const v of ['true', '1', 'TRUE', ' true ']) {
-    assert.deepEqual(run(FLAG, { GPAY_ENABLED: v }), { flag: true, feature: true }, v);
+    assert.equal(run(FLAG, { GPAY_ENABLED: v }).flag, true, v);
+    assert.equal(run(FLAG, { GPAY_ENABLED: v }).feature, false, v);
   }
 });
 
@@ -69,7 +70,7 @@ const srv = app.listen(0, async () => {
   out.webhook = { status: w.status, code: (await w.json()).code };
   const c = await fetch(base + '/config');
   const cfg = await c.json();
-  out.config = { status: c.status, available: cfg.available, enabled: cfg.enabled, featureEnabled: cfg.featureEnabled };
+  out.config = { status: c.status, available: cfg.available, enabled: cfg.enabled, featureEnabled: cfg.featureEnabled, removed: cfg.removed };
   const ret = await fetch(base + '/return?order=AIM1', { redirect: 'manual' });
   out.return = ret.status;
   srv.close();
@@ -77,24 +78,19 @@ const srv = app.listen(0, async () => {
 });
 `;
 
-test('disabled: create-payment routes return 503 GPAY_DISABLED; webhook/config/return stay up', () => {
-  const out = run(HTTP, { GPAY_RELAY_SECRET: 'relay-secret' });
-  for (const p of ['/checkout', '/qr', '/account', '/sandbox/credit']) {
-    assert.deepEqual(out[p], { status: 503, code: 'GPAY_DISABLED' }, p);
+test('create-payment routes stay removed; webhook/config/return stay up', () => {
+  for (const env of [{ GPAY_RELAY_SECRET: 'relay-secret' }, { GPAY_ENABLED: 'true', GPAY_RELAY_SECRET: 'relay-secret' }]) {
+    const out = run(HTTP, env);
+    for (const p of ['/checkout', '/qr', '/account', '/sandbox/credit']) {
+      assert.deepEqual(out[p], { status: 410, code: 'GPAY_REMOVED' }, p);
+    }
+    assert.equal(out.webhook.status, 401);
+    assert.equal(out.webhook.code, 'GPAY_BAD_RELAY');
+    assert.equal(out.config.status, 200);
+    assert.equal(out.config.removed, true);
+    assert.equal(out.config.available, false);
+    assert.equal(out.config.enabled, false);
+    assert.equal(out.config.featureEnabled, false);
+    assert.equal(out.return, 302);
   }
-  // Webhook is not gated by the flag: it reaches its own auth check (bad relay secret → 401).
-  assert.equal(out.webhook.status, 401);
-  assert.equal(out.webhook.code, 'GPAY_BAD_RELAY');
-  assert.deepEqual(out.config, { status: 200, available: false, enabled: false, featureEnabled: false });
-  assert.equal(out.return, 302);
-});
-
-test('enabled: create-payment routes pass the flag (then require auth)', () => {
-  const out = run(HTTP, { GPAY_ENABLED: 'true', GPAY_RELAY_SECRET: 'relay-secret' });
-  for (const p of ['/checkout', '/qr', '/account', '/sandbox/credit']) {
-    assert.notEqual(out[p].code, 'GPAY_DISABLED', p);
-    assert.equal(out[p].status, 401, p);
-  }
-  assert.equal(out.config.available, true);
-  assert.equal(out.config.featureEnabled, true);
 });

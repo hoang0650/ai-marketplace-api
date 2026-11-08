@@ -42,7 +42,13 @@ function sellerEarnedAvailable({ orders = [], usage = [], walletTxs = [], now = 
     if (status === 'failed' || status === 'cancelled') continue;
     const amount = Number(tx.amount) || 0;
     if (tx.type === 'debit' && CLAWBACK.test(tx.note || '')) clawback += amount;
-    else if (tx.type === 'withdraw' && tx.meta?.persona !== 'affiliate' && (status === 'completed' || status === 'pending')) {
+    else if (
+      tx.type === 'withdraw'
+      && tx.meta?.persona !== 'affiliate'
+      && tx.meta?.persona !== 'buyer'
+      && tx.meta?.source !== 'vietqr_company_bank'
+      && (status === 'completed' || status === 'pending')
+    ) {
       withdrawn += amount;
     } else if ((tx.type === 'credit' || tx.type === 'debit') && tx.reviewedBy && !SALE_CREDIT.test(tx.note || '')) {
       adjustment += tx.type === 'credit' ? amount : -amount;

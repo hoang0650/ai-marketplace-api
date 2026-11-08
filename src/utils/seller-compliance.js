@@ -151,7 +151,57 @@ function sellerApprovalGate(profile, kyc) {
       };
     }
   }
+  if (String(profile?.manualTaxReview?.status || 'none') !== 'approved') {
+    return {
+      ok: false,
+      code: 'MANUAL_TAX_REVIEW_REQUIRED',
+      message: 'The supplier tax record must be manually reviewed before seller approval. That review does not verify electronic identity.',
+    };
+  }
   return { ok: true };
+}
+
+const TAX_IDENTITY_FIELDS = ['taxCode', 'sellerType', 'legalName', 'businessRegistrationNumber'];
+
+/**
+ * A tax-identity change, or a review that has never been approved, goes back to pending.
+ * This does not write user.kyc. An approved review stays put when only unrelated fields change.
+ */
+function manualReviewAfterApplication({ before = {}, after = {}, current = null } = {}) {
+  const changed = TAX_IDENTITY_FIELDS.some((key) => String(before[key] || '') !== String(after[key] || ''));
+  const status = String(current?.status || 'none');
+  const reset = status === 'none' || status === 'rejected' || changed;
+  return {
+    reset,
+    demoteVerified: changed && String(after.verificationStatus || '') === 'VERIFIED',
+  };
+}
+
+/**
+ * Admin attestation that a person checked the public tax lookup. The server does not call that site
+ * and the decision never changes user.kyc.
+ */
+function decideManualTaxReview({ actorRole, status, reason, lookupAttested } = {}) {
+  const { normalizeRole } = require('./roles');
+  if (normalizeRole(actorRole) !== 'admin') {
+    return { ok: false, code: 'RBAC', message: 'Only an admin can record this review.' };
+  }
+  const next = String(status || '');
+  if (next !== 'approved' && next !== 'rejected') {
+    return { ok: false, code: 'STATUS_INVALID', message: 'status must be approved or rejected.' };
+  }
+  const why = String(reason || '').trim();
+  if (why.length < 5 || why.length > 1000) {
+    return { ok: false, code: 'REASON_REQUIRED', message: 'A review reason is required.' };
+  }
+  if (next === 'approved' && lookupAttested !== true) {
+    return {
+      ok: false,
+      code: 'LOOKUP_ATTESTATION_REQUIRED',
+      message: 'Approve only after checking the declared tax code on the public tax lookup. The server does not query that site.',
+    };
+  }
+  return { ok: true, status: next, reason: why, lookupAttested: next === 'approved' };
 }
 
 async function getOrCreateSellerProfile(user, defaults = {}) {
@@ -180,4 +230,6 @@ module.exports = {
   REGISTRATION_SELLER_TYPES,
   isValidTaxCode,
   validateSellerTaxInfo,
+  decideManualTaxReview,
+  manualReviewAfterApplication,
 };

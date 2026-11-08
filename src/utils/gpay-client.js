@@ -28,9 +28,12 @@ function gpayEnabled() {
   return Boolean(config.gpayMerchantCode && config.gpayPassword);
 }
 
-/** GPAY_ENABLED feature flag (default OFF). Gates creating new GPay payments only. */
+/**
+ * GPay is not a top-up channel. GPAY_ENABLED cannot turn checkout back on.
+ * Webhook reconciliation of an in-flight bill does not use this flag.
+ */
 function gpayFeatureEnabled() {
-  return config.gpayVaEnabled === true;
+  return false;
 }
 
 /** Gateway credentials present, regardless of the feature flag (used to reconcile in-flight bills). */
