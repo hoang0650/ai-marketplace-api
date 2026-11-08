@@ -1,5 +1,6 @@
 const { roundMoney } = require('./constants');
 const { AFFILIATE_MAX_RATE, affiliateConfig } = require('../config/affiliate');
+const { isAffiliateCode } = require('../utils/affiliate-code');
 
 /**
  * Validate a seller-entered affiliate rate. Accepts a fraction (0–0.25).
@@ -84,6 +85,33 @@ function onScale(n, digits) {
  * `available` is already net of the 48h hold and open disputes. A balance that
  * rounds to 0.00 USD is not withdrawable; that is currency precision, not a minimum.
  */
+/**
+ * Affiliate is a capability, not a separate account role and not a downline.
+ * A new code is not minted here: electronic identity is not implemented, and a
+ * document review or a manual tax-code review does not stand in for it.
+ * An existing code is left in place.
+ */
+function affiliateParticipation(user) {
+  const kycStatus = String(user?.kyc?.status || 'none');
+  const hasCode = isAffiliateCode(user?.affiliateCode);
+  return {
+    capability: 'affiliate',
+    separateRole: false,
+    multiLevel: false,
+    depositToJoin: false,
+    recruitment: false,
+    kycStatus,
+    electronicIdentityStatus: 'not_implemented',
+    electronicIdentitySatisfied: false,
+    manualTaxReviewGrantsAffiliateEligibility: false,
+    codeIssuance: 'closed_pending_electronic_identity',
+    code: hasCode && kycStatus === 'verified' ? String(user.affiliateCode).trim().toUpperCase() : null,
+    linkReady: hasCode && kycStatus === 'verified',
+    minWithdrawVnd: 0,
+    taxDetermination: 'unresolved',
+  };
+}
+
 function affiliateCanWithdraw({ available, identityVerified = false } = {}) {
   const n = Number(available);
   const spendable = Number.isFinite(n) ? Math.round(n * 100) / 100 : 0;
@@ -157,6 +185,9 @@ function quoteAffiliateWithdrawal({ amount, available, currency = 'USD', digits 
     net: roundMoney(gross - pitAmount, scale),
     pitRule: !cfg.pit.enabled ? '' : exempt ? 'EXEMPT_CAM_KET_08_CK_TNCN' : 'VN_PIT_10PCT_AFFILIATE_WITHDRAWAL',
     pitCommitmentApplied: exempt && cfg.pit.enabled,
+    legalDetermination: 'unresolved',
+    statutoryRuleApplied: false,
+    article50Paragraph2Applied: false,
   };
 }
 
@@ -166,4 +197,5 @@ module.exports = {
   calculateAffiliateCommission,
   quoteAffiliateWithdrawal,
   affiliateCanWithdraw,
+  affiliateParticipation,
 };

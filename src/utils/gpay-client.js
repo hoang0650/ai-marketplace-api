@@ -28,12 +28,29 @@ function gpayEnabled() {
   return Boolean(config.gpayMerchantCode && config.gpayPassword);
 }
 
+const GPAY_PROJECT_MESSAGE =
+  'AI Markets đang làm việc trực tiếp với GPay để hoàn tất hợp đồng cung ứng dịch vụ cho dự án.';
+
 /**
- * GPay is not a top-up channel. GPAY_ENABLED cannot turn checkout back on.
+ * Checkout stays closed. GPAY_ENABLED cannot open it.
+ * The project contract is still pending. This is not a permanent-removal finding
+ * and it does not confirm that another agreement covers AI Markets.
  * Webhook reconciliation of an in-flight bill does not use this flag.
  */
 function gpayFeatureEnabled() {
   return false;
+}
+
+function gpayProjectStatus() {
+  return {
+    relationship: 'direct',
+    projectContract: 'pending',
+    activation: 'not_activated',
+    serviceScopeReady: false,
+    licenseScopeConfirmed: false,
+    removed: false,
+    message: GPAY_PROJECT_MESSAGE,
+  };
 }
 
 /** Gateway credentials present, regardless of the feature flag (used to reconcile in-flight bills). */
@@ -433,6 +450,8 @@ module.exports = {
   PORTAL_LIVE_BASE,
   gpayEnabled,
   gpayFeatureEnabled,
+  gpayProjectStatus,
+  GPAY_PROJECT_MESSAGE,
   gpayPortalConfigured,
   gpayVaEnabled,
   gpayPortalEnabled,

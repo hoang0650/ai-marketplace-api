@@ -201,7 +201,14 @@ function decideManualTaxReview({ actorRole, status, reason, lookupAttested } = {
       message: 'Approve only after checking the declared tax code on the public tax lookup. The server does not query that site.',
     };
   }
-  return { ok: true, status: next, reason: why, lookupAttested: next === 'approved' };
+  return {
+    ok: true,
+    status: next,
+    reason: why,
+    lookupAttested: next === 'approved',
+    grantsElectronicIdentity: false,
+    grantsAffiliateEligibility: false,
+  };
 }
 
 async function getOrCreateSellerProfile(user, defaults = {}) {

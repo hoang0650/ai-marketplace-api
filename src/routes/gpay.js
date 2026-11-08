@@ -15,6 +15,7 @@ const {
   gpayVaEnabled,
   gpayPortalEnabled,
   gpaySandbox,
+  gpayProjectStatus,
   createVirtualAccount,
   queryVirtualAccount,
   initBill,
@@ -75,9 +76,9 @@ function canSimulate(user) {
  * Webhook / return / order-status routes are NOT gated, so an in-flight bill can still be reconciled.
  */
 function requireGpayEnabled(_req, res) {
-  return res.status(410).json({
-    message: 'GPay is not offered. Top up with VietQR to the company account. No replacement gateway is provided.',
-    code: 'GPAY_REMOVED',
+  return res.status(403).json({
+    ...gpayProjectStatus(),
+    code: 'GPAY_NOT_ACTIVATED',
   });
 }
 
@@ -124,7 +125,7 @@ router.get('/config', optionalAuth, async (req, res, next) => {
   try {
     const fx = await rateQuote();
     res.json({
-      removed: true,
+      ...gpayProjectStatus(),
       available: false,
       featureEnabled: false,
       enabled: false,

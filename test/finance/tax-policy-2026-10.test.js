@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const zlib = require('node:zlib');
 const { settleSale } = require('../../src/finance/settlement-engine');
 const { calculateSellerTax, publicTaxPolicy, sellerTaxRateFor } = require('../../src/finance/seller-tax-policy');
+const { taxLegalStatus, rejectUngroundedStatutoryOverride } = require('../../src/finance/tax-legal-status');
 const { taxConfig } = require('../../src/config/tax');
 const { taxCategoryFromProduct } = require('../../src/finance/tax-category');
 const { validateSellerTaxInfo, isValidTaxCode, sellerApprovalGate } = require('../../src/utils/seller-compliance');
@@ -31,7 +32,8 @@ describe('seller tax by type and product kind', () => {
     assert.equal(s.taxPolicy.rate, 0.07);
     assert.equal(s.taxPolicy.withheldByPlatform, true);
     assert.equal(s.taxPolicy.productKind, 'DIGITAL');
-    assert.match(s.taxPolicy.legalBasis, /252\/2026/);
+    assert.equal(s.taxPolicy.legalBasis, '');
+    assert.equal(s.taxPolicy.legalDetermination, 'unresolved');
   });
   test('individual, physical goods: 1% + 0.5% = 1.5%', () => {
     assert.equal(taxCategoryFromProduct({ productKind: 'physical' }), 'PHYSICAL_GOODS');
@@ -75,6 +77,12 @@ describe('seller tax by type and product kind', () => {
     assert.equal(p.householdBusiness.rate, 0);
     assert.equal(p.company.platformIssuesVatInvoiceOnFee, true);
     assert.equal(sellerTaxRateFor('COMPANY').total, 0);
+    assert.equal(p.legalReview, false);
+    assert.equal(p.legalDetermination.determination, 'unresolved');
+    assert.equal(p.legalDetermination.fiveMillionPerPaymentNotApplied, true);
+    assert.equal(taxLegalStatus().householdZeroIsConfiguredNotStatutoryBlanket, true);
+    assert.equal(rejectUngroundedStatutoryOverride({ statutoryRate: 0 }).code, 'TAX_MATRIX_REQUIRED');
+    assert.equal(rejectUngroundedStatutoryOverride({}).ok, true);
   });
   test('platform-direct sales carry no seller tax', () => {
     const s = sale('INDIVIDUAL', { ownershipType: 'PLATFORM_DIRECT' });

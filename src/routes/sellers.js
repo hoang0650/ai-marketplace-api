@@ -79,9 +79,12 @@ function mapSellerProfile(doc) {
       reason: o.manualTaxReview?.reason || '',
       reviewedAt: o.manualTaxReview?.reviewedAt ? new Date(o.manualTaxReview.reviewedAt).toISOString() : null,
       lookupAttested: o.manualTaxReview?.lookupAttested === true,
+      grantsElectronicIdentity: false,
+      grantsAffiliateEligibility: false,
     },
     /** Legacy profile flag. It is not user.kyc and must not be read as electronic identity. */
     electronicIdentitySeparate: true,
+    electronicIdentitySchedule: require('../finance/electronic-identity-schedule').electronicIdentitySchedule(),
     verifiedAt: o.verifiedAt ? new Date(o.verifiedAt).toISOString() : null,
     rejectedAt: o.rejectedAt ? new Date(o.rejectedAt).toISOString() : null,
     suspendedAt: o.suspendedAt ? new Date(o.suspendedAt).toISOString() : null,

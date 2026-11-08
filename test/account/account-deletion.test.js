@@ -42,6 +42,8 @@ describe('confirmation and retention', () => {
     assert.equal(retentionUntil(new Date('2026-10-13T00:00:00Z')).toISOString(), '2029-10-13T00:00:00.000Z');
     const n = deletionNotice();
     assert.ok(n.retained.some((s) => s.includes('3 năm')));
+    assert.ok(n.retained.some((s) => s.includes('tạm ngừng hoặc chấm dứt')));
+    assert.ok(n.retained.some((s) => s.includes('không bị xóa tự động')));
     assert.equal(n.webUrl, 'https://aimarkets.vn/account/delete');
     assert.equal(n.irreversible, true);
   });
