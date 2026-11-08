@@ -111,7 +111,9 @@ router.get('/', async (req, res, next) => {
         .lean();
       return products.map(mapProduct);
     });
-    res.json(result);
+    const { currentFx, stampMappedProduct } = require('../finance/vnd-quote');
+    const fx = await currentFx();
+    res.json(Array.isArray(result) ? result.map((p) => stampMappedProduct(p, fx)) : result);
   } catch (err) {
     next(err);
   }
@@ -134,7 +136,8 @@ router.get('/:slug', async (req, res, next) => {
       return mapped;
     });
     if (!result) return res.status(404).json({ message: 'Not found' });
-    res.json(result);
+    const { currentFx, stampMappedProduct } = require('../finance/vnd-quote');
+    res.json(stampMappedProduct(result, await currentFx()));
   } catch (err) {
     next(err);
   }

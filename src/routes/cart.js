@@ -14,6 +14,8 @@ async function loadCart(userId) {
 
 async function respond(res, cart) {
   await cart.populate({ path: 'items.product' });
+  const { currentFx, stampMappedProduct, quoteAuthoritativeVnd } = require('../finance/vnd-quote');
+  const fx = await currentFx();
   const items = (cart.items || [])
     .filter((it) => it.product)
     .map((it) => {
@@ -21,11 +23,14 @@ async function respond(res, cart) {
       // Same price checkout will charge: the line's license period, else the listing default.
       const pick = isLicenseCategory(raw.category) ? resolveLicensePrice(raw, it.licenseTerm) : null;
       return {
-        product: mapProduct(it.product),
+        product: stampMappedProduct(mapProduct(it.product), fx),
         qty: it.qty,
         addedAt: it.addedAt,
         licenseTerm: pick ? pick.term : '',
         unitPrice: pick ? pick.unitPrice : null,
+        unitPriceVnd: pick
+          ? quoteAuthoritativeVnd({ amount: pick.unitPrice, currency: raw.pricing?.currency || 'USD', ...fx })
+          : null,
       };
     })
     .filter((it) => it.product);
