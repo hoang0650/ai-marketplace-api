@@ -82,6 +82,16 @@ router.get('/summary', authenticate, async (req, res, next) => {
       buyerCashoutAllowed: false,
       prepaidWithdrawable: false,
       buyerDepositWithdraw: await buyerDepositWithdrawFor(req.user._id, req.user),
+      displayVnd: await (async () => {
+        const { quoteAuthoritativeVnd, currentFx } = require('../finance/vnd-quote');
+        const fx = await currentFx();
+        return {
+          ledgerCurrency: 'USD',
+          clientRateIgnored: true,
+          balance: quoteAuthoritativeVnd({ amount: summary.balance, currency: 'USD', ...fx }),
+          available: quoteAuthoritativeVnd({ amount: summary.available, currency: 'USD', ...fx }),
+        };
+      })(),
     });
   } catch (err) {
     next(err);

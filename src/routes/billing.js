@@ -170,6 +170,24 @@ router.post('/checkout', authenticate, async (req, res, next) => {
       }
     }
     const payableSubtotal = roundMoney(Math.max(0, subtotal - couponDiscount));
+    if (req.body?.amountVnd != null && req.body.amountVnd !== '') {
+      const { quoteAuthoritativeVnd, assertClientVndMatches } = require('../finance/vnd-quote');
+      const fx = await require('../finance/exchange-rate').getExchangeRates();
+      const serverQuote = quoteAuthoritativeVnd({
+        amount: payableSubtotal,
+        currency,
+        vndPerUsd: fx.vndPerUsd,
+        rateSource: fx.source,
+      });
+      const check = assertClientVndMatches({ clientAmountVnd: req.body.amountVnd, serverQuote });
+      if (!check.ok) {
+        return res.status(409).json({
+          message: 'amountVnd must match the server VND quote for this charge. The wallet debit stays in the stored currency.',
+          code: check.code,
+          amountVnd: serverQuote.amountVnd,
+        });
+      }
+    }
     const discountedUnit = checkoutQty > 0 ? roundMoney(payableSubtotal / checkoutQty) : 0;
     const sellerProfile = await SellerProfile.findOne({ user: product.creator }).lean();
     // Affiliate: last valid click (cookie click id or the buyer's own signed-in clicks), seller's
@@ -444,6 +462,16 @@ router.post('/checkout', authenticate, async (req, res, next) => {
       quantity: checkoutQty,
       amount,
       currency,
+      amountVnd: (await (async () => {
+        const { quoteAuthoritativeVnd } = require('../finance/vnd-quote');
+        const fx = await require('../finance/exchange-rate').getExchangeRates().catch(() => null);
+        return quoteAuthoritativeVnd({
+          amount,
+          currency,
+          vndPerUsd: fx?.vndPerUsd,
+          rateSource: fx?.source,
+        });
+      })()),
       couponCode: couponCode || undefined,
       couponDiscount: couponDiscount || undefined,
       listUnitPrice: unit,
