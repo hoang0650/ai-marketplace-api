@@ -20,6 +20,8 @@ const { applyVoiceProduct } = require('../utils/voice-clone');
 const { normalizeDevices } = require('../utils/stream-clients');
 const SellerProfile = require('../models/SellerProfile');
 const { parseAffiliateRate, effectiveAffiliateRate } = require('../finance/affiliate-engine');
+const { assertUsageListing } = require('../finance/usage-units');
+const { normalizeServicePackages } = require('../utils/hire/packages');
 
 /** 'DIGITAL' | 'PHYSICAL' | '' (missing/invalid). */
 function normalizeProductKind(v) {
@@ -148,7 +150,7 @@ function talentCategoryError(user, category) {
   if (user.role !== ROLE.TALENT || PROFESSIONAL_SERVICE_CATEGORIES.includes(String(category))) return null;
   return {
     message:
-      'Tài khoản này chỉ được đăng dịch vụ chuyên môn trọn gói: Làm web, Làm app, Marketing, SEO, Creator, Tự động hóa.',
+      'Tài khoản này chỉ được đăng dịch vụ chuyên môn trọn gói: Làm web, Làm app, Marketing, SEO, Creator, Tự động hóa, Đặt nhiếp ảnh.',
     code: 'CATEGORY_NOT_ALLOWED',
     allowed: PROFESSIONAL_SERVICE_CATEGORIES,
   };
@@ -187,6 +189,17 @@ function serviceDeliveryDays(category, value) {
   if (typeof value === 'string' && !/^\d+$/.test(value.trim())) return null;
   const days = Number(value);
   return Number.isInteger(days) && days >= 1 && days <= 365 ? days : null;
+}
+
+function usageListingError(category, pricing) {
+  if (!pricing || pricing.model !== 'usage') return null;
+  if (PROFESSIONAL_SERVICE_CATEGORIES.includes(String(category))) return null;
+  return assertUsageListing(category, pricing.usageUnit);
+}
+
+function servicePackagesFor(category, raw) {
+  if (!PROFESSIONAL_SERVICE_CATEGORIES.includes(String(category))) return { packages: undefined };
+  return normalizeServicePackages(raw);
 }
 
 function serviceDeliveryError(category, value) {
@@ -228,6 +241,10 @@ router.post('/', authenticate, requireRoles('seller', 'talent', 'admin'), async 
     if (badServicePrice) return res.status(400).json(badServicePrice);
     const badServiceDelivery = serviceDeliveryError(body.category, body.serviceDeliveryDays);
     if (badServiceDelivery) return res.status(400).json(badServiceDelivery);
+    const badUnit = usageListingError(body.category, body.pricing);
+    if (badUnit) return res.status(400).json(badUnit);
+    const packed = servicePackagesFor(body.category, body.servicePackages);
+    if (packed.error) return res.status(400).json(packed.error);
     const affiliate = parseAffiliateRate(body.affiliateRate, { allowNull: true });
     if (!affiliate.ok) return res.status(400).json({ message: affiliate.message, code: affiliate.code });
     // Required in the web/app forms. An invalid value is rejected; a missing one (older app
@@ -314,6 +331,7 @@ router.post('/', authenticate, requireRoles('seller', 'talent', 'admin'), async 
       coverUrl: body.coverUrl || '',
       gallery: Array.isArray(body.gallery) ? body.gallery : [],
       pricing: hirePricing(body.category, body.pricing),
+      servicePackages: packed.packages,
       serviceDeliveryDays: serviceDeliveryDays(body.category, body.serviceDeliveryDays),
       affiliateRate: affiliate.rate,
       runtime: normalizeRuntime(body.runtime || {}, {
@@ -408,7 +426,17 @@ router.put('/:id', authenticate, requireRoles('seller', 'talent', 'admin'), asyn
       const plain = product.pricing?.toObject?.() || product.pricing;
       const badServicePrice = servicePricingError(product.category, plain);
       if (badServicePrice) return res.status(400).json(badServicePrice);
+      const badUnit = usageListingError(product.category, plain);
+      if (badUnit) return res.status(400).json(badUnit);
       product.pricing = hirePricing(product.category, plain);
+    }
+    if (body.servicePackages !== undefined || body.category !== undefined) {
+      const packed = servicePackagesFor(
+        product.category,
+        body.servicePackages !== undefined ? body.servicePackages : product.servicePackages,
+      );
+      if (packed.error) return res.status(400).json(packed.error);
+      product.servicePackages = packed.packages;
     }
     const effectiveDeliveryDays =
       body.serviceDeliveryDays !== undefined ? body.serviceDeliveryDays : product.serviceDeliveryDays;
@@ -475,3 +503,5 @@ module.exports.hirePricing = hirePricing;
 module.exports.servicePricingError = servicePricingError;
 module.exports.serviceDeliveryDays = serviceDeliveryDays;
 module.exports.serviceDeliveryError = serviceDeliveryError;
+module.exports.usageListingError = usageListingError;
+module.exports.servicePackagesFor = servicePackagesFor;

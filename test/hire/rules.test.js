@@ -155,8 +155,9 @@ test('publicHire exposes role and current phase', () => {
   assert.equal(view.milestones.length, 3);
 });
 
-test('talent may only list the six custom-work categories', () => {
+test('talent may list professional services, including book photographer', () => {
   assert.equal(isHireRequestCategory('hire-seo'), true);
+  assert.equal(isHireRequestCategory('hire-photographer'), true);
   assert.equal(isHireRequestCategory('hire-agent'), false);
   const talent = { role: 'talent' };
   assert.equal(talentCategoryError(talent, 'hire-build-web'), null);

@@ -77,6 +77,17 @@ const orderSchema = new mongoose.Schema(
     },
     /** Set when the order pays one phase of a quoted hire project. */
     hireProject: { type: mongoose.Schema.Types.ObjectId, ref: 'HireProject', default: null, index: true },
+    /**
+     * Prepaid professional-service escrow. Seller net stays at releasedSellerNet
+     * until the buyer accepts a phase. Unreleased funds are not seller earnings.
+     */
+    escrow: {
+      status: { type: String, enum: ['', 'held', 'partial', 'released', 'refunded'], default: '' },
+      plannedSellerNet: { type: Number, default: 0 },
+      releasedSellerNet: { type: Number, default: 0 },
+      releasedGross: { type: Number, default: 0 },
+      gross: { type: Number, default: 0 },
+    },
     hireMilestone: { type: Number, default: null },
     /** Client Idempotency-Key of the checkout click (unique per buyer): a retried request never charges twice. */
     idempotencyKey: { type: String, default: undefined, trim: true, maxlength: 120 },

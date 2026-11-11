@@ -25,6 +25,7 @@ const AI_CATEGORIES = [
   { id: 'hire-seo', label: 'SEO', description: 'Fixed-package SEO services priced per deliverable.', hubPath: '/hire-seo', group: 'hire', navGroup: 'talent', lane: 'ai' },
   { id: 'hire-creator', label: 'Creator', description: 'Fixed-package content creation (video, design, copy) priced per deliverable.', hubPath: '/hire-creator', group: 'hire', navGroup: 'talent', lane: 'ai' },
   { id: 'hire-workflow', label: 'Workflow automation', description: 'Fixed-package automation (n8n, Zapier, Make, OpenClaw) priced per deliverable.', hubPath: '/hire-workflow', group: 'hire', navGroup: 'talent', lane: 'ai' },
+  { id: 'hire-photographer', label: 'Book photographer', description: 'Fixed-package photography. The buyer pays by phase or pays the whole package up front into escrow.', hubPath: '/hire-photographer', group: 'hire', navGroup: 'talent', lane: 'ai' },
   { id: 'hire-build-app', label: 'Build app', description: 'Fixed-package mobile / desktop app builds priced per deliverable.', hubPath: '/hire-build-app', group: 'hire', navGroup: 'talent', lane: 'ai' },
   { id: 'hire-build-web', label: 'Build web', description: 'Fixed-package websites, dashboards and web apps priced per deliverable.', hubPath: '/hire-build-web', group: 'hire', navGroup: 'talent', lane: 'ai' },
   { id: 'template-web', label: 'Web templates', description: 'Seller-made website templates. Open one in AI App Builder and restyle it with your own AI key.', hubPath: '/template-web', group: 'models', navGroup: 'platform', lane: 'ai' },
@@ -35,9 +36,9 @@ const AI_CATEGORIES = [
 const TEMPLATE_CATEGORY_KIND = { 'template-web': 'web', 'template-app': 'app' };
 
 /**
- * Professional services: làm web, làm app, marketing, SEO, creator, tự động hóa.
- * Sold as fixed packages and paid from the wallet at checkout like any other product
- * (no quotes, hourly/monthly pricing, job posts or milestones). Talent accounts may list only these.
+ * Professional services: làm web, làm app, marketing, SEO, creator, tự động hóa, đặt nhiếp ảnh.
+ * Sold as fixed packages. The buyer pays each phase on acceptance, or pays the
+ * whole package up front into the existing wallet escrow. Talent accounts may list only these.
  */
 const PROFESSIONAL_SERVICE_CATEGORIES = [
   'hire-build-web',
@@ -46,6 +47,7 @@ const PROFESSIONAL_SERVICE_CATEGORIES = [
   'hire-seo',
   'hire-creator',
   'hire-workflow',
+  'hire-photographer',
 ];
 /** @deprecated Legacy name kept for existing imports — same list as PROFESSIONAL_SERVICE_CATEGORIES. */
 const HIRE_REQUEST_CATEGORIES = PROFESSIONAL_SERVICE_CATEGORIES;

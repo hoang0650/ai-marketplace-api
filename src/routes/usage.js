@@ -10,6 +10,45 @@ const {
 } = require('../utils/buyer-usage');
 
 const router = express.Router();
+const { usageUnitCatalog } = require('../finance/usage-units');
+const { purchaseUsageAccess, hasActiveUsageEntitlement } = require('../finance/usage-access');
+
+/** Fixed per-unit codes, labels and which categories can meter them. */
+router.get('/units', (req, res) => {
+  res.json(usageUnitCatalog());
+});
+
+/** Buy one day/week/month/year access period. Calls are not metered after this. */
+router.post('/access', authenticate, async (req, res, next) => {
+  try {
+    const { order, entitlement, unit } = await purchaseUsageAccess({
+      buyer: req.user,
+      productId: req.body?.productId,
+    });
+    res.status(201).json({
+      orderId: String(order._id),
+      amount: order.amount,
+      currency: order.currency,
+      unit: unit.code,
+      period: unit.period,
+      startsAt: entitlement.startsAt,
+      expiresAt: entitlement.expiresAt,
+    });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ message: err.message, code: err.code });
+    next(err);
+  }
+});
+
+router.get('/access', authenticate, async (req, res, next) => {
+  try {
+    const row = await hasActiveUsageEntitlement(req.user._id, req.query.productId);
+    res.json({ active: !!row, expiresAt: row?.expiresAt || null, unit: row?.unit || null });
+  } catch (err) {
+    next(err);
+  }
+});
+
 
 /** Seller/admin aggregate stats (existing). */
 router.get('/', authenticate, requireRoles('seller', 'admin'), async (req, res, next) => {

@@ -74,7 +74,20 @@ async function currentFx() {
 
 function stampMappedProduct(mapped, fx) {
   if (!mapped || typeof mapped !== 'object') return mapped;
-  return { ...mapped, pricingVnd: pricingVnd(mapped.pricing || {}, fx || {}) };
+  const pricing = mapped.pricing || {};
+  const currency = pricing.currency || 'USD';
+  const packages = Array.isArray(mapped.servicePackages)
+    ? mapped.servicePackages.map((row) => ({
+        ...row,
+        priceVnd: quoteAuthoritativeVnd({
+          amount: row.price,
+          currency: row.currency || currency,
+          vndPerUsd: fx?.vndPerUsd,
+          rateSource: fx?.rateSource,
+        }),
+      }))
+    : mapped.servicePackages;
+  return { ...mapped, servicePackages: packages, pricingVnd: pricingVnd(pricing, fx || {}) };
 }
 
 module.exports = {

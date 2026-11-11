@@ -1,4 +1,5 @@
 const { publicRuntime } = require('./runtime');
+const { describeUsageUnit } = require('../finance/usage-units');
 const { isPayoutHeld, holdKind, holdUntil, canOpenDispute, roundMoney, effectiveSellerNet } = require('./payout-hold');
 const { inferLegacy } = require('./notify');
 const { publicProvider, scrubVendor } = require('./white-label');
@@ -51,7 +52,11 @@ function mapProduct(doc, { includeSecrets = false } = {}) {
       settings: d.settings || '',
       createdAt: d.createdAt || null,
     })),
-    pricing: o.pricing,
+    pricing: {
+      ...(o.pricing || {}),
+      ...describeUsageUnit(o.pricing || {}, o.category),
+    },
+    servicePackages: Array.isArray(o.servicePackages) ? o.servicePackages : [],
     sectorQualification: require('../finance/sector-qualification').sectorQualification(o.category),
     serviceDeliveryDays: Number(o.serviceDeliveryDays) || null,
     affiliateRate: o.affiliateRate ?? null,

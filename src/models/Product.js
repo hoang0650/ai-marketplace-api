@@ -8,6 +8,10 @@ const pricingSchema = new mongoose.Schema(
     currency: { type: String, default: 'USD' },
     interval: { type: String, enum: ['day', 'month', 'year', null], default: null },
     usageUnit: { type: String },
+    /** Previous free-text unit, kept when the listing is mapped or flagged. */
+    usageUnitLegacy: { type: String, default: '' },
+    /** canonical = stored code is the enum. needs_review = seller must pick a code. */
+    usageUnitStatus: { type: String, enum: ['', 'canonical', 'needs_review'], default: '' },
     usageRate: { type: Number },
     /** Optional separate per-unit prices for prompt (input) and completion (output) tokens. */
     inputRate: { type: Number },
@@ -174,6 +178,31 @@ const productSchema = new mongoose.Schema(
     /** Professional services: optional phase plan [{title, percent, days}] (percent sums to 100). */
     servicePlan: {
       type: [new mongoose.Schema({ title: String, percent: Number, days: Number }, { _id: false })],
+      default: undefined,
+    },
+    /**
+     * Named packages for a professional service. The buyer picks one and then
+     * either staged acceptance payments or full prepayment into escrow.
+     */
+    servicePackages: {
+      type: [
+        new mongoose.Schema(
+          {
+            code: { type: String, required: true, trim: true, maxlength: 40 },
+            name: { type: String, required: true, trim: true, maxlength: 120 },
+            scope: { type: String, default: '', maxlength: 2000 },
+            deliverables: { type: [String], default: [] },
+            durationDays: { type: Number, required: true, min: 1, max: 365 },
+            price: { type: Number, required: true, min: 0 },
+            currency: { type: String, default: 'USD' },
+            phases: {
+              type: [new mongoose.Schema({ title: String, percent: Number, days: Number }, { _id: false })],
+              default: undefined,
+            },
+          },
+          { _id: false }
+        ),
+      ],
       default: undefined,
     },
     /** Seller-promised completion time for a professional-service package, measured in days. */
