@@ -11,6 +11,7 @@ const { ensureLegalDocuments } = require('./utils/ensure-legal-documents');
 const { ensureCommissionRules } = require('./utils/ensure-commission-rules');
 const { ensureTaxRules } = require('./utils/ensure-tax-rules');
 const { ensureProductKinds } = require('./utils/ensure-product-kinds');
+const { ensureUsageUnits } = require('./utils/ensure-usage-units');
 const { syncSalesCountsFromOrders } = require('./utils/sales');
 const { attachTerminalGateway } = require('./terminal/gateway');
 const { attachGameStreamProxy } = require('./terminal/stream-proxy');
@@ -55,6 +56,7 @@ connectDb()
   .then(() => ensureAiProviderProducts())
   .then(() => ensureComputeTestProducts())
   .then(() => ensureProductKinds().catch((err) => console.error('[catalog] productKind backfill failed:', err.message)))
+  .then(() => ensureUsageUnits().catch((err) => console.error('[catalog] usage unit backfill failed:', err.message)))
   .then(() => warmExchangeRates())
   .then((fx) => {
     if (fx) console.log(`[exchange-rate] ${fx.source} VND/USD=${fx.vndPerUsd} CNY/USD=${fx.cnyPerUsd}`);

@@ -338,7 +338,7 @@ function billMeasuredUsage({ unit, rate, currency = 'USD', inputRate, outputRate
  */
 function applyUsageUnitMigration(product) {
   const pricing = product?.pricing;
-  if (!pricing) return { changed: false, status: 'skipped' };
+  if (!pricing || pricing.model !== 'usage') return { changed: false, status: 'skipped' };
   const result = migrateUsageUnit(pricing.usageUnit, product.category, {
     charactersPerCredit: product.contentMeta?.charactersPerCredit,
   });

@@ -65,9 +65,11 @@ test('unambiguous free text migrates and the rest is flagged', () => {
   const listing = { category: 'inference', pricing: { model: 'usage', usageUnit: '1M tokens', usageRate: 2 } };
   assert.equal(applyUsageUnitMigration(listing).usageUnit, '1m_tokens');
   assert.equal(listing.pricing.usageUnitLegacy, '1M tokens');
-  const odd = { category: 'text-to-image', pricing: { usageUnit: 'megapixel' } };
+  const odd = { category: 'text-to-image', pricing: { model: 'usage', usageUnit: 'megapixel' } };
   assert.equal(applyUsageUnitMigration(odd).status, 'needs_review');
   assert.equal(odd.pricing.usageUnit, 'megapixel');
+  const fixed = { category: 'hire-photographer', pricing: { model: 'one-time', price: 10 } };
+  assert.equal(applyUsageUnitMigration(fixed).status, 'skipped');
 });
 
 test('metering ignores client quantity and bills pro-rata', () => {
