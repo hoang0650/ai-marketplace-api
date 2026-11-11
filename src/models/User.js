@@ -102,8 +102,31 @@ const userSchema = new mongoose.Schema(
     authProvider: { type: String, enum: ['local', 'google'], default: 'local' },
     name: { type: String, required: true, trim: true },
     avatarUrl: { type: String, default: '' },
-    /** buyer | seller | talent | freelancer | employer | admin — see utils/roles.js */
-    role: { type: String, enum: ['buyer', 'seller', 'talent', 'freelancer', 'employer', 'admin'], default: 'buyer' },
+    /** buyer | seller | affiliate | talent | freelancer | employer | admin — see utils/roles.js */
+    role: { type: String, enum: ['buyer', 'seller', 'affiliate', 'talent', 'freelancer', 'employer', 'admin'], default: 'buyer' },
+    /** Explicit email verification. Google sign-up sets this; local sign-up does not. */
+    emailVerified: { type: Boolean, default: false },
+    /**
+     * Affiliate onboarding. Existing buyer/seller rows leave intent false.
+     * taxReview is never set to approved by the account holder.
+     */
+    affiliateOnboarding: {
+      intent: { type: Boolean, default: false },
+      policyAccepted: { type: Boolean, default: false },
+      policyVersion: { type: String, default: '' },
+      policyAcceptedAt: { type: Date, default: null },
+      taxCode: { type: String, default: '', maxlength: 20 },
+      taxReview: {
+        status: { type: String, enum: ['none', 'declared', 'approved', 'rejected'], default: 'none' },
+        lookupAttested: { type: Boolean, default: false },
+        reason: { type: String, default: '', maxlength: 1000 },
+        source: { type: String, default: 'manual_public_lookup' },
+        reviewedAt: { type: Date, default: null },
+        reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+        grantsElectronicIdentity: { type: Boolean, default: false },
+        grantsAffiliateEligibility: { type: Boolean, default: false },
+      },
+    },
     /** Least-privilege staff permissions (e.g. 'finance.tax' for kế toán thuế); admins need none. */
     adminPermissions: { type: [String], default: [] },
     creatorSlug: { type: String, trim: true, sparse: true, unique: true },

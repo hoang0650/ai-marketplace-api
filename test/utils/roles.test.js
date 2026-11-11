@@ -17,13 +17,15 @@ const {
   normalizeAdminPermissions,
 } = require('../../src/utils/roles');
 
-test('role enum covers the six marketplace roles', () => {
-  assert.deepEqual(USER_ROLES, ['buyer', 'seller', 'talent', 'freelancer', 'employer', 'admin']);
+test('role enum covers buyer, seller, affiliate and the legacy roles', () => {
+  assert.deepEqual(USER_ROLES, ['buyer', 'seller', 'affiliate', 'talent', 'freelancer', 'employer', 'admin']);
 });
 
-test('signup offers buyer and seller only (Work roles are legacy, admin never)', () => {
-  assert.deepEqual([...SIGNUP_ROLES], ['buyer', 'seller']);
+test('signup offers buyer, seller and affiliate (Work roles are legacy, admin never)', () => {
+  assert.deepEqual([...SIGNUP_ROLES], ['buyer', 'seller', 'affiliate']);
+  assert.equal(isSignupRole('affiliate'), true);
   assert.equal(isSignupRole('admin'), false);
+  assert.equal(isSignupRole('marketer'), false);
   for (const r of ['employer', 'freelancer', 'talent']) assert.equal(isSignupRole(r), false, r);
   assert.deepEqual([...LEGACY_WORK_ROLES], ['talent', 'freelancer', 'employer']);
   assert.equal(isSignupRole('creator'), true, 'legacy creator maps to seller');
@@ -48,6 +50,7 @@ test('legacy creator normalizes to seller', () => {
 test('strict split: only sellers can sell', () => {
   assert.equal(hasCapability({ role: 'seller' }, 'sell'), true);
   assert.equal(hasCapability({ role: 'buyer' }, 'sell'), false);
+  assert.equal(hasCapability({ role: 'affiliate' }, 'sell'), false);
   assert.equal(hasCapability({ role: 'talent' }, 'sell'), false);
 });
 
@@ -84,6 +87,7 @@ test('earner roles are the ones that can withdraw', () => {
   assert.equal(isEarnerRole({ role: 'freelancer' }), true);
   assert.equal(isEarnerRole({ role: 'employer' }), false);
   assert.equal(isEarnerRole({ role: 'buyer' }), false);
+  assert.equal(isEarnerRole({ role: 'affiliate' }), false);
 });
 
 test('withAdmin appends the admin role', () => {

@@ -9,8 +9,10 @@
  *            with MST (and ĐKKD for household business / company) — see utils/seller-compliance.js
  * - admin  : ban quản trị (full platform ops, bypasses capability gates)
  *
- * Affiliate (người tiếp thị liên kết) is a CAPABILITY of any eKYC-verified account, not a role
- * (routes/affiliate.js): seller-funded 0–25%, any positive eligible withdrawal, configured PIT or Mẫu 08.
+ * Affiliate (Người tiếp thị liên kết) is a signup role. The account can buy and cannot sell.
+ * Signing up records intent only. It does not issue an affiliate code. Existing buyer and
+ * seller accounts keep their role. A code still requires the existing issuance flow, which
+ * stays closed until statutory electronic identity exists.
  *
  * Least-privilege admin permissions (`User.adminPermissions`): a non-admin account (e.g. kế toán
  * thuế) can be granted only `finance.tax` (tax exports + Mẫu 08/CK-TNCN queue). Admins keep full access.
@@ -26,6 +28,7 @@
 const ROLE = Object.freeze({
   BUYER: 'buyer',
   SELLER: 'seller',
+  AFFILIATE: 'affiliate',
   TALENT: 'talent',
   FREELANCER: 'freelancer',
   EMPLOYER: 'employer',
@@ -36,7 +39,7 @@ const ROLE = Object.freeze({
 const USER_ROLES = Object.freeze(Object.values(ROLE));
 
 /** Roles a user may pick for themselves at signup (never admin). */
-const SIGNUP_ROLES = Object.freeze([ROLE.BUYER, ROLE.SELLER]);
+const SIGNUP_ROLES = Object.freeze([ROLE.BUYER, ROLE.SELLER, ROLE.AFFILIATE]);
 
 /** Roles kept only for existing accounts (Work/Hire discontinued). */
 const LEGACY_WORK_ROLES = Object.freeze([ROLE.TALENT, ROLE.FREELANCER, ROLE.EMPLOYER]);

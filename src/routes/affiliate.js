@@ -10,6 +10,12 @@ const { affiliateConfig } = require('../config/affiliate');
 const { authenticate, optionalAuth, requireRoles, requireAdminPermission, invalidateAuthUserCache } = require('../middleware/auth');
 const { ADMIN_PERMISSION, hasAdminPermission } = require('../utils/roles');
 const { parseAffiliateRate, effectiveAffiliateRate, affiliateParticipation } = require('../finance/affiliate-engine');
+const {
+  affiliateOnboardingView,
+  affiliateLinkDenial,
+  declareAffiliateTax,
+  reviewAffiliateTax,
+} = require('../finance/affiliate-onboarding');
 const { isCommissionHeld, reverseAffiliateCommission } = require('../finance/affiliate-service');
 const { roundMoney } = require('../finance/constants');
 const { deleteCachePattern } = require('../utils/cache');
@@ -173,6 +179,7 @@ router.get('/', authenticate, async (req, res, next) => {
       electronicIdentitySatisfied: false,
       codeIssuance: participation.codeIssuance,
       participation,
+      onboarding: affiliateOnboardingView(user),
       clicks,
       orders: rows.filter((r) => r.status === 'active').length,
       conversions: rows.filter((r) => r.status === 'active').length,
@@ -196,10 +203,10 @@ router.get('/link', authenticate, async (req, res, next) => {
     if (!user) return res.status(401).json({ message: 'Unauthorized' });
     if (!isKycVerified(user)) return res.status(403).json(KYC_REQUIRED);
     const participation = affiliateParticipation(user);
-    if (!participation.code) {
-      return res.status(403).json({
+    const denial = affiliateLinkDenial(user);
+    if (!participation.code || denial) {
+      return res.status(denial?.status || 403).json(denial?.body || {
         code: 'ELECTRONIC_IDENTITY_NOT_IMPLEMENTED',
-        message: 'A new affiliate code is not issued. Electronic identity for affiliates is not implemented, and a manual tax-code review does not replace it.',
         electronicIdentityStatus: 'not_implemented',
       });
     }
@@ -555,6 +562,73 @@ router.get('/pit-certificate', authenticate, async (req, res, next) => {
     const year = Number(req.query.year) || new Date().getFullYear();
     const rows = await buildPitCertificates({ year, affiliateId: req.user._id });
     res.json(rows.find((r) => r.kind === 'AFFILIATE') || { year, totalIncomeVnd: 0, totalPitWithheldVnd: 0, payments: 0 });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/onboarding', authenticate, async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user._id).lean();
+    if (!user) return res.status(401).json({ message: 'Unauthorized' });
+    res.json(affiliateOnboardingView(user));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.patch('/onboarding', authenticate, async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(401).json({ message: 'Unauthorized' });
+    const declared = declareAffiliateTax(user, {
+      taxCode: req.body?.taxCode,
+      acceptAffiliatePolicy: req.body?.acceptAffiliatePolicy === true,
+    });
+    if (!declared.ok) return res.status(400).json({ message: declared.message, code: declared.code });
+    user.affiliateOnboarding = declared.affiliateOnboarding;
+    user.markModified('affiliateOnboarding');
+    await user.save();
+    await invalidateAuthUserCache(user._id);
+    res.json(affiliateOnboardingView(user));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.patch('/admin/:userId/tax-review', authenticate, requireRoles('admin'), async (req, res, next) => {
+  try {
+    const user = await User.findById(req.params.userId);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    const reviewed = reviewAffiliateTax(user, {
+      actorRole: req.user.role,
+      status: req.body?.status,
+      reason: req.body?.reason,
+      lookupAttested: req.body?.lookupAttested === true,
+    });
+    if (!reviewed.ok) return res.status(400).json({ message: reviewed.message, code: reviewed.code });
+    user.affiliateOnboarding = {
+      ...(user.affiliateOnboarding?.toObject?.() || user.affiliateOnboarding || {}),
+      taxReview: { ...reviewed.taxReview, reviewedBy: req.user._id },
+    };
+    user.markModified('affiliateOnboarding');
+    await user.save();
+    await invalidateAuthUserCache(user._id);
+    await writeAuditLog({
+      actorId: req.user._id,
+      actorRole: req.user.role,
+      action: 'AFFILIATE_TAX_REVIEW',
+      resourceType: 'User',
+      resourceId: user._id,
+      newValue: {
+        status: reviewed.taxReview.status,
+        lookupAttested: reviewed.taxReview.lookupAttested,
+        issueAffiliateCode: false,
+        grantsElectronicIdentity: false,
+      },
+      reason: reviewed.taxReview.reason,
+    });
+    res.json({ ...affiliateOnboardingView(user), affiliateCode: user.affiliateCode || '' });
   } catch (err) {
     next(err);
   }

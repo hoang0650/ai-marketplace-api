@@ -201,7 +201,7 @@ async function detectPersonas(user) {
   const found = [];
   if (seller) found.push('seller');
   if (talent) found.push('talent');
-  if (affiliate) found.push('affiliate');
+  if (affiliate || role === 'affiliate') found.push('affiliate');
   found.push('buyer');
   return found;
 }
