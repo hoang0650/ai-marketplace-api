@@ -11,7 +11,8 @@ const {
 
 const router = express.Router();
 const { usageUnitCatalog } = require('../finance/usage-units');
-const { purchaseUsageAccess, hasActiveUsageEntitlement } = require('../finance/usage-access');
+const { purchaseUsageAccess, hasActiveUsageEntitlement, quoteLedgerAmount } = require('../finance/usage-access');
+const { currentFx } = require('../finance/vnd-quote');
 
 /** Fixed per-unit codes, labels and which categories can meter them. */
 router.get('/units', (req, res) => {
@@ -25,10 +26,19 @@ router.post('/access', authenticate, async (req, res, next) => {
       buyer: req.user,
       productId: req.body?.productId,
     });
-    res.status(201).json({
-      orderId: String(order._id),
+    const fx = await currentFx();
+    const quoted = quoteLedgerAmount({
       amount: order.amount,
       currency: order.currency,
+      vndPerUsd: fx.vndPerUsd,
+      rateSource: fx.rateSource,
+    });
+    res.status(201).json({
+      orderId: String(order._id),
+      amount: quoted.amount,
+      currency: quoted.currency,
+      amountVnd: quoted.amountVnd,
+      vndQuote: quoted.vndQuote,
       unit: unit.code,
       period: unit.period,
       startsAt: entitlement.startsAt,

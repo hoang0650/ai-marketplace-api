@@ -10,6 +10,18 @@ const { unitByCode, accessPeriodEnd } = require('./usage-units');
 const { settleSaleFromDb } = require('./settlement-service');
 const { recordOrderLedger } = require('./ledger-service');
 const { taxCategoryFromProduct } = require('./tax-category');
+const { quoteAuthoritativeVnd } = require('./vnd-quote');
+
+/** Ledger amount plus the server VND quote. A client rate is not an input. */
+function quoteLedgerAmount({ amount, currency = 'USD', vndPerUsd, rateSource } = {}) {
+  const quote = quoteAuthoritativeVnd({ amount, currency, vndPerUsd, rateSource });
+  return {
+    amount: Number(amount),
+    currency: String(currency || 'USD').toUpperCase(),
+    amountVnd: quote.amountVnd,
+    vndQuote: quote,
+  };
+}
 
 function httpError(status, code, message) {
   const err = new Error(message || code);
@@ -131,4 +143,4 @@ async function purchaseUsageAccess({ buyer, productId }) {
   return { order, entitlement, unit };
 }
 
-module.exports = { hasActiveUsageEntitlement, purchaseUsageAccess, accessPeriodEnd };
+module.exports = { hasActiveUsageEntitlement, purchaseUsageAccess, accessPeriodEnd, quoteLedgerAmount };
