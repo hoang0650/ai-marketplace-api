@@ -96,6 +96,15 @@ const hireProjectSchema = new mongoose.Schema(
     messages: { type: [messageSchema], default: [] },
     /** 'package' = fixed-price professional service split into phases; 'quote' = legacy flow. */
     origin: { type: String, enum: ['quote', 'package'], default: 'quote' },
+    /** Which seller package the buyer bought. `default` is the single listing price. */
+    packageCode: { type: String, default: '' },
+    packageSnapshot: { type: mongoose.Schema.Types.Mixed, default: null },
+    /** staged = charge each phase on acceptance; prepaid = full amount held in escrow at the start. */
+    paymentChoice: { type: String, enum: ['staged', 'prepaid'], default: 'staged' },
+    prepaidOrder: { type: mongoose.Schema.Types.ObjectId, ref: 'Order', default: null },
+    escrowStatus: { type: String, enum: ['', 'held', 'partial', 'released', 'refunded'], default: '' },
+    escrowGross: { type: Number, default: 0 },
+    escrowReleasedNet: { type: Number, default: 0 },
   },
   { timestamps: true },
 );

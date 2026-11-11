@@ -8,6 +8,7 @@ const {
   calculateAffiliateCommission,
   quoteAffiliateWithdrawal,
   affiliateCanWithdraw,
+  affiliateParticipation,
 } = require('../../src/finance/affiliate-engine');
 const { pickAttribution, isCommissionHeld, computeAffiliateBalance } = require('../../src/finance/affiliate-service');
 const { policyFor, EMPLOYER_MIN_VND } = require('../../src/finance/payout-policy');
@@ -136,6 +137,9 @@ describe('affiliate PIT at withdrawal: no commercial minimum, configured rate, 0
     assert.equal(w.net, 2_250_000);
     assert.equal(w.pitRule, 'VN_PIT_10PCT_AFFILIATE_WITHDRAWAL');
     assert.equal(w.minWithdrawVnd, 0);
+    assert.equal(w.legalDetermination, 'unresolved');
+    assert.equal(w.article50Paragraph2Applied, false);
+    assert.equal(w.statutoryRuleApplied, false);
   });
   test('below 2,000,000 VND and exactly 2,000,000 VND are allowed when available', () => {
     const below = q({ amount: 1_500_000, available: 1_999_999 });
@@ -275,6 +279,19 @@ describe('affiliate PIT at withdrawal: no commercial minimum, configured rate, 0
     assert.equal(b.available, 1_500_000);
     assert.equal(computeAffiliateBalance({ earned: 100, held: 0, withdrawn: 200 }).available, 0);
   });
+  test('affiliate participation does not mint a code or a downline', () => {
+    const existing = affiliateParticipation({ kyc: { status: 'verified' }, affiliateCode: 'AB1234' });
+    assert.equal(existing.linkReady, true);
+    assert.equal(existing.code, 'AB1234');
+    assert.equal(existing.electronicIdentitySatisfied, false);
+    assert.equal(existing.codeIssuance, 'closed_pending_electronic_identity');
+    assert.equal(existing.multiLevel, false);
+    assert.equal(existing.depositToJoin, false);
+    const fresh = affiliateParticipation({ kyc: { status: 'verified' }, affiliateCode: '' });
+    assert.equal(fresh.code, null);
+    assert.equal(fresh.linkReady, false);
+    assert.equal(affiliateParticipation({ kyc: { status: 'verified' }, manualTaxReview: { status: 'approved' } }).linkReady, false);
+  });
   test('withdrawal.canWithdraw is identity plus a positive eligible balance', () => {
     assert.equal(affiliateCanWithdraw({ available: 40, identityVerified: true }), true);
     assert.equal(affiliateCanWithdraw({ available: 0.01, identityVerified: true }), true);
@@ -327,6 +344,14 @@ describe('last-click attribution', () => {
     const r = pickAttribution([click('a', 'aff1', 31)], { buyerId: 'buyer', product, now, windowDays: 30 });
     assert.equal(r.click, null);
     assert.equal(r.rejected[0].reason, 'EXPIRED');
+  });
+  test('a click already tied to another visitor cannot be reused', () => {
+    const r = pickAttribution(
+      [click('a', 'aff1', 1, { visitor: 'other-buyer' }), click('b', 'aff2', 2)],
+      { buyerId: 'buyer', product, now, windowDays: 30 },
+    );
+    assert.equal(r.click._id, 'b');
+    assert.equal(r.rejected[0].reason, 'VISITOR_MISMATCH');
   });
   test('no self-referral: buyer or seller cannot be the affiliate', () => {
     const r = pickAttribution([click('a', 'buyer', 1), click('b', 'seller1', 1)], { buyerId: 'buyer', product, now, windowDays: 30 });

@@ -156,6 +156,7 @@ function applyAllowedOverrides(product, resolved, requested = {}) {
 }
 
 const { toUsd, charCount, tokenUnitSize, charUnitSize, timeUnitSeconds } = require('./usage-pricing');
+const { unitByCode, measureGatewayUsage, billMeasuredUsage } = require('../finance/usage-units');
 
 const round6 = (value) => Math.round(Number(value) * 1e6) / 1e6;
 const { isUpstreamPriced, providerCostParts, sellPrice } = require('./runpod-public-pricing');
@@ -192,6 +193,27 @@ function computeUsageCost(product, usage, input = {}, providerCost = 0) {
     // Nothing known about the call: charge the listed "from" price for one unit.
     const listed = toUsd(Number(pricing.usageRate) || 0, pricing.currency || 'USD');
     return listed > 0 ? round6(listed) : 0;
+  }
+
+  const canonical = unitByCode(pricing.usageUnit);
+  if (canonical) {
+    if (canonical.kind === 'entitlement') return 0;
+    const measurement = measureGatewayUsage({
+      unit: canonical.code,
+      category: product?.category,
+      input,
+      upstreamUsage: usage,
+      output: usage?.output || null,
+      elapsedMs: usage?.elapsedMs,
+    });
+    return billMeasuredUsage({
+      unit: canonical.code,
+      rate: pricing.usageRate,
+      currency: pricing.currency || 'USD',
+      inputRate: pricing.inputRate,
+      outputRate: pricing.outputRate,
+      measurement,
+    }).costUsd;
   }
 
   const currency = pricing.currency || 'USD';

@@ -4,6 +4,22 @@ const { getExchangeRates, getAdminExchangeRates, setAdminOverride } = require('.
 
 const router = express.Router();
 
+/** Integer VND for a stored amount. Ignores any client rate. */
+router.get('/quote', async (req, res, next) => {
+  try {
+    const { quoteAuthoritativeVnd } = require('../finance/vnd-quote');
+    const quote = await getExchangeRates();
+    res.json(quoteAuthoritativeVnd({
+      amount: req.query.amount,
+      currency: req.query.currency || 'USD',
+      vndPerUsd: quote.vndPerUsd,
+      rateSource: quote.source,
+    }));
+  } catch (err) {
+    next(err);
+  }
+});
+
 /** Public display rate: VND and CNY per 1 USD, plus where it came from. */
 router.get('/', async (_req, res, next) => {
   try {
@@ -17,6 +33,8 @@ router.get('/', async (_req, res, next) => {
       source: quote.source,
       updatedAt: quote.updatedAt,
       stale: quote.stale,
+      clientMustNotPrice: true,
+      authoritativeQuotePath: '/v1/exchange-rates/quote',
     });
   } catch (err) {
     next(err);

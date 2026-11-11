@@ -139,7 +139,10 @@ async function buildHomeFeed() {
 router.get('/', async (_req, res, next) => {
   try {
     const result = await cached('home:feed:v1', HOME_TTL, buildHomeFeed);
-    res.json(result);
+    const { currentFx, stampMappedProduct } = require('../finance/vnd-quote');
+    const fx = await currentFx();
+    const stamp = (list) => (Array.isArray(list) ? list.map((p) => stampMappedProduct(p, fx)) : list);
+    res.json({ ...result, newArrivals: stamp(result.newArrivals), promoted: stamp(result.promoted), bestsellers: stamp(result.bestsellers) });
   } catch (err) {
     next(err);
   }

@@ -11,6 +11,7 @@ function roundMoney(n) {
 
 /** Snapshot only — never recompute historical commission from the current rate. */
 function effectiveSellerNet(order) {
+  if (order?.escrow?.status) return roundMoney(order.escrow.releasedSellerNet || 0);
   const snap = Number(order.sellerNetAmount);
   if (Number.isFinite(snap) && snap > 0) return roundMoney(snap);
   const stored = Number(order.sellerNet);
@@ -51,6 +52,9 @@ function holdKind(order, now = new Date()) {
 function canOpenDispute(order, now = new Date()) {
   if ((order.status || 'paid') !== 'paid') return false;
   if ((order.disputeStatus || 'none') !== 'none') return false;
+  if (order?.escrow?.status === 'held' || order?.escrow?.status === 'partial') {
+    return Number(order.amount) > 0;
+  }
   const net = effectiveSellerNet(order);
   if (net <= 0 && !(Number(order.amount) > 0)) return false;
   return now < holdUntil(order);

@@ -63,8 +63,10 @@ async function createRefund({
     }
   }
 
+  const creditedNet = order.escrow?.status ? Number(order.escrow.releasedSellerNet) || 0 : null;
   const snapshot = {
     ...((order.financialSnapshot && typeof order.financialSnapshot === 'object' && order.financialSnapshot) || {}),
+    ...(creditedNet == null ? {} : { sellerNetAmount: creditedNet }),
     grossAmount: Number(order.amount) || 0,
     unitPrice: Number(order.amount) || 0,
     quantity: order.quantity || 1,

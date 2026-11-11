@@ -30,6 +30,8 @@ const {
   paidTotal,
   packageMilestones,
 } = require('../utils/hire/rules');
+const { selectServicePackage, normalizePaymentChoice } = require('../utils/hire/packages');
+const { holdPrepaidPackage, releaseEscrowSlice } = require('../finance/service-escrow');
 
 const router = express.Router();
 
@@ -41,6 +43,10 @@ const MESSAGES = {
   HIRE_OWN_PRODUCT: 'Bạn không thể gửi yêu cầu cho listing của chính mình.',
   HIRE_ALREADY_OPEN: 'Bạn đã có một yêu cầu đang mở với listing này.',
   HIRE_TOO_MANY: 'Bạn có quá nhiều yêu cầu đang mở.',
+  SERVICE_PACKAGE_REQUIRED: 'Hãy chọn một gói dịch vụ.',
+  PAYMENT_CHOICE_INVALID: 'Chọn thanh toán từng giai đoạn hoặc thanh toán toàn bộ trước.',
+  ESCROW_NOT_HELD: 'Khoản giữ trước không còn để giải ngân.',
+  DISPUTE_OPEN: 'Đơn đang bị khiếu nại nên chưa giải ngân.',
   HIRE_NOT_FOUND: 'Không tìm thấy dự án thuê.',
   HIRE_FORBIDDEN: 'Bạn không thuộc dự án này.',
   HIRE_ACTION_NOT_ALLOWED: 'Không thể thực hiện thao tác này ở trạng thái hiện tại.',
@@ -164,6 +170,13 @@ function publicHire(doc, me, previews = new Map(), now = new Date()) {
     events: (o.events || []).map((e) => ({ at: iso(e.at), actor: e.actor, action: e.action, note: e.note || '' })),
     messages: (o.messages || []).map((m) => ({ id: String(m._id), at: iso(m.at), actor: m.actor, body: m.body || '', link: m.link || '', attachments: mapEmbedded(m.attachments) })),
     origin: o.origin || 'quote',
+    packageCode: o.packageCode || '',
+    package: o.packageSnapshot || null,
+    paymentChoice: o.paymentChoice || 'staged',
+    prepaidOrderId: o.prepaidOrder ? String(o.prepaidOrder) : null,
+    escrow: o.paymentChoice === 'prepaid'
+      ? { status: o.escrowStatus || 'held', gross: o.escrowGross || 0, releasedNet: o.escrowReleasedNet || 0 }
+      : null,
     createdAt: iso(o.createdAt),
     updatedAt: iso(o.updatedAt),
   };
@@ -207,7 +220,11 @@ async function openComplaintOf(doc) {
 
 async function fileComplaint(req, doc, { note, requestedAction, context }) {
   const lastPaid = [...(doc.milestones || [])].reverse().find((m) => m.status === 'approved' && m.order);
-  const order = lastPaid ? await Order.findById(lastPaid.order) : null;
+  const order = lastPaid
+    ? await Order.findById(lastPaid.order)
+    : doc.prepaidOrder
+      ? await Order.findById(doc.prepaidOrder)
+      : null;
   let opened = false;
   if (order && canOpenDispute(order)) {
     await openOrderDispute(order, { reason: note, actorName: req.user.name, href: '/sell/complaints' });
@@ -477,7 +494,25 @@ router.post(
       const index = doc.milestones.indexOf(m);
       const product = await Product.findById(doc.product);
       if (!product) throw httpError(404, 'HIRE_PRODUCT_INVALID');
-      const { order, settlement } = await chargeMilestone({ project: doc, milestone: m, index, product, buyer: req.user });
+      let order;
+      let sellerNet = 0;
+      if (doc.paymentChoice === 'prepaid') {
+        const total = (doc.milestones || []).reduce((sum, row) => sum + (Number(row.amount) || 0), 0);
+        const released = await releaseEscrowSlice({
+          orderId: doc.prepaidOrder,
+          total,
+          milestoneAmount: m.amount,
+          isLast: index === doc.milestones.length - 1,
+        });
+        order = released.order;
+        sellerNet = released.netSlice;
+        doc.escrowStatus = order.escrow?.status || doc.escrowStatus;
+        doc.escrowReleasedNet = order.escrow?.releasedSellerNet || 0;
+      } else {
+        const charged = await chargeMilestone({ project: doc, milestone: m, index, product, buyer: req.user });
+        order = charged.order;
+        sellerNet = charged.settlement.sellerNetAmount;
+      }
       const done = advanceAfterApproval(doc, { orderId: order._id });
       pushEvent(doc, 'buyer', 'approved', `#${index + 1} · order ${order._id}`);
       if (done) pushEvent(doc, 'system', 'completed');
@@ -486,7 +521,7 @@ router.post(
       await notifyUser(
         doc.seller,
         'hire.approved',
-        { phase: index + 1, product: doc.productName, amount: settlement.sellerNetAmount, currency: doc.currency },
+        { phase: index + 1, product: doc.productName, amount: sellerNet, currency: doc.currency },
         href(doc),
       ).catch(() => {});
       await notifyUser(
@@ -536,7 +571,7 @@ router.post(
       // Do not file a duplicate case: attach the termination to the open complaint instead.
       already.events.push({ at: new Date(), actorId: req.user._id, actorRole: req.user.role, action: 'hire_terminated', note: `${reason}: ${note}`.slice(0, 2000) });
       await already.save();
-    } else if (lastApproved?.order) {
+    } else if (lastApproved?.order || doc.prepaidOrder) {
       await fileComplaint(req, doc, {
         note,
         requestedAction: req.body?.requestedAction || 'Chấm dứt dự án thuê và hoàn tiền giai đoạn đã thanh toán.',
@@ -573,9 +608,16 @@ router.post(
     const existing = await HireProject.findOne({ buyer: req.user._id, product: product._id, status: open }).select('_id').lean();
     if (existing) return res.status(200).json({ ...(await HireProject.findById(existing._id).then((d) => publicHire(d, req.user._id))), existing: true });
     if ((await HireProject.countDocuments({ buyer: req.user._id, status: open })) >= 20) throw httpError(429, 'HIRE_TOO_MANY');
-    const milestones = packageMilestones(product);
+    const selected = selectServicePackage(product, body.packageCode);
+    const paymentChoice = normalizePaymentChoice(body.paymentChoice);
+    const priced = {
+      ...product,
+      pricing: { ...(product.pricing || {}), price: selected.price, currency: selected.currency || product.pricing?.currency || 'USD' },
+      servicePlan: selected.phases?.length ? selected.phases : product.servicePlan,
+    };
+    const milestones = packageMilestones(priced);
     const total = milestones.reduce((a, m) => a + m.amount, 0);
-    const brief = cleanText(body.brief, 6000) || `Gói dịch vụ: ${product.name}`;
+    const brief = cleanText(body.brief, 6000) || `Gói dịch vụ: ${selected.name}`;
     const doc = await HireProject.create({
       origin: 'package',
       product: product._id,
@@ -588,14 +630,30 @@ router.post(
       sellerName: product.creatorName || '',
       brief,
       budget: total,
-      currency: product.pricing?.currency || 'USD',
-      listPrice: Number(product.pricing?.price) || 0,
-      quote: { amount: total, note: 'Giá gói cố định', by: 'seller', at: new Date() },
+      currency: selected.currency || product.pricing?.currency || 'USD',
+      listPrice: selected.price,
+      quote: { amount: total, note: paymentChoice === 'prepaid' ? 'Thanh toán toàn bộ trước, giữ escrow' : 'Giá gói cố định', by: 'seller', at: new Date() },
       status: 'active',
       acceptedAt: new Date(),
       milestones,
-      events: [{ actor: 'buyer', action: 'package_started', note: `${total} ${product.pricing?.currency || 'USD'} · ${milestones.length}` }],
+      packageCode: selected.code,
+      packageSnapshot: selected,
+      paymentChoice,
+      escrowStatus: paymentChoice === 'prepaid' ? 'held' : '',
+      escrowGross: paymentChoice === 'prepaid' ? total : 0,
+      events: [{ actor: 'buyer', action: 'package_started', note: `${paymentChoice} · ${total} ${selected.currency || 'USD'} · ${milestones.length}` }],
     });
+    if (paymentChoice === 'prepaid') {
+      try {
+        const held = await holdPrepaidPackage({ project: doc, product: priced, buyer: req.user, amount: total });
+        doc.prepaidOrder = held.order._id;
+        doc.escrowGross = held.order.amount;
+        await doc.save();
+      } catch (err) {
+        await HireProject.deleteOne({ _id: doc._id });
+        throw err;
+      }
+    }
     await notifyUser(
       product.creator,
       'hire.packageStarted',

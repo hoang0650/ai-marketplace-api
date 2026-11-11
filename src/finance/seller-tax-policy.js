@@ -1,6 +1,7 @@
 const { roundMoney } = require('./constants');
 const { normalizeSellerType } = require('./seller-types');
 const { taxConfig } = require('../config/tax');
+const { taxLegalStatus } = require('./tax-legal-status');
 
 /** Seller types whose tax the platform withholds and pays on their behalf (NĐ 252/2026/NĐ-CP). */
 const WITHHELD_SELLER_TYPES = new Set(['INDIVIDUAL', 'FOREIGN_INDIVIDUAL']);
@@ -52,6 +53,7 @@ function calculateSellerTax({
     sellerAnnualRevenueVnd: sellerAnnualRevenueVnd ?? null,
     rule: '',
     legalBasis: '',
+    legalDetermination: 'unresolved',
   };
   const empty = (reason) => ({
     taxApplicable: false,
@@ -97,7 +99,8 @@ function calculateSellerTax({
       pitAmount,
       withheldByPlatform: total > 0,
       rule,
-      legalBasis: 'NĐ 252/2026/NĐ-CP; Luật Thuế TNCN; TT 18/2026/TT-BTC',
+      legalBasis: '',
+      legalDetermination: 'unresolved',
     },
   };
 }
@@ -128,8 +131,9 @@ function publicTaxPolicy(config) {
     },
     householdBusiness: { withheldByPlatform: false, rate: 0 },
     company: { withheldByPlatform: false, rate: 0, platformIssuesVatInvoiceOnFee: true },
-    legalBasis: ['Nghị định 252/2026/NĐ-CP', 'Luật Thuế TNCN', 'Thông tư 18/2026/TT-BTC'],
-    legalReview: true,
+    legalBasis: [],
+    legalReview: false,
+    legalDetermination: taxLegalStatus(),
   };
 }
 

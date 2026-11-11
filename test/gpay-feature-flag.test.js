@@ -19,6 +19,20 @@ const g = require('./src/utils/gpay-client');
 console.log(JSON.stringify({ flag: c.gpayVaEnabled, feature: g.gpayFeatureEnabled() }));
 `;
 
+test('GPay wording is a direct pending project contract and cites no other agreement', () => {
+  const { gpayProjectStatus } = require('../src/utils/gpay-client');
+  const status = gpayProjectStatus();
+  assert.equal(status.message, 'AI Markets đang làm việc trực tiếp với GPay để hoàn tất hợp đồng cung ứng dịch vụ cho dự án.');
+  assert.equal(status.relationship, 'direct');
+  assert.equal(status.projectContract, 'pending');
+  assert.equal(status.activation, 'not_activated');
+  assert.equal(status.removed, false);
+  assert.equal(status.licenseScopeConfirmed, false);
+  const packed = JSON.stringify(status);
+  assert.equal(packed.includes('37/GP'), false);
+  assert.equal(packed.toLowerCase().includes('dự kiến'), false);
+});
+
 test('GPAY_ENABLED unset → GPay disabled (safe default after Dokploy redeploy)', () => {
   assert.deepEqual(run(FLAG), { flag: false, feature: false });
 });
@@ -70,7 +84,7 @@ const srv = app.listen(0, async () => {
   out.webhook = { status: w.status, code: (await w.json()).code };
   const c = await fetch(base + '/config');
   const cfg = await c.json();
-  out.config = { status: c.status, available: cfg.available, enabled: cfg.enabled, featureEnabled: cfg.featureEnabled, removed: cfg.removed };
+  out.config = { status: c.status, available: cfg.available, enabled: cfg.enabled, featureEnabled: cfg.featureEnabled, removed: cfg.removed, activation: cfg.activation, relationship: cfg.relationship, projectContract: cfg.projectContract };
   const ret = await fetch(base + '/return?order=AIM1', { redirect: 'manual' });
   out.return = ret.status;
   srv.close();
@@ -78,16 +92,20 @@ const srv = app.listen(0, async () => {
 });
 `;
 
-test('create-payment routes stay removed; webhook/config/return stay up', () => {
+test('create-payment routes stay closed pending the project contract; webhook/config/return stay up', () => {
   for (const env of [{ GPAY_RELAY_SECRET: 'relay-secret' }, { GPAY_ENABLED: 'true', GPAY_RELAY_SECRET: 'relay-secret' }]) {
     const out = run(HTTP, env);
     for (const p of ['/checkout', '/qr', '/account', '/sandbox/credit']) {
-      assert.deepEqual(out[p], { status: 410, code: 'GPAY_REMOVED' }, p);
+      assert.equal(out[p].status, 403, p);
+      assert.equal(out[p].code, 'GPAY_NOT_ACTIVATED', p);
     }
     assert.equal(out.webhook.status, 401);
     assert.equal(out.webhook.code, 'GPAY_BAD_RELAY');
     assert.equal(out.config.status, 200);
-    assert.equal(out.config.removed, true);
+    assert.equal(out.config.removed, false);
+    assert.equal(out.config.activation, 'not_activated');
+    assert.equal(out.config.relationship, 'direct');
+    assert.equal(out.config.projectContract, 'pending');
     assert.equal(out.config.available, false);
     assert.equal(out.config.enabled, false);
     assert.equal(out.config.featureEnabled, false);

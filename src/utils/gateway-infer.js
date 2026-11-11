@@ -6,6 +6,8 @@ const { placeHold, releaseHold } = require('./wallet');
 const { preflight } = require('./usage-preflight');
 const { claimIdempotencyKey, completeIdempotencyKey, releaseIdempotencyKey } = require('./idempotency');
 const { chargeUsage } = require('../finance/charge-usage');
+const { unitByCode } = require('../finance/usage-units');
+const { hasActiveUsageEntitlement } = require('../finance/usage-access');
 const { resolveProviderForProduct, computeUsageCost } = require('./provider-resolve');
 const { inferWithFallback, fetchJobStatus } = require('./denglish-client');
 const { getRunpodPublicEndpoint } = require('../data/runpod-public-endpoints');
@@ -75,7 +77,19 @@ async function meterAndInfer(req, product, input, action = 'runsync') {
   const selfUse = String(buyerId) === String(sellerId);
   let hold = null;
 
+  const startedAt = Date.now();
   try {
+    const listedUnit = unitByCode(product.pricing?.usageUnit);
+    if (listedUnit?.kind === 'entitlement' && !selfUse) {
+      const entitlement = await hasActiveUsageEntitlement(buyerId, product._id);
+      if (!entitlement) {
+        const err = new Error('An access period is required before this call');
+        err.status = 402;
+        err.code = 'ENTITLEMENT_REQUIRED';
+        err.body = { code: 'ENTITLEMENT_REQUIRED', unit: listedUnit.code, period: listedUnit.period };
+        throw err;
+      }
+    }
     const quote = await preflight({ provider, endpointId, model, input });
     const estimatedCost = computeUsageCost(product, quote.usage, input, {
       upstream: quote.upstreamCost,
@@ -103,6 +117,8 @@ async function meterAndInfer(req, product, input, action = 'runsync') {
       idempotencyKey: scopedKey,
     });
     const usage = ai.usage || { input_tokens: 0, output_tokens: 0, total_tokens: 0, unit: 'tokens' };
+    usage.elapsedMs = Date.now() - startedAt;
+    usage.output = ai.data || null;
     const sandbox = Boolean(ai.raw?.sandbox || ai.data?.sandbox);
     if (sandbox) usage.sandbox = true;
     const aiData = ai.data || {};

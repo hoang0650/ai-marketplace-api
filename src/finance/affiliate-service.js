@@ -34,6 +34,7 @@ function pickAttribution(clicks, { buyerId, product, now = new Date(), windowDay
     else if (aff && aff === sellerId) reason = 'SELF_REFERRAL_SELLER';
     else if (c.scope === 'product' && sid(c.product) !== productId) reason = 'OTHER_PRODUCT';
     else if (sid(c.seller) !== sellerId) reason = 'OTHER_STORE';
+    else if (c.visitor && sid(c.visitor) !== sid(buyerId)) reason = 'VISITOR_MISMATCH';
     if (reason) rejected.push({ clickId: sid(c._id), reason });
     else ok.push(c);
   }
@@ -67,7 +68,9 @@ async function recordAffiliateCommission({ order, settlement, click, holdUntil }
     rate: settlement.affiliateRate,
     currency: order.currency,
   });
-  const commission = await AffiliateCommission.create({
+  let commission;
+  try {
+    commission = await AffiliateCommission.create({
     order: order._id,
     affiliate: click.affiliate,
     seller: order.seller,
@@ -87,7 +90,11 @@ async function recordAffiliateCommission({ order, settlement, click, holdUntil }
     pitCommitmentApplied: false,
     netAmount: calc.netAmount,
     holdUntil,
-  });
+    });
+  } catch (err) {
+    if (err?.code === 11000) return AffiliateCommission.findOne({ order: order._id });
+    throw err;
+  }
   if (calc.netAmount > 0) {
     await WalletTx.create({
       user: click.affiliate,
