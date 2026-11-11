@@ -6,6 +6,7 @@ const { toClient } = require('../utils/serialize');
 const { getCache, setCache, deleteCache, isCacheAvailable, generateCacheKey } = require('../utils/cache');
 const { liftExpired, effectiveStatus, denyMessage } = require('../utils/moderation');
 const { normalizeRole, hasCapability } = require('../utils/roles');
+const { affiliateOnboardingView } = require('../finance/affiliate-onboarding');
 
 const AUTH_USER_CACHE_TTL = 60 * 60;
 const AUTH_SESSION_TTL = 30 * 24 * 60 * 60;
@@ -137,6 +138,7 @@ function publicUser(user) {
     avatarUrl: u.avatarUrl || undefined,
     coverUrl: u.coverUrl || undefined,
     role: normalizeRole(u.role),
+    affiliateOnboarding: affiliateOnboardingView(user),
     adminPermissions: Array.isArray(u.adminPermissions) ? u.adminPermissions : [],
     creatorSlug: u.creatorSlug || undefined,
     bio: u.bio || undefined,

@@ -18,7 +18,8 @@ const {
   normalizeReturnTo,
 } = require('../config/googleAuth');
 const { liftExpired, effectiveStatus, denyMessage } = require('../utils/moderation');
-const { ROLE, SIGNUP_ROLES, isSignupRole } = require('../utils/roles');
+const { ROLE, SIGNUP_ROLES } = require('../utils/roles');
+const { resolveSignupRole, signupAffiliateFields } = require('../finance/affiliate-onboarding');
 const crypto = require('crypto');
 const { sendTransactional, verifyUnsubscribeToken } = require('../email/send');
 const { siteUrl } = require('../email/templates');
@@ -33,6 +34,7 @@ function loginNotice(req, user) {
 const ROLE_LABELS = {
   [ROLE.BUYER]: 'Người mua',
   [ROLE.SELLER]: 'Người bán',
+  [ROLE.AFFILIATE]: 'Người tiếp thị liên kết',
 };
 // Work/Hire is discontinued: talent / freelancer / employer are legacy roles, not offered at signup.
 
@@ -110,9 +112,10 @@ async function resolveGoogleSignupPrefill(payload) {
     name: profile.fullName || profile.email.split('@')[0],
     avatarUrl: profile.avatar || '',
     googleId: profile.googleId,
-    googleSignupToken: signGoogleSignupToken({
+      googleSignupToken: signGoogleSignupToken({
       googleId: profile.googleId,
       email: profile.email,
+      emailVerified: true,
       name: profile.fullName || '',
       avatar: profile.avatar || '',
       redirectUri,
@@ -127,9 +130,15 @@ router.post('/register', async (req, res, next) => {
     const name = String(req.body?.name || '').trim();
     const password = String(req.body?.password || '');
     const confirmPassword = req.body?.confirmPassword;
-    const requestedRole = String(req.body?.role || '').trim().toLowerCase();
-    // Back-compat: older clients send boolean asCreator.
-    const role = !requestedRole && req.body?.asCreator ? ROLE.SELLER : requestedRole || ROLE.BUYER;
+    const requested = resolveSignupRole(req.body || {});
+    if (!requested.ok) {
+      return res.status(400).json({
+        message: requested.message,
+        code: requested.code,
+        roles: requested.roles,
+      });
+    }
+    const role = requested.role;
 
     const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && email.length <= 254;
     if (!emailOk) {
@@ -144,16 +153,9 @@ router.post('/register', async (req, res, next) => {
     if (confirmPassword !== undefined && String(confirmPassword) !== password) {
       return res.status(400).json({ message: 'Mật khẩu xác nhận không khớp', code: 'PASSWORD_MISMATCH' });
     }
-    if (!isSignupRole(role)) {
-      return res.status(400).json({
-        message: `Invalid role. Choose one of: ${SIGNUP_ROLES.join(', ')}`,
-        code: 'INVALID_ROLE',
-        roles: SIGNUP_ROLES,
-      });
-    }
-
     // Verify the Google prefill token so the account is linked to that Google id.
     let googleId = '';
+    let googleEmailVerified = false;
     const prefillToken = String(req.body?.googleSignupToken || '');
     if (prefillToken) {
       try {
@@ -163,6 +165,7 @@ router.post('/register', async (req, res, next) => {
           return res.status(400).json({ message: 'Email không khớp với Google', code: 'GOOGLE_EMAIL_MISMATCH' });
         }
         googleId = String(claims.googleId || '');
+        googleEmailVerified = claims.emailVerified === true;
       } catch {
         return res.status(400).json({ message: 'Phiên Google đã hết hạn, vui lòng đăng nhập lại', code: 'GOOGLE_SIGNUP_EXPIRED' });
       }
@@ -182,6 +185,10 @@ router.post('/register', async (req, res, next) => {
       if (clash) creatorSlug = `${creatorSlug}-${Date.now().toString(36)}`;
     }
 
+    const affiliateFields = signupAffiliateFields(role, {
+      emailVerified: !!googleId || googleEmailVerified,
+      acceptAffiliatePolicy: req.body?.acceptAffiliatePolicy === true,
+    });
     const user = await User.create({
       email,
       name,
@@ -193,8 +200,7 @@ router.post('/register', async (req, res, next) => {
       avatarUrl:
         String(req.body?.avatarUrl || '').trim() ||
         `https://api.dicebear.com/9.x/shapes/svg?seed=${encodeURIComponent(email)}`,
-      // Assigned after eKYC when the user first opens Affiliate.
-      affiliateCode: '',
+      ...affiliateFields,
     });
 
     if (asSeller) {
