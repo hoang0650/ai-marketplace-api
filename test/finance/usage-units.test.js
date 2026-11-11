@@ -14,6 +14,7 @@ const {
 } = require('../../src/finance/usage-units');
 const { escrowSlice, escrowRefundPlan } = require('../../src/finance/service-escrow');
 const { normalizeServicePackages, selectServicePackage, normalizePaymentChoice } = require('../../src/utils/hire/packages');
+const { quoteLedgerAmount } = require('../../src/finance/usage-access');
 const { usageListingError } = require('../../src/routes/products');
 
 const usageProduct = (pricing, category = 'inference') => ({
@@ -175,12 +176,46 @@ test('service packages and the two payment choices', () => {
   }]);
   assert.equal(ok.packages[0].code, 'half-day');
   assert.equal(ok.packages[0].price, 150);
+  const photo = normalizeServicePackages([{
+    name: 'Buổi chụp',
+    scope: 'Một địa điểm, ảnh đã chỉnh',
+    deliverables: ['30 ảnh'],
+    durationDays: 7,
+    price: 2_500_000,
+    currency: 'VND',
+  }]);
+  assert.equal(photo.packages[0].price, 2_500_000);
+  assert.equal(photo.packages[0].currency, 'VND');
+  assert.equal(normalizeServicePackages([{
+    name: 'Buổi chụp', scope: 'Một địa điểm', deliverables: ['ảnh'], durationDays: 7, price: 2_500_000.5, currency: 'VND',
+  }]).error.code, 'SERVICE_PACKAGE_PRICE');
+  assert.equal(normalizeServicePackages([{
+    name: 'Cap', scope: 'USD ceiling', deliverables: ['file'], durationDays: 1, price: 100_000, currency: 'USD',
+  }]).packages[0].price, 100_000);
+  assert.equal(normalizeServicePackages([{
+    name: 'Cap', scope: 'USD ceiling', deliverables: ['file'], durationDays: 1, price: 100_001, currency: 'USD',
+  }]).error.code, 'SERVICE_PACKAGE_PRICE');
   const product = { name: 'Photo', pricing: { price: 10 }, servicePackages: ok.packages };
   assert.throws(() => selectServicePackage(product, ''), /SERVICE_PACKAGE_REQUIRED/);
   assert.equal(selectServicePackage(product, 'half-day').price, 150);
   assert.equal(normalizePaymentChoice(undefined), 'staged');
   assert.equal(normalizePaymentChoice('prepaid'), 'prepaid');
   assert.throws(() => normalizePaymentChoice('bank'), /PAYMENT_CHOICE_INVALID/);
+});
+
+test('usage access returns the server VND quote next to the ledger amount', () => {
+  const usd = quoteLedgerAmount({ amount: 10, currency: 'USD', vndPerUsd: 25000, rateSource: 'exchangerate-api' });
+  assert.equal(usd.amount, 10);
+  assert.equal(usd.currency, 'USD');
+  assert.equal(usd.amountVnd, 250000);
+  assert.equal(usd.vndQuote.authoritative, true);
+  const vnd = quoteLedgerAmount({ amount: 2_500_000, currency: 'VND' });
+  assert.equal(vnd.amountVnd, 2_500_000);
+  assert.equal(vnd.vndQuote.displayOnly, false);
+  const missing = quoteLedgerAmount({ amount: 10, currency: 'USD', vndPerUsd: 25000, rateSource: 'fallback' });
+  assert.equal(missing.amount, 10);
+  assert.equal(missing.amountVnd, null);
+  assert.equal(missing.vndQuote.code, 'RATE_UNAVAILABLE');
 });
 
 test('prepaid escrow releases on acceptance and refunds do not claw unreleased net', () => {

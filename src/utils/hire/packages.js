@@ -4,9 +4,30 @@ const { httpError, roundMoney } = require('./rules');
 
 const MAX_PACKAGES = 12;
 const MAX_DELIVERABLES = 20;
+/** USD stays on the existing commercial cap. VND is an integer dong amount. */
+const MAX_PACKAGE_USD = 100_000;
+const MAX_PACKAGE_VND = 1_000_000_000;
 
 function clean(value, max) {
   return String(value || '').trim().slice(0, max);
+}
+
+function packageCurrency(raw) {
+  const code = clean(raw || 'USD', 8).normalize('NFC').toUpperCase();
+  if (code === 'USD') return 'USD';
+  if (code === 'VND' || code === 'VNĐ') return 'VND';
+  return '';
+}
+
+function packagePrice(raw, currency) {
+  const n = Number(raw);
+  if (currency === 'VND') {
+    if (!Number.isSafeInteger(n) || n < 1 || n > MAX_PACKAGE_VND) return null;
+    return n;
+  }
+  const price = roundMoney(n);
+  if (!(price > 0) || price > MAX_PACKAGE_USD) return null;
+  return price;
 }
 
 function packageCode(raw, index) {
@@ -46,19 +67,26 @@ function normalizeServicePackages(raw) {
       .filter(Boolean)
       .slice(0, MAX_DELIVERABLES);
     const durationDays = Math.round(Number(row.durationDays));
-    const price = roundMoney(row.price);
-    const currency = clean(row.currency || 'USD', 8).toUpperCase() || 'USD';
+    const currency = packageCurrency(row.currency);
     if (!name || !scope || !deliverables.length) {
       return { error: { code: 'SERVICE_PACKAGE_FIELDS', message: 'Mỗi gói cần tên, phạm vi và ít nhất một hạng mục bàn giao.' } };
     }
     if (!Number.isInteger(durationDays) || durationDays < 1 || durationDays > 365) {
       return { error: { code: 'SERVICE_PACKAGE_DURATION', message: 'Thời lượng gói là số ngày từ 1 đến 365.' } };
     }
-    if (!(price > 0) || price > 100_000) {
-      return { error: { code: 'SERVICE_PACKAGE_PRICE', message: 'Mỗi gói cần giá cố định lớn hơn 0.' } };
-    }
-    if (currency !== 'USD' && currency !== 'VND') {
+    if (!currency) {
       return { error: { code: 'SERVICE_PACKAGE_CURRENCY', message: 'Gói chỉ nhận USD hoặc VND.' } };
+    }
+    const price = packagePrice(row.price, currency);
+    if (price == null) {
+      return {
+        error: {
+          code: 'SERVICE_PACKAGE_PRICE',
+          message: currency === 'VND'
+            ? 'Giá gói VND phải là số nguyên từ 1 đến 1.000.000.000.'
+            : 'Giá gói USD phải lớn hơn 0 và không quá 100.000.',
+        },
+      };
     }
     const phases = Array.isArray(row.phases)
       ? row.phases
@@ -114,7 +142,10 @@ function normalizePaymentChoice(raw) {
 }
 
 module.exports = {
+  MAX_PACKAGE_USD,
+  MAX_PACKAGE_VND,
   normalizeServicePackages,
   selectServicePackage,
   normalizePaymentChoice,
+  packagePrice,
 };
