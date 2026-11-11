@@ -1,5 +1,3 @@
-const { convertAmount } = require('./bank-topup-core');
-
 /**
  * Integer VND from the server rate. A client-supplied rate is not an input.
  * Fallback rates are not authoritative. USD ledger amounts are not relabelled:
@@ -24,12 +22,14 @@ function quoteAuthoritativeVnd({ amount, currency = 'USD', vndPerUsd, rateSource
   if (!(rate > 0) || !rateSource || rateSource === 'fallback') {
     return { amountVnd: null, authoritative: false, code: 'RATE_UNAVAILABLE', ledgerCurrency, rateSource: rateSource || null, displayOnly: true };
   }
-  const conv = convertAmount({ amount: n, currency: 'USD' }, rate);
-  if (!conv || !Number.isSafeInteger(conv.amountVnd)) {
+  // One multiplication, then round to an integer dong. Do not round the USD
+  // amount to cents first: a per-1K rate such as $0.0123 would become $0.01.
+  const amountVnd = Math.round(n * rate);
+  if (!Number.isSafeInteger(amountVnd) || amountVnd <= 0) {
     return { amountVnd: null, authoritative: false, code: 'AMOUNT_BELOW_VND_PRECISION', ledgerCurrency, rateSource, displayOnly: true };
   }
   return {
-    amountVnd: conv.amountVnd,
+    amountVnd,
     authoritative: true,
     code: null,
     ledgerCurrency: 'USD',
@@ -87,7 +87,8 @@ function stampMappedProduct(mapped, fx) {
         }),
       }))
     : mapped.servicePackages;
-  return { ...mapped, servicePackages: packages, pricingVnd: pricingVnd(pricing, fx || {}) };
+  const { offers, listOfferId } = require('./sell-offers').buildSellOffers(mapped, fx || {});
+  return { ...mapped, servicePackages: packages, pricingVnd: pricingVnd(pricing, fx || {}), offers, listOfferId };
 }
 
 module.exports = {
