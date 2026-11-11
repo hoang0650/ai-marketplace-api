@@ -9,6 +9,8 @@ test('USD converts to an integer VND quote only from a non-fallback server rate'
   assert.equal(quote.authoritative, true);
   assert.equal(Number.isSafeInteger(quote.amountVnd), true);
   assert.equal(quote.amountVnd, 250000);
+  const perThousand = quoteAuthoritativeVnd({ amount: 0.0123, currency: 'USD', vndPerUsd: 25608.244657, rateSource: 'exchangerate-api' });
+  assert.equal(perThousand.amountVnd, 315);
   assert.equal(quote.ledgerCurrency, 'USD');
   assert.equal(quote.displayOnly, true);
   const fallback = quoteAuthoritativeVnd({ amount: 10, currency: 'USD', vndPerUsd: 26500, rateSource: 'fallback' });

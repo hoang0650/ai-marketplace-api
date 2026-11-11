@@ -28,7 +28,20 @@ async function affiliateSlice(userId) {
 router.get('/', authenticate, async (req, res, next) => {
   try {
     const txs = await WalletTx.find({ user: req.user._id }).sort({ createdAt: -1 }).lean();
-    res.json(txs.map(mapWallet));
+    const { quoteAuthoritativeVnd, currentFx } = require('../finance/vnd-quote');
+    const fx = await currentFx();
+    res.json(txs.map((tx) => {
+      const row = mapWallet(tx);
+      return {
+        ...row,
+        displayVnd: quoteAuthoritativeVnd({
+          amount: row.amount,
+          currency: row.currency || 'USD',
+          vndPerUsd: fx.vndPerUsd,
+          rateSource: fx.rateSource,
+        }),
+      };
+    }));
   } catch (err) {
     next(err);
   }
@@ -85,11 +98,14 @@ router.get('/summary', authenticate, async (req, res, next) => {
       displayVnd: await (async () => {
         const { quoteAuthoritativeVnd, currentFx } = require('../finance/vnd-quote');
         const fx = await currentFx();
+        const one = (amount) => quoteAuthoritativeVnd({ amount, currency: 'USD', vndPerUsd: fx.vndPerUsd, rateSource: fx.rateSource });
+        if (affiliate) affiliate.displayVnd = one(affiliate.available);
         return {
           ledgerCurrency: 'USD',
           clientRateIgnored: true,
-          balance: quoteAuthoritativeVnd({ amount: summary.balance, currency: 'USD', ...fx }),
-          available: quoteAuthoritativeVnd({ amount: summary.available, currency: 'USD', ...fx }),
+          balance: one(summary.balance),
+          available: one(summary.available),
+          payable: one(payable.payableAmount),
         };
       })(),
     });
