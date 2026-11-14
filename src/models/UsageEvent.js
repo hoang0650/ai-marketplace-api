@@ -57,5 +57,7 @@ usageEventSchema.virtual('id').get(function idVirtual() {
 usageEventSchema.set('toJSON', { virtuals: true });
 usageEventSchema.set('toObject', { virtuals: true });
 
+require('../finance/stamp-exchange-rate').attachExchangeRateStamp(usageEventSchema);
+
 module.exports = mongoose.model('UsageEvent', usageEventSchema);
 module.exports.newUsageIdempotencyKey = newUsageIdempotencyKey;

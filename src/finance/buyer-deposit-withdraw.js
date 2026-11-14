@@ -19,6 +19,7 @@ const MESSAGES = {
   SOURCE_NOT_SEPARATED: 'The server could not prove a VietQR company-bank balance, so no withdrawal was created.',
   NOTHING_TO_WITHDRAW: 'There is no proven VietQR company-bank balance to withdraw.',
   DEPOSIT_CAP: 'The amount is above the proven VietQR balance that this wallet can fund.',
+  EXCHANGE_RATE_UNAVAILABLE: 'Exchange rate is unavailable. Conversion waits for a rate from ExchangeRate-API (https://www.exchangerate-api.com).',
 };
 
 function centsOf(usd) {
@@ -344,6 +345,7 @@ function decideBuyerVietqrWithdrawal({
     return refusal(409, 'PENDING_WITHDRAWAL', snapshot);
   }
 
+  if (!(Number(vndPerUsd) > 0)) return refusal(503, 'EXCHANGE_RATE_UNAVAILABLE', snapshot);
   if (!account) return refusal(400, 'BANK_ACCOUNT_REQUIRED', snapshot);
   if (!holderMatchesKyc(account.accountName, user?.kyc)) return refusal(400, 'ACCOUNT_NAME_MISMATCH', snapshot);
   if (amountVnd > snapshot.payableVnd) return refusal(400, snapshot.payableVnd > 0 ? 'DEPOSIT_CAP' : zeroReason(snapshot), snapshot);

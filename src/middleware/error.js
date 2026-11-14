@@ -29,6 +29,9 @@ function resolveError(err) {
     return { status: 413, message: 'Payload too large' };
   }
   const status = err.status || err.statusCode || 500;
+  if (err.code === 'EXCHANGE_RATE_UNAVAILABLE') {
+    return { status: status === 500 ? 503 : status, code: err.code, message: err.message };
+  }
   return {
     status,
     code: err.code,

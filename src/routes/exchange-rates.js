@@ -1,6 +1,6 @@
 const express = require('express');
 const { authenticate, requireRoles } = require('../middleware/auth');
-const { getExchangeRates, getAdminExchangeRates, setAdminOverride } = require('../finance/exchange-rate');
+const { getExchangeRates, getAdminExchangeRates, setAdminOverride, toPublicExchangeRate } = require('../finance/exchange-rate');
 
 const router = express.Router();
 
@@ -20,22 +20,12 @@ router.get('/quote', async (req, res, next) => {
   }
 });
 
-/** Public display rate: VND and CNY per 1 USD, plus where it came from. */
+/** Public display rate from ExchangeRate-API. No client-supplied figure is accepted. */
 router.get('/', async (_req, res, next) => {
   try {
     const quote = await getExchangeRates();
-    res.json({
-      base: quote.base,
-      provider: quote.provider,
-      vndPerUsd: quote.vndPerUsd,
-      cnyPerUsd: quote.cnyPerUsd,
-      rates: quote.rates,
-      source: quote.source,
-      updatedAt: quote.updatedAt,
-      stale: quote.stale,
-      clientMustNotPrice: true,
-      authoritativeQuotePath: '/v1/exchange-rates/quote',
-    });
+    const pub = toPublicExchangeRate(quote);
+    res.status(pub.status).json(pub.body);
   } catch (err) {
     next(err);
   }

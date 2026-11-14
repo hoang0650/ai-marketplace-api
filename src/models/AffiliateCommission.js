@@ -25,7 +25,9 @@ const affiliateCommissionSchema = new mongoose.Schema(
     pitAmount: { type: Number, default: 0 },
     pitRule: { type: String, default: '' },
     /** Commission (gross) in VND at payment time - for the year-end PIT certificate / quarterly report. */
-    amountVnd: { type: Number, default: 0 },
+    amountVnd: { type: Number, default: null },
+    /** VND per USD used for amountVnd. Null when the rate was not available. */
+    vndPerUsd: { type: Number, default: null },
     /** True when an approved Mẫu 08/CK-TNCN exempted this payment from withholding. */
     pitCommitmentApplied: { type: Boolean, default: false },
     netAmount: { type: Number, required: true, min: 0 },
@@ -40,5 +42,7 @@ const affiliateCommissionSchema = new mongoose.Schema(
 );
 
 affiliateCommissionSchema.index({ affiliate: 1, createdAt: 1 });
+
+require('../finance/stamp-exchange-rate').attachExchangeRateStamp(affiliateCommissionSchema);
 
 module.exports = mongoose.model('AffiliateCommission', affiliateCommissionSchema);

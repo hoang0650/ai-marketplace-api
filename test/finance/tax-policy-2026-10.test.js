@@ -145,14 +145,24 @@ describe('quarterly report + year-end PIT certificate exports', () => {
       { seller: 'h', sellerType: 'HOUSEHOLD_BUSINESS', currency: 'USD', grossAmount: 10, taxAmount: 0 },
       { seller: 'c', sellerType: 'COMPANY', currency: 'VND', grossAmount: 9_000_000, taxAmount: 0 },
     ];
-    const rows = buildSellerRows(orders, new Map([['a', { legalName: 'Nguyễn Văn A', taxCode: '012345678901' }]]), 26_500);
+    const rows = buildSellerRows(orders, new Map([['a', { legalName: 'Nguyễn Văn A', taxCode: '012345678901' }]]), 25_000);
     assert.equal(rows.length, 2);
     const a = rows.find((r) => r.sellerId === 'a');
     assert.equal(a.revenueVnd, 1_500_000);
     assert.equal(a.netRevenueVnd, 1_400_000);
     assert.equal(a.vatWithheldVnd, 75_000);
     assert.equal(a.pitWithheldVnd, 30_000);
-    assert.equal(rows.find((r) => r.sellerId === 'h').revenueVnd, 265_000);
+    assert.equal(rows.find((r) => r.sellerId === 'h').revenueVnd, 250_000);
+    const stored = buildSellerRows([
+      { seller: 'h', sellerType: 'HOUSEHOLD_BUSINESS', currency: 'USD', grossAmount: 10, exchangeRate: { vndPerUsd: 20000 } },
+    ], new Map(), null);
+    assert.equal(stored[0].revenueVnd, 200_000);
+    assert.equal(stored[0].fxIncomplete, false);
+    const missing = buildSellerRows([
+      { seller: 'h', sellerType: 'HOUSEHOLD_BUSINESS', currency: 'USD', grossAmount: 10 },
+    ], new Map(), null);
+    assert.equal(missing[0].revenueVnd, 0);
+    assert.equal(missing[0].fxIncomplete, true);
     const aff = buildAffiliateRows([
       { affiliate: 'x', currency: 'VND', amount: 2_500_000, amountVnd: 2_500_000, netAmount: 2_250_000, pitAmount: 250_000, createdAt: '2026-08-01T00:00:00Z' },
       { affiliate: 'x', currency: 'VND', amount: 250_000, amountVnd: 250_000, netAmount: 250_000, pitAmount: 0, createdAt: '2026-09-01T00:00:00Z' },

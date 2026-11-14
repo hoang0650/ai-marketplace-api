@@ -578,9 +578,12 @@ function billMeasuredUsage({ unit, rate, currency = 'USD', inputRate, outputRate
     return { costUsd: 0, quantity: 0, billableUnits: 0, rounding: ROUNDING_ID };
   }
   const measured = measurement || { count: 0, inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
-  const flat = toUsd(Number(rate) || 0, currency);
-  const inRate = toUsd(Number(inputRate) || 0, currency);
-  const outRate = toUsd(Number(outputRate) || 0, currency);
+  const flatRaw = toUsd(Number(rate) || 0, currency);
+  const inRaw = toUsd(Number(inputRate) || 0, currency);
+  const outRaw = toUsd(Number(outputRate) || 0, currency);
+  const flat = flatRaw || 0;
+  const inRate = inRaw || 0;
+  const outRate = outRaw || 0;
   const cacheSpecified = cachedInputRate != null && cachedInputRate !== '' && Number.isFinite(Number(cachedInputRate));
   const cacheRate = cacheSpecified ? toUsd(Number(cachedInputRate) || 0, currency) : null;
   const split = def.dimension === 'tokens' && !measured.flatQuantity && (inRate > 0 || outRate > 0 || cacheRate != null);

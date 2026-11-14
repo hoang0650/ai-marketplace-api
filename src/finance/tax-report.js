@@ -40,8 +40,18 @@ function yearRange(year) {
   return { from: new Date(Date.UTC(y, 0, 1) - VN_OFFSET_MS), to: new Date(Date.UTC(y + 1, 0, 1) - VN_OFFSET_MS), year: y };
 }
 
-function toVnd(amount, currency, fx) {
-  return roundMoney(String(currency || 'USD').toUpperCase() === 'VND' ? Number(amount) || 0 : (Number(amount) || 0) * fx, 0);
+function rateFor(row, fx) {
+  const locked = Number(row?.exchangeRate?.vndPerUsd ?? row?.vndPerUsd);
+  if (locked > 0) return locked;
+  const live = Number(fx);
+  return live > 0 ? live : null;
+}
+
+function toVnd(amount, currency, rate) {
+  const n = Number(amount) || 0;
+  if (n === 0 || String(currency || 'USD').toUpperCase() === 'VND') return roundMoney(n, 0);
+  if (!(Number(rate) > 0)) return null;
+  return roundMoney(n * rate, 0);
 }
 
 /**
@@ -69,12 +79,20 @@ function buildSellerRows(orders, sellers = new Map(), fx = taxConfig().vndPerUsd
       vatWithheldVnd: 0,
       pitWithheldVnd: 0,
       totalWithheldVnd: 0,
+      fxIncomplete: false,
     };
-    const gross = toVnd(o.grossAmount ?? o.amount, o.currency, fx);
-    const refund = toVnd(o.refundAmount, o.currency, fx);
-    const tax = toVnd(o.taxAmount, o.currency, fx);
-    const vat = o.taxPolicy ? toVnd(o.taxPolicy.vatAmount, o.currency, fx) : 0;
-    const pit = o.taxPolicy ? toVnd(o.taxPolicy.pitAmount, o.currency, fx) : 0;
+    const rate = rateFor(o, fx);
+    const gross = toVnd(o.grossAmount ?? o.amount, o.currency, rate);
+    const refund = toVnd(o.refundAmount, o.currency, rate);
+    const tax = toVnd(o.taxAmount, o.currency, rate);
+    const vat = o.taxPolicy ? toVnd(o.taxPolicy.vatAmount, o.currency, rate) : 0;
+    const pit = o.taxPolicy ? toVnd(o.taxPolicy.pitAmount, o.currency, rate) : 0;
+    if (gross == null || refund == null || tax == null || vat == null || pit == null) {
+      row.fxIncomplete = true;
+      row.orders += 1;
+      bySeller.set(id, row);
+      continue;
+    }
     row.orders += 1;
     row.revenueVnd += gross;
     row.refundVnd += refund;
@@ -134,11 +152,18 @@ function buildAffiliateRows(commissions, people = new Map(), fx = taxConfig().vn
       exemptByCommitment: 0,
       firstMonth: null,
       lastMonth: null,
+      fxIncomplete: false,
     };
     const share = c.amount > 0 ? Math.max(0, 1 - (Number(c.reversedAmount) || 0) / (Number(c.netAmount) || c.amount)) : 0;
-    const income = c.amountVnd ? roundMoney(c.amountVnd * share, 0) : toVnd(c.amount * share, c.currency, fx);
+    const income = c.amountVnd ? roundMoney(c.amountVnd * share, 0) : toVnd(c.amount * share, c.currency, rateFor(c, fx));
     if (!(share > 0)) continue;
-    const pit = c.pitAmountVnd ? roundMoney(c.pitAmountVnd * share, 0) : toVnd((Number(c.pitAmount) || 0) * share, c.currency, fx);
+    const pit = c.pitAmountVnd ? roundMoney(c.pitAmountVnd * share, 0) : toVnd((Number(c.pitAmount) || 0) * share, c.currency, rateFor(c, fx));
+    if (income == null || pit == null) {
+      row.fxIncomplete = true;
+      row.payments += 1;
+      byAff.set(id, row);
+      continue;
+    }
     row.payments += 1;
     row.incomeVnd += income;
     row.pitWithheldVnd += pit;

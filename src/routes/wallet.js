@@ -65,7 +65,7 @@ router.get('/summary', authenticate, async (req, res, next) => {
       affiliate = {
         ...slice,
         minWithdrawVnd: 0,
-        availableVnd: Math.round(slice.available * cfg.pit.vndPerUsd),
+        availableVnd: cfg.pit.vndPerUsd > 0 ? Math.round(slice.available * cfg.pit.vndPerUsd) : null,
         canWithdraw: affiliateCanWithdraw({ available: slice.available, identityVerified }),
       };
     }
@@ -231,7 +231,14 @@ router.post('/withdraw', authenticate, async (req, res, next) => {
     if (isVietqrDepositWithdrawalRequest(req.body)) {
       return withdrawVietqrCompanyBank(req, res, next);
     }
+    await require('../finance/exchange-rate').getExchangeRates();
     const { personas, persona, policy } = await resolvePayoutPersona(req.user, req.body?.persona);
+    if (policy.minAmountVnd > 0 && !(Number(policy.minAmount) > 0)) {
+      return res.status(503).json({
+        message: 'Exchange rate is unavailable. Conversion waits for a rate from ExchangeRate-API (https://www.exchangerate-api.com).',
+        code: 'EXCHANGE_RATE_UNAVAILABLE',
+      });
+    }
 
     // Affiliate amounts are checked by quoteAffiliateWithdrawal (precision, not a commercial minimum).
     // Other personas keep the shared USD normalizer, including seller and employer minimums below.

@@ -162,7 +162,7 @@ router.get('/', authenticate, async (req, res, next) => {
     const withdrawal = {
       ...slice,
       minWithdrawVnd: 0,
-      availableVnd: Math.round(slice.available * cfg.pit.vndPerUsd),
+      availableVnd: cfg.pit.vndPerUsd > 0 ? Math.round(slice.available * cfg.pit.vndPerUsd) : null,
       canWithdraw: affiliateCanWithdraw({ available: slice.available, identityVerified }),
       pitRate: cfg.pit.enabled && !exempt ? cfg.pit.rate : 0,
       pitCommitmentApplied: exempt,

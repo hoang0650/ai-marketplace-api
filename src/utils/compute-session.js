@@ -234,8 +234,15 @@ function usageRatePerHour(product) {
   const rate = Number(pricing.usageRate) || 0;
   if (rate <= 0) return 0;
   // "phút", "per minute", "/min", "1 minute", "sec", "GPU hour"… and VND listings → USD/hour.
-  const perHour = ratePerHourUsd(rate, pricing.usageUnit || 'hour', pricing.currency || 'USD');
-  return perHour === null ? toUsd(rate, pricing.currency || 'USD') : perHour;
+  const currency = pricing.currency || 'USD';
+  const perHour = ratePerHourUsd(rate, pricing.usageUnit || 'hour', currency);
+  if (perHour != null) return perHour;
+  const usd = toUsd(rate, currency);
+  if (usd == null) {
+    const { exchangeRateUnavailableError } = require('../finance/exchange-rate');
+    throw exchangeRateUnavailableError();
+  }
+  return usd;
 }
 
 async function assertBuyerAccess(user, product) {

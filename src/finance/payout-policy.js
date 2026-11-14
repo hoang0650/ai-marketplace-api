@@ -1,6 +1,5 @@
 const TalentProfile = require('../models/TalentProfile');
 const SellerProfile = require('../models/SellerProfile');
-const { fallbackVndPerUsd } = require('../config/fx');
 const { currentVndPerUsd } = require('./exchange-rate');
 
 /**
@@ -53,16 +52,17 @@ const EMPLOYER_MIN_VND = Math.max(0, Number(process.env.WITHDRAW_EMPLOYER_MIN_VN
  */
 const SELLER_CHARGE_AT_WITHDRAW = String(process.env.WITHDRAW_SELLER_CHARGE_AT_WITHDRAW || '').toLowerCase() === 'true';
 
-/** Snapshot of the env fallback at load. Live conversion uses `currentVndPerUsd()`. */
-const VND_PER_USD = fallbackVndPerUsd();
-
 function roundMoney(n) {
   return Math.round((Number(n) || 0) * 100) / 100;
 }
 
+/** USD for a VND amount at the live rate. Null when that rate has never been fetched. */
 function vndToUsd(vnd) {
+  const n = Number(vnd) || 0;
+  if (n === 0) return 0;
   const rate = currentVndPerUsd();
-  return roundMoney(Number(vnd || 0) / (rate > 0 ? rate : VND_PER_USD));
+  if (!(rate > 0)) return null;
+  return roundMoney(n / rate);
 }
 
 function sellerTaxRate(sellerType) {
@@ -343,7 +343,6 @@ module.exports = {
   SELLER_TAX_RATE,
   EMPLOYER_FEE_RATE,
   EMPLOYER_MIN_VND,
-  VND_PER_USD,
   vndToUsd,
   policyFor,
   sellerTaxSummary,

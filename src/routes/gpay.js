@@ -93,10 +93,21 @@ function readAmountVnd(req, res) {
   return amountVnd;
 }
 
+function requireVndRate(fx) {
+  const rate = Number(fx?.vndPerUsd);
+  if (!(rate > 0)) {
+    const err = new Error('Exchange rate is unavailable. Conversion waits for a rate from ExchangeRate-API (https://www.exchangerate-api.com).');
+    err.status = 503;
+    err.code = 'EXCHANGE_RATE_UNAVAILABLE';
+    throw err;
+  }
+  return rate;
+}
+
 /** Pending deposit whose `_id` also names the GPay order (`AIM<id>`). */
 async function createPendingDeposit(user, amountVnd, channel) {
   const fx = await rateQuote();
-  const rate = fx.vndPerUsd;
+  const rate = requireVndRate(fx);
   const amountUsd = roundMoney(amountVnd / rate);
   const _id = new mongoose.Types.ObjectId();
   return WalletTx.create({
@@ -397,7 +408,7 @@ async function handleVirtualAccountEvent(payload, res) {
   }
 
   const fx = await rateQuote();
-  const rate = fx.vndPerUsd;
+  const rate = requireVndRate(fx);
   const amountUsd = roundMoney(amountVnd / rate);
   if (amountUsd <= 0) {
     return res.status(400).json({ message: 'Deposit amount rounds to zero', code: 'GPAY_BAD_AMOUNT' });
@@ -478,7 +489,7 @@ router.post('/sandbox/credit', requireGpayEnabled, authenticate, async (req, res
 
     const gpayTransId = `SIM${Date.now()}${new mongoose.Types.ObjectId().toString().slice(-6)}`;
     const fx = await rateQuote();
-    const rate = fx.vndPerUsd;
+    const rate = requireVndRate(fx);
     const amountUsd = roundMoney(amountVnd / rate);
 
     const tx = await WalletTx.create({

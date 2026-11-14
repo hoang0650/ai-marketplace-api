@@ -43,10 +43,17 @@ describe('usage-pricing helpers', () => {
     assert.equal(p.charCount(null), 0);
   });
 
-  test('toUsd converts VND with the shared 26,500 default', () => {
-    assert.equal(p.vndPerUsd({}), 26500);
+  test('toUsd converts VND only with a supplied rate', (t) => {
+    const prev = process.env.EXCHANGE_RATE_VND_OVERRIDE;
+    delete process.env.EXCHANGE_RATE_VND_OVERRIDE;
+    t.after(() => {
+      if (prev === undefined) delete process.env.EXCHANGE_RATE_VND_OVERRIDE;
+      else process.env.EXCHANGE_RATE_VND_OVERRIDE = prev;
+    });
+    assert.equal(p.vndPerUsd({}), null);
     assert.equal(p.vndPerUsd({ VND_USD_RATE: '25000' }), 25000);
-    assert.equal(p.toUsd(26500, 'VND', 26500), 1);
+    assert.equal(p.toUsd(25000, 'VND', 25000), 1);
+    assert.equal(p.toUsd(25000, 'VND'), null);
     assert.equal(p.toUsd(2, 'usd'), 2);
   });
 });
@@ -71,8 +78,14 @@ describe('computeUsageCost', () => {
     assert.equal(computeUsageCost(onlyOut, tok(1_000_000, 1_000_000)), 5);
   });
 
-  test('VND-priced listings are converted to USD', () => {
-    const prod = usageProduct({ usageUnit: '1M tokens', usageRate: 26500, currency: 'VND' });
+  test('VND-priced listings are converted with the live rate', (t) => {
+    const prev = process.env.EXCHANGE_RATE_VND_OVERRIDE;
+    process.env.EXCHANGE_RATE_VND_OVERRIDE = '25000';
+    t.after(() => {
+      if (prev === undefined) delete process.env.EXCHANGE_RATE_VND_OVERRIDE;
+      else process.env.EXCHANGE_RATE_VND_OVERRIDE = prev;
+    });
+    const prod = usageProduct({ usageUnit: '1M tokens', usageRate: 25000, currency: 'VND' });
     assert.equal(computeUsageCost(prod, tok(1_000_000, 0)), 1);
   });
 
@@ -105,8 +118,14 @@ describe('usageRatePerHour (game / compute streaming)', () => {
     assert.equal(rate({ usageUnit: 'day', usageRate: 24 }), 1);
     assert.equal(rate({ usageUnit: 'GPU hour', usageRate: 1.2 }), 1.2);
   });
-  test('VND listings → USD/hour', () => {
-    assert.equal(rate({ usageUnit: 'phút', usageRate: 1325, currency: 'VND' }), 3);
+  test('VND listings convert to USD per hour with the live rate', (t) => {
+    const prev = process.env.EXCHANGE_RATE_VND_OVERRIDE;
+    process.env.EXCHANGE_RATE_VND_OVERRIDE = '25000';
+    t.after(() => {
+      if (prev === undefined) delete process.env.EXCHANGE_RATE_VND_OVERRIDE;
+      else process.env.EXCHANGE_RATE_VND_OVERRIDE = prev;
+    });
+    assert.equal(rate({ usageUnit: 'hour', usageRate: 25000, currency: 'VND' }), 1);
   });
 });
 
@@ -148,7 +167,14 @@ describe('deployment proxy metering (computeCost)', () => {
   test('uses the same unit / split / currency rules as the playground', () => {
     const prod = usageProduct({ usageUnit: '1M tokens', usageRate: 1, inputRate: 2, outputRate: 8, currency: 'VND' });
     assert.equal(_computeCost({ ...prod, pricing: { ...prod.pricing, currency: 'USD' } }, 1_500_000, 1_000_000, 500_000), 6);
-    assert.equal(_computeCost(prod, 1_500_000, 1_000_000, 500_000), Math.round((6 / 26500) * 1e6) / 1e6);
+    const prev = process.env.EXCHANGE_RATE_VND_OVERRIDE;
+    process.env.EXCHANGE_RATE_VND_OVERRIDE = '25000';
+    try {
+      assert.equal(_computeCost(prod, 1_500_000, 1_000_000, 500_000), Math.round((6 / 25000) * 1e6) / 1e6);
+    } finally {
+      if (prev === undefined) delete process.env.EXCHANGE_RATE_VND_OVERRIDE;
+      else process.env.EXCHANGE_RATE_VND_OVERRIDE = prev;
+    }
     assert.equal(_computeCost(usageProduct({ usageUnit: '1K tokens', usageRate: 0.5 }), 4000), 2);
     assert.equal(_computeCost({ pricing: { model: 'fixed', price: 9 } }, 1000), 0);
   });

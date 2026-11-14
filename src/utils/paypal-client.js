@@ -19,6 +19,7 @@ function toPaypalUsd(amount, currency = 'USD', vndPerUsd = currentVndPerUsd()) {
   let usd = n;
   if (code === 'VND' || code === 'VNĐ') {
     const rate = Number(vndPerUsd) > 0 ? Number(vndPerUsd) : currentVndPerUsd();
+    if (!(rate > 0)) return null;
     usd = n / rate;
   } else if (code !== 'USD') {
     return null;

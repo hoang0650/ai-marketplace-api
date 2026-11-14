@@ -43,4 +43,6 @@ const orderInvoiceSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+require('../finance/stamp-exchange-rate').attachExchangeRateStamp(orderInvoiceSchema);
+
 module.exports = mongoose.models.OrderInvoice || mongoose.model('OrderInvoice', orderInvoiceSchema);

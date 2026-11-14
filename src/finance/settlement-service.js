@@ -39,12 +39,27 @@ async function sellerAnnualRevenueVnd(sellerId, at = new Date()) {
     const Order = require('../models/Order');
     const d = new Date(at);
     const from = new Date(Date.UTC(d.getUTCFullYear(), 0, 1) - 7 * 3600 * 1000); // 00:00 1/1 Asia/Bangkok
-    const rows = await Order.aggregate([
-      { $match: { seller: sellerId, status: 'paid', ownershipType: { $ne: 'PLATFORM_DIRECT' }, createdAt: { $gte: from, $lte: d } } },
-      { $group: { _id: { $toUpper: { $ifNull: ['$currency', 'USD'] } }, total: { $sum: { $ifNull: ['$grossAmount', '$amount'] } } } },
-    ]);
-    const fx = taxConfig().vndPerUsd;
-    return rows.reduce((s, r) => s + (r._id === 'VND' ? r.total : r.total * fx), 0);
+    const rows = await Order.find({
+      seller: sellerId,
+      status: 'paid',
+      ownershipType: { $ne: 'PLATFORM_DIRECT' },
+      createdAt: { $gte: from, $lte: d },
+    }).select('currency grossAmount amount exchangeRate').lean();
+    const live = Number(taxConfig().vndPerUsd);
+    let total = 0;
+    for (const r of rows) {
+      const cur = String(r.currency || 'USD').toUpperCase();
+      const amt = Number(r.grossAmount ?? r.amount) || 0;
+      if (cur === 'VND') {
+        total += amt;
+        continue;
+      }
+      const locked = Number(r.exchangeRate?.vndPerUsd);
+      const rate = locked > 0 ? locked : live;
+      if (!(rate > 0)) return undefined;
+      total += amt * rate;
+    }
+    return total;
   } catch {
     return undefined;
   }

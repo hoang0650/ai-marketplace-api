@@ -1,4 +1,3 @@
-const { DEFAULT_VND_PER_USD } = require('./fx');
 const { currentVndPerUsd } = require('../finance/exchange-rate');
 
 function num(raw, fallback) {
@@ -41,7 +40,7 @@ function taxVndRate(env) {
       ? env.TAX_VND_PER_USD
       : env.AFFILIATE_VND_PER_USD;
     const n = Number(raw);
-    return Number.isFinite(n) && n > 0 ? Math.max(1, n) : DEFAULT_VND_PER_USD;
+    return Number.isFinite(n) && n > 0 ? Math.max(1, n) : null;
   }
   return currentVndPerUsd();
 }

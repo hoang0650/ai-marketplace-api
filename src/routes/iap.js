@@ -85,6 +85,8 @@ router.post('/verify', authenticate, async (req, res, next) => {
     }
 
     const storeLabel = platform === 'ios' ? 'App Store' : 'Google Play';
+    const { getExchangeRates, fxAudit } = require('../finance/exchange-rate');
+    const fx = await getExchangeRates();
     const tx = await WalletTx.create({
       user: req.user._id,
       type: 'deposit',
@@ -96,6 +98,7 @@ router.post('/verify', authenticate, async (req, res, next) => {
       iapProductId: productId,
       note: `${storeLabel} IAP ${productId}`,
       reviewedAt: new Date(),
+      meta: { channel: 'iap', sku: productId, usd: pack.usd, ...fxAudit(fx) },
     });
 
     res.json({ success: true, duplicate: false, wallet: mapWallet(tx) });

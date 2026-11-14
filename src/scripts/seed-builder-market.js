@@ -22,10 +22,7 @@ const { WEB_CASE, APP_CASE, replayCase } = require('./builder-demo-cases');
 const { inferProductType } = require('../data/marketplace-types');
 const { taxCategoryFromProduct } = require('../finance/tax-category');
 const { publicGatewayUrls } = require('../utils/gateway-urls');
-const { fallbackVndPerUsd } = require('../config/fx');
-
 const MOCK_PATH = path.resolve(__dirname, '../../../ai-marketplace/src/assets/mock/marketplace.json');
-const VND_PER_USD = fallbackVndPerUsd();
 
 /** USD, one-time. */
 const HIRE = [
@@ -67,10 +64,6 @@ function argEmail() {
   return String((flag ? flag.slice('--email='.length) : process.env.BUILDER_DEMO_EMAIL) || 'nova@creators.dev')
     .trim()
     .toLowerCase();
-}
-
-function vnd(usd) {
-  return `${Math.round(usd * VND_PER_USD).toLocaleString('vi-VN')}đ`;
 }
 
 function demoFiles(demo) {
@@ -202,10 +195,10 @@ connectDb()
   .then(({ seller, hire, templates }) => {
     console.log(`[seed:builder-market] seller=${seller.email} (${seller.creatorSlug})`);
     for (const h of hire) {
-      console.log(`  ${h.category.padEnd(15)} /product/${h.slug}  $${h.price} ≈ ${vnd(h.price)}  ${h.action}${h.seller ? ` · ${h.seller}` : ''}`);
+      console.log(`  ${h.category.padEnd(15)} /product/${h.slug}  $${h.price}  ${h.action}${h.seller ? ` · ${h.seller}` : ''}`);
     }
     for (const t of templates) {
-      console.log(`  ${t.category.padEnd(15)} /product/${t.slug}  $${t.price} ≈ ${vnd(t.price)}  ${t.files} files · v${t.version}`);
+      console.log(`  ${t.category.padEnd(15)} /product/${t.slug}  $${t.price}  ${t.files} files · v${t.version}`);
     }
     process.exit(0);
   })
