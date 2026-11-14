@@ -90,6 +90,8 @@ function mapUsageEvent(ev) {
   const cachedTokens = Math.max(0, Math.floor(Number(ev.cachedTokens) || 0));
   const unit = String(ev.unit || (inputTokens + outputTokens > 0 ? 'tokens' : 'requests'));
   const quantity = Math.max(0, Number(ev.quantity) || inputTokens + outputTokens || 0);
+  const bill = ev.rawUsage && typeof ev.rawUsage === 'object' ? ev.rawUsage.bill : null;
+  const rate = ev.rate != null && ev.rate !== '' ? Number(ev.rate) : (bill?.rate ?? null);
   return {
     id: String(ev._id || ev.id),
     createdAt: ev.createdAt ? new Date(ev.createdAt).toISOString() : new Date().toISOString(),
@@ -105,6 +107,12 @@ function mapUsageEvent(ev) {
     tokens: inputTokens + outputTokens,
     unit,
     quantity,
+    rate: Number.isFinite(rate) ? rate : null,
+    rateCurrency: bill?.currency || ev.currency || 'USD',
+    inputRate: bill?.inputRate ?? null,
+    outputRate: bill?.outputRate ?? null,
+    cachedInputRate: bill?.cachedInputRate ?? null,
+    rounding: bill?.rounding || null,
     usageLabel: `${quantity.toLocaleString('en-US')} ${unit}`,
     amount: Number(ev.cost) || 0,
     currency: ev.currency || 'USD',

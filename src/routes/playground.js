@@ -5,7 +5,8 @@ const UsageStat = require('../models/UsageStat');
 const { authenticate } = require('../middleware/auth');
 const { placeHold, releaseHold } = require('../utils/wallet');
 const { chargeUsage } = require('../finance/charge-usage');
-const { resolveProviderForProduct, computeUsageCost, applyAllowedOverrides } = require('../utils/provider-resolve');
+const { noteUpstreamStatus, eventMeter } = require('../finance/usage-units');
+const { resolveProviderForProduct, computeUsageCost, explainUsageCharge, applyAllowedOverrides } = require('../utils/provider-resolve');
 const { inferWithFallback } = require('../utils/denglish-client');
 const { preflight } = require('../utils/usage-preflight');
 const { charCount } = require('../utils/usage-pricing');
@@ -263,9 +264,12 @@ router.post('/run', authenticate, history.recordRequest, async (req, res, next) 
     }
     const sandbox = Boolean(ai.raw?.sandbox || ai.data?.sandbox);
     if (sandbox) usage.sandbox = true;
+    const data = ai.data && typeof ai.data === 'object' ? ai.data : {};
+    usage.elapsedMs = latencyMs;
+    usage.output = data;
+    noteUpstreamStatus(usage, ai);
     const inputTokens = Number(usage.input_tokens) || 0;
     const outputTokens = Number(usage.output_tokens) || 0;
-    const data = ai.data && typeof ai.data === 'object' ? ai.data : {};
     // denglish-api reports RunPod's own price as upstream_cost and the sell price
     // (upstream + markup) as cost, computed from output.cost when RunPod returns
     // one, otherwise from the formula on the model's docs page.
@@ -275,7 +279,9 @@ router.post('/run', authenticate, history.recordRequest, async (req, res, next) 
       upstream: sandbox ? 0 : reported ? Number(data.upstream_cost) : Number(data.cost) ? 0 : quote.upstreamCost,
       cost: providerCost,
     };
-    const cost = licenseCovered || sandbox ? 0 : computeUsageCost(product, usage, inferInput, costParts);
+    const explained = explainUsageCharge(product, usage, inferInput, costParts);
+    const meter = eventMeter(explained, usage);
+    const cost = licenseCovered || sandbox ? 0 : explained.costUsd;
 
     let charged = 0;
     let sellerNet = 0;
@@ -309,14 +315,15 @@ router.post('/run', authenticate, history.recordRequest, async (req, res, next) 
       seller: sellerId,
       inputTokens,
       outputTokens,
-      cachedTokens: Number(usage.cached_tokens) || 0,
+      cachedTokens: meter.cachedTokens,
       cost: charged,
       platformFee,
       sellerNet,
       provider,
-      unit: usage.unit || 'tokens',
-      quantity: Number(usage.quantity) || 0,
-      rawUsage: shortfall > 0 ? { ...usage, shortfall } : usage,
+      unit: meter.unit,
+      quantity: meter.quantity,
+      rate: meter.rate,
+      rawUsage: shortfall > 0 ? { ...usage, bill: meter.bill, shortfall } : { ...usage, bill: meter.bill },
       source: 'playground',
       usageType: voice ? 'VOICE_TTS' : 'API_REQUEST',
     });
@@ -336,11 +343,11 @@ router.post('/run', authenticate, history.recordRequest, async (req, res, next) 
 
     void notifyUser(buyerId, 'usage.completed', {
       product: product.name,
-      quantity: Number(usage.quantity) || 0,
-      unit: usage.unit || 'tokens',
+      quantity: meter.quantity,
+      unit: meter.unit,
       input: inputTokens,
       output: outputTokens,
-      cache: Number(usage.cached_tokens) || 0,
+      cache: meter.cachedTokens,
       amount: String(Number(Number(charged || 0).toFixed(6))),
       currency: 'USD',
     }, '/usage').catch(() => {});
@@ -480,7 +487,7 @@ async function runGpuVoice(req, product, inferInput) {
     const event = await UsageEvent.create({
       deployment: null, product: product._id, buyer: buyerId, seller: product.creator, inputTokens: 0, outputTokens: 0,
       cachedTokens: 0,
-      cost: charged, platformFee, sellerNet, provider: 'aimx_gpu', unit: 'characters', quantity: usage.quantity, rawUsage: usage,
+      cost: charged, platformFee, sellerNet, provider: 'aimx_gpu', unit: product.pricing?.usageUnit || 'characters', quantity: usage.quantity, rate: product.pricing?.usageRate ?? null, rawUsage: usage,
       source: 'playground', usageType: 'VOICE_TTS',
     });
     void notifyUser(buyerId, 'usage.completed', {

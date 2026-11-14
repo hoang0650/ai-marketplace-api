@@ -83,6 +83,13 @@ function normalizeInferenceResult(json, input = {}) {
     quantity: Number.isFinite(quantity) && quantity >= 0 ? quantity : totalTokens || 1,
     ...(estimated ? { estimated: true } : {}),
   };
+  const headerUsage = result?.headers?.['x-aim-usage'] || result?.headers?.['X-AIM-Usage'];
+  if (headerUsage && !result.usage.report && result.usage['x-aim-usage'] == null) {
+    result.usage['x-aim-usage'] = headerUsage;
+  }
+  if (result.ok === false) result.usage.ok = false;
+  const http = Number(result.http_status ?? result.httpStatus);
+  if (Number.isFinite(http) && http >= 400) result.usage.http_status = http;
   return result;
 }
 

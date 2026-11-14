@@ -7,7 +7,8 @@ const UsageStat = require('../models/UsageStat');
 const { authenticate, requireRoles } = require('../middleware/auth');
 const { requireAvailableFunds } = require('../utils/wallet');
 const { chargeUsage } = require('../finance/charge-usage');
-const { computeUsageCost } = require('../utils/provider-resolve');
+const { computeUsageCost, explainUsageCharge } = require('../utils/provider-resolve');
+const { eventMeter } = require('../finance/usage-units');
 const { slugify } = require('../utils/serialize');
 const { normalizeRuntime, normalizeRuntimeForStorage, publicRuntime, mergeRuntime } = require('../utils/runtime');
 const { deleteCachePattern } = require('../utils/cache');
@@ -294,7 +295,14 @@ router.post('/:id/invoke', authenticate, async (req, res, next) => {
     const product = await Product.findById(dep.product).lean();
     if (!product) return res.status(404).json({ message: 'Product behind deployment is gone' });
 
-    const cost = computeCost(product, totalTokens, inputTokens, outputTokens);
+    const explained = explainUsageCharge(product, {
+      unit: 'tokens',
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      total_tokens: totalTokens,
+    });
+    const meter = eventMeter(explained, { unit: 'tokens', quantity: totalTokens });
+    const cost = explained.costUsd;
     const buyerId = req.user._id;
     const sellerId = dep.seller;
     const selfUse = String(buyerId) === String(sellerId);
@@ -346,8 +354,10 @@ router.post('/:id/invoke', authenticate, async (req, res, next) => {
       platformFee,
       sellerNet,
       provider: '',
-      unit: 'tokens',
-      quantity: totalTokens,
+      unit: meter.unit || 'tokens',
+      quantity: explained.measured ? meter.quantity : totalTokens,
+      rate: meter.rate,
+      rawUsage: { bill: meter.bill },
       source: 'deployment',
     });
 

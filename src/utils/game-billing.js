@@ -105,6 +105,7 @@ async function recordCharge(session, product, a, rate) {
     sellerNet: billed.sellerNet,
     unit: product.pricing?.usageUnit || 'hours',
     quantity: a.minutes / 60,
+    rate: product.pricing?.usageRate ?? null,
     rawUsage: {
       minutes: a.minutes,
       ratePerHour: rate,

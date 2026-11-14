@@ -6,9 +6,9 @@ const { placeHold, releaseHold } = require('./wallet');
 const { preflight } = require('./usage-preflight');
 const { claimIdempotencyKey, completeIdempotencyKey, releaseIdempotencyKey } = require('./idempotency');
 const { chargeUsage } = require('../finance/charge-usage');
-const { unitByCode } = require('../finance/usage-units');
+const { unitByCode, noteUpstreamStatus, eventMeter } = require('../finance/usage-units');
 const { hasActiveUsageEntitlement } = require('../finance/usage-access');
-const { resolveProviderForProduct, computeUsageCost } = require('./provider-resolve');
+const { resolveProviderForProduct, computeUsageCost, explainUsageCharge } = require('./provider-resolve');
 const { inferWithFallback, fetchJobStatus } = require('./denglish-client');
 const { getRunpodPublicEndpoint } = require('../data/runpod-public-endpoints');
 const { catalogProductSlug, canonicalProductSlug, catalogModelSlug } = require('./product-slug');
@@ -121,13 +121,14 @@ async function meterAndInfer(req, product, input, action = 'runsync') {
     usage.output = ai.data || null;
     const sandbox = Boolean(ai.raw?.sandbox || ai.data?.sandbox);
     if (sandbox) usage.sandbox = true;
+    noteUpstreamStatus(usage, ai);
     const aiData = ai.data || {};
     // Async `run` submissions have no cost yet: bill the pre-flight quote for the job.
     const upstream =
       Number(aiData.upstream_cost) || (Number(aiData.cost) ? 0 : Number(quote.upstreamCost) || 0);
-    const cost = sandbox
-      ? 0
-      : computeUsageCost(product, usage, input, { upstream, cost: Number(aiData.cost) || 0 });
+    const explained = explainUsageCharge(product, usage, input, { upstream, cost: Number(aiData.cost) || 0 });
+    const cost = sandbox ? 0 : explained.costUsd;
+    const meter = eventMeter(explained, usage);
     let charged = 0;
     let sellerNet = 0;
     let platformFee = 0;
@@ -158,16 +159,17 @@ async function meterAndInfer(req, product, input, action = 'runsync') {
       product: product._id,
       buyer: buyerId,
       seller: sellerId,
-      inputTokens: Number(usage.input_tokens) || 0,
-      outputTokens: Number(usage.output_tokens) || 0,
-      cachedTokens: Number(usage.cached_tokens) || 0,
+      inputTokens: Number(usage.input_tokens) || (Number(explained.inputTokens) + Number(explained.cachedTokens)) || 0,
+      outputTokens: Number(usage.output_tokens) || Number(explained.outputTokens) || 0,
+      cachedTokens: meter.cachedTokens,
       cost: charged,
       platformFee,
       sellerNet,
       provider,
-      unit: usage.unit || 'tokens',
-      quantity: Number(usage.quantity) || Number(usage.total_tokens) || 0,
-      rawUsage: { ...usage, ...(shortfall > 0 ? { shortfall } : {}), gatewayJobId: String(aiData.id || ai.raw?.id || ai.raw?.jobId || '') },
+      unit: meter.unit,
+      quantity: meter.quantity,
+      rate: meter.rate,
+      rawUsage: { ...usage, bill: meter.bill, ...(shortfall > 0 ? { shortfall } : {}), gatewayJobId: String(aiData.id || ai.raw?.id || ai.raw?.jobId || '') },
       source: 'gateway',
       usageType: 'API_REQUEST',
       idempotencyKey: scopedKey ? `gw_${scopedKey}` : `gw_${crypto.randomBytes(8).toString('hex')}`,
@@ -185,11 +187,11 @@ async function meterAndInfer(req, product, input, action = 'runsync') {
       'usage.completed',
       {
         product: product.name,
-        quantity: Number(usage.quantity) || Number(usage.total_tokens) || 0,
-        unit: usage.unit || 'tokens',
+        quantity: meter.quantity,
+        unit: meter.unit,
         input: Number(usage.input_tokens) || 0,
         output: Number(usage.output_tokens) || 0,
-        cache: Number(usage.cached_tokens) || 0,
+        cache: meter.cachedTokens,
         amount: Number(charged || 0).toFixed(6),
         currency: 'USD',
       },

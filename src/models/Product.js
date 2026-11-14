@@ -17,6 +17,8 @@ const pricingSchema = new mongoose.Schema(
     inputRate: { type: Number },
     outputRate: { type: Number },
     cachedInputRate: { type: Number },
+    /** Floor in `currency` applied when a successful call costs more than zero and less than this. */
+    minCharge: { type: Number, min: 0 },
     upstreamMarkup: { type: Number, min: 0 },
     /** 'upstream': bill provider-reported cost × (1 + markup); usageRate is the listed "from" price. */
     costBasis: { type: String },

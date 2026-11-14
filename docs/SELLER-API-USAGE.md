@@ -173,7 +173,176 @@ A: `POST /deployments/:id/invoke` có thể nhận token client báo cáo — ư
 
 ---
 
-## 8. Liên hệ
+## 9. Hợp đồng tính tiền (pricing units)
+
+Seller đặt giá trên `pricing` của sản phẩm `model: "usage"`. Trường lưu là `usageUnit` và `usageRate`. Khi tạo hoặc sửa, có thể gửi alias `unit` và `rate`; server đổi về mã cố định. Sản phẩm cũ với `usageUnit` dạng `"tokens"` (mỗi 1M token) hoặc `"hour"` / `"phút"` vẫn tính đúng, không cần migration.
+
+### 9.1. Trường giá
+
+```json
+{
+  "model": "usage",
+  "currency": "USD",
+  "usageUnit": "1k_tokens",
+  "usageRate": 0.5,
+  "inputRate": 0.4,
+  "outputRate": 1.2,
+  "cachedInputRate": 0.1,
+  "minCharge": 0.01
+}
+```
+
+| Trường | Ý nghĩa |
+|--------|---------|
+| `usageUnit` | Mã đơn vị. Alias lúc ghi: `token`, `1k_tokens`, `1m_tokens`, `1k_chars`, `1m_chars`, `second`, `minute`, `hour`, `request`, `image` |
+| `usageRate` | Đơn giá cho **một** đơn vị, theo `currency` |
+| `inputRate` | Tuỳ chọn. Token input chưa cache, cùng cỡ đơn vị với `usageRate`. Thiếu thì dùng `usageRate` |
+| `outputRate` | Tuỳ chọn. Token output. Thiếu thì dùng `usageRate` |
+| `cachedInputRate` | Tuỳ chọn. Token input đã cache. Thiếu thì bằng giá input. `0` nghĩa là cache miễn phí |
+| `minCharge` | Tuỳ chọn. Sàn tiền (cùng `currency`) chỉ khi lượt gọi thành công và tiền đo được > 0 nhưng nhỏ hơn sàn |
+| `currency` | `USD` (mặc định), `VND`, hoặc `CNY`. Ví trừ bằng USD |
+
+Mã lưu và cỡ đơn vị:
+
+| `usageUnit` | Đếm gì | Một đơn giá mua |
+|-------------|---------|-----------------|
+| `1_token` | token | 1 token |
+| `1k_tokens` | token | 1 000 token |
+| `1m_tokens` | token | 1 000 000 token |
+| `1k_characters` | ký tự Unicode | 1 000 ký tự |
+| `1m_characters` | ký tự Unicode | 1 000 000 ký tự |
+| `1_second` | giây | 1 giây |
+| `1_minute` | giây | 60 giây |
+| `1_hour` | giây | 3 600 giây |
+| `1_request` | request thành công | 1 request |
+| `1_image` | ảnh | 1 ảnh |
+
+`GET /v1/usage/units` trả `units`, `allowedByCategory`, `rounding`, `measurement`, `sellerReportBounds`.
+
+Catalog và chi tiết sản phẩm thêm `pricing.meter`:
+
+```json
+{
+  "unit": "1k_tokens",
+  "rate": 0.5,
+  "currency": "USD",
+  "inputRate": 0.4,
+  "outputRate": 1.2,
+  "cachedInputRate": 0.1,
+  "minCharge": 0.01,
+  "rounding": "exact_pro_rata_round6"
+}
+```
+
+### 9.2. Cách đếm
+
+`quantity` trong lịch sử buyer là **số thô** (token, ký tự, giây, ảnh, request), không phải số đơn vị đã chia.
+
+- **Ký tự.** Số code point Unicode NFC của văn bản request. Thứ tự field: `messages[].content` (nối bằng xuống dòng), rồi `prompt`, rồi `text`, rồi `input` nếu là string. `Tiếng Việt` = 10, emoji = 1.
+- **Token.** `prompt_tokens` hoặc `input_tokens`, cộng `completion_tokens` hoặc `output_tokens`. Thiếu cả hai thì `ceil(số ký tự / 4)` cho input và cho output.
+- **Token cache.** Lấy số dương đầu tiên trong `prompt_tokens_details.cached_tokens`, `input_tokens_details.cached_tokens`, `cache_read_input_tokens`, `cached_input_tokens`, `cached_tokens`. Provider kiểu OpenAI đã tính cache **nằm trong** prompt: gateway trừ khỏi input rồi tính `cachedInputRate`. Không cộng thêm vào tổng. Nếu cache lớn hơn prompt thì kẹp bằng prompt.
+- **Ảnh.** `output.images[]`, hoặc `output.data[]` có `url` / `b64_json` / `image_url`, hoặc 1 ảnh khi có `output.image_url` / `imageUrl` / `kind: "image"`.
+- **Request.** 1 nếu HTTP 2xx. `0` nếu không phải 2xx, `usage.ok === false`, hoặc `usage.billable === false`.
+- **Thời gian (gateway).** `duration_seconds` / `durationSec` / `billed_seconds` trên output hoặc usage. `gpu-compute`, `game-server`, `training-service` không có số đó thì dùng đồng hồ tường của gateway (ms / 1000).
+
+Buyer gửi `quantity`, `duration`, hoặc `usage` trên request thì **không** được tính.
+
+### 9.3. Làm tròn
+
+`exact_pro_rata_round6`:
+
+```
+tiền USD = làm_tròn_nửa_lên_6_chữ_số( (quantity / cỡ_đơn_vị) × đơn_giá_USD )
+```
+
+- Giây: đúng số giây, kể cả phần lẻ (`1.5` giây × `$0.02` = `$0.03`).
+- Phút và giờ: **pro-rata**, không làm tròn lên cả phút/giờ. `90` giây ở `$0.60/phút` = `$0.90`, không phải `$1.20`.
+- Đơn vị nhỏ nhất của ví cho usage là `$0.000001` (half-up). `$0.0000005` → `$0.000001`; `$0.0000004` → `$0`.
+- Phí sàn: **20%** giá trị đơn (`PLATFORM_COMMISSION_RATE`) sau giảm giá, qua cùng settlement với checkout. Buyer trả từ ví; seller nhận phần còn lại trên sổ phải trả. Self-use (buyer là seller) không trừ ví.
+- Phiên GPU/game stream dài vẫn chốt theo phút nguyên; phút lẻ cuối cùng làm tròn lên lúc dừng. Đó là sổ phiên, không phải đồng hồ của một request gateway.
+
+### 9.4. Seller runtime báo usage
+
+Gateway chỉ tin usage trên **response của chính sản phẩm đó**, trong giới hạn:
+
+| Chiều | Trần một request thành công |
+|-------|------------------------------|
+| token | 2 000 000 |
+| ký tự | 2 000 000 |
+| ảnh | 32 |
+| request | 1 |
+| giây | `min(6 giờ, max(2 × thời gian tường, 1 giây))` khi gateway biết wall clock; nếu không thì 6 giờ |
+
+Vượt trần, sai chiều, hoặc `quantity` / tổng token bằng 0 thì bỏ report và đo phía server như mục 9.2. Report `0` không xoá số đếm mà gateway đã thấy. Muốn không tính tiền thì trả HTTP không phải 2xx, `usage.ok: false`, hoặc `usage.billable: false`. Runtime phải tự ghi `usage`, không copy nguyên body của buyer.
+
+**Cách 1 — usage OpenAI** (token, cache):
+
+```json
+{
+  "usage": {
+    "prompt_tokens": 1000,
+    "completion_tokens": 200,
+    "prompt_tokens_details": { "cached_tokens": 800 }
+  }
+}
+```
+
+Input tính tiền = 200. Cache = 800. Output = 200.
+
+**Cách 2 — `usage.report`** (hoặc `usage.aim`, `usage.seller_report`):
+
+```json
+{
+  "usage": {
+    "report": { "unit": "image", "quantity": 2 }
+  }
+}
+```
+
+Token tách input/output/cache (số thô, không phải số đơn vị giá):
+
+```json
+{
+  "usage": {
+    "report": { "unit": "1k_tokens", "input": 1000, "output": 200, "cached": 800 }
+  }
+}
+```
+
+`{ "unit": "token", "quantity": 1500 }` không có `input`/`output` thì cả 1500 token tính theo `usageRate` (không dùng giá tách).
+
+**Cách 3 — header** `X-AIM-Usage` (JSON). Gateway đọc khi response đưa header vào `usage["x-aim-usage"]` hoặc `headers["x-aim-usage"]`:
+
+```
+X-AIM-Usage: {"unit":"second","quantity":12}
+```
+
+`unit` nhận alias ở mục 9.1 hoặc mã cố định. `quantity` là số thô.
+
+HTTP không phải 2xx thì không trừ ví, kể cả khi body có `usage`.
+
+### 9.5. Ví dụ tiền
+
+Đơn giá USD, chưa sàn `minCharge`.
+
+| Đơn vị | Số đo | Giá | Tiền |
+|--------|-------|-----|------|
+| `1_token` | 1 000 in + 100 out | in `$0.000003`, out `$0.000015` | `$0.0045` |
+| `1k_tokens` | 2 000 token | `$0.50` | `$1.00` |
+| `1m_tokens` | prompt 1 000 (800 cache), out 200 | in `$3`, cache `$0.30`, out `$15` | `(200×3 + 800×0.30 + 200×15) / 1e6 = $0.00384` |
+| `1k_characters` | `abcd` = 4 ký tự | `$1` | `$0.004` |
+| `1m_characters` | 2 500 ký tự | `$2` | `$0.005` |
+| `1_second` | 1.5 giây | `$0.02` | `$0.03` |
+| `1_minute` | 90 giây | `$0.60` | `$0.90` |
+| `1_hour` | 90 giây | `$1.20` | `$0.03` |
+| `1_request` | 1 request 200 | `$0.02` | `$0.02` |
+| `1_image` | 3 ảnh | `$0.04` | `$0.12` |
+
+`GET /v1/usage/me` mỗi dòng có `quantity`, `unit`, `rate`, `rateCurrency`, `inputRate`, `outputRate`, `cachedInputRate`, `amount` (USD đã trừ), `currency`.
+
+---
+
+## 10. Liên hệ
 
 - Support: support@aimarkets.vn  
 - Frontend seller docs: `/sell/docs/api-usage`  

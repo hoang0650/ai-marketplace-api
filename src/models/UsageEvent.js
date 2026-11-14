@@ -28,9 +28,11 @@ const usageEventSchema = new mongoose.Schema(
     currency: { type: String, default: 'USD' },
     /** AI router provider id */
     provider: { type: String, default: '', trim: true },
-    /** tokens | seconds | images | requests */
+    /** Canonical usage unit (`1k_tokens`, `1_minute`, …) or the legacy text. */
     unit: { type: String, default: 'tokens' },
     quantity: { type: Number, default: 0, min: 0 },
+    /** Listing rate in the product currency (see rawUsage.bill). */
+    rate: { type: Number, default: null },
     rawUsage: { type: mongoose.Schema.Types.Mixed, default: null },
     source: { type: String, enum: ['deployment', 'playground', 'api', 'gateway', 'training', 'gpu'], default: 'deployment' },
     usageType: { type: String, default: 'API_REQUEST', index: true },

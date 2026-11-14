@@ -5,7 +5,8 @@ const UsageStat = require('../models/UsageStat');
 const { authenticate } = require('../middleware/auth');
 const { requireAvailableFunds } = require('../utils/wallet');
 const { chargeUsage } = require('../finance/charge-usage');
-const { resolveProviderForProduct, computeUsageCost } = require('../utils/provider-resolve');
+const { noteUpstreamStatus, eventMeter } = require('../finance/usage-units');
+const { resolveProviderForProduct, explainUsageCharge } = require('../utils/provider-resolve');
 const { inferWithFallback } = require('../utils/denglish-client');
 const { productSlugQuery } = require('../utils/product-slug');
 const { publicProvider } = require('../utils/white-label');
@@ -45,11 +46,15 @@ router.post('/infer/:slug', authenticate, async (req, res, next) => {
     });
 
     const usage = ai.usage || { input_tokens: 0, output_tokens: 0, total_tokens: 0, unit: 'tokens' };
+    usage.output = ai.data || null;
+    noteUpstreamStatus(usage, ai);
     const providerCost = Number(ai.data?.cost) || 0;
-    const cost = computeUsageCost(product, usage, input, {
+    const explained = explainUsageCharge(product, usage, input, {
       upstream: Number(ai.data?.upstream_cost) || 0,
       cost: providerCost,
     });
+    const meter = eventMeter(explained, usage);
+    const cost = explained.costUsd;
     const buyerId = req.user._id;
     const sellerId = product.creator;
     const selfUse = String(buyerId) === String(sellerId);
@@ -85,13 +90,15 @@ router.post('/infer/:slug', authenticate, async (req, res, next) => {
       seller: sellerId,
       inputTokens: Number(usage.input_tokens) || 0,
       outputTokens: Number(usage.output_tokens) || 0,
+      cachedTokens: meter.cachedTokens,
       cost: charged,
       platformFee,
       sellerNet,
       provider,
-      unit: usage.unit || 'tokens',
-      quantity: Number(usage.quantity) || 0,
-      rawUsage: usage,
+      unit: meter.unit,
+      quantity: meter.quantity,
+      rate: meter.rate,
+      rawUsage: { ...usage, bill: meter.bill },
       source: 'api',
     });
 

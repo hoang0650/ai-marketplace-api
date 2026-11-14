@@ -20,7 +20,7 @@ const { applyVoiceProduct } = require('../utils/voice-clone');
 const { normalizeDevices } = require('../utils/stream-clients');
 const SellerProfile = require('../models/SellerProfile');
 const { parseAffiliateRate, effectiveAffiliateRate } = require('../finance/affiliate-engine');
-const { assertUsageListing } = require('../finance/usage-units');
+const { assertUsageListing, normalizeUsagePricing } = require('../finance/usage-units');
 const { normalizeServicePackages } = require('../utils/hire/packages');
 
 /** 'DIGITAL' | 'PHYSICAL' | '' (missing/invalid). */
@@ -194,6 +194,20 @@ function serviceDeliveryDays(category, value) {
 function usageListingError(category, pricing) {
   if (!pricing || pricing.model !== 'usage') return null;
   if (PROFESSIONAL_SERVICE_CATEGORIES.includes(String(category))) return null;
+  const normalized = normalizeUsagePricing(pricing);
+  pricing.usageUnit = normalized.usageUnit;
+  if (normalized.usageRate != null && normalized.usageRate !== '') pricing.usageRate = normalized.usageRate;
+  for (const key of ['usageRate', 'inputRate', 'outputRate', 'cachedInputRate', 'minCharge']) {
+    if (pricing[key] == null || pricing[key] === '') continue;
+    const n = Number(pricing[key]);
+    if (!Number.isFinite(n) || n < 0) {
+      return {
+        message: 'Đơn giá usage phải là số không âm.',
+        code: 'USAGE_RATE_INVALID',
+        field: key,
+      };
+    }
+  }
   return assertUsageListing(category, pricing.usageUnit);
 }
 
