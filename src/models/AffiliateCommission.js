@@ -1,8 +1,10 @@
 const mongoose = require('mongoose');
 
 /**
- * Commission owed to an affiliate for one order. Snapshot at order time; the net amount is
- * credited to the affiliate wallet immediately and frozen by the same 48h hold as seller sales.
+ * Commission owed to an affiliate for one order. Snapshot at order time. The net amount is
+ * recorded on the shared ledger as a payout liability (not spendable wallet balance) and
+ * frozen by the same 48h hold as seller sales. It can be paid only to the affiliate's
+ * registered bank account.
  */
 const affiliateCommissionSchema = new mongoose.Schema(
   {

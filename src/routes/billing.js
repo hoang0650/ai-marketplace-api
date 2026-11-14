@@ -10,6 +10,7 @@ const { authenticate } = require('../middleware/auth');
 const { deleteCachePattern } = require('../utils/cache');
 const { clampQty } = require('../utils/sales');
 const { getAvailableBalance, requireAvailableFunds } = require('../utils/wallet');
+const { forbiddenCommissionUse } = require('../finance/affiliate-use-policy');
 const { HOLD_MS } = require('../utils/payout-hold');
 const { recordOrderLedger } = require('../finance/ledger-service');
 const { settleSaleFromDb } = require('../finance/settlement-service');
@@ -227,13 +228,20 @@ router.post('/checkout', authenticate, async (req, res, next) => {
     });
 
     const amount = settlement.grossAmount;
+    const commissionUse = forbiddenCommissionUse(req.body);
+    if (commissionUse) {
+      return res.status(commissionUse.status).json({
+        message: commissionUse.message,
+        code: commissionUse.code,
+      });
+    }
 
     if (amount > 0) {
       try {
         await requireAvailableFunds(req.user._id, amount, { currency });
       } catch (err) {
-        if (err.status === 402) {
-          return res.status(402).json({
+        if (err.status === 402 || err.status === 403) {
+          return res.status(err.status).json({
             message: err.message,
             code: err.code || 'INSUFFICIENT_WALLET',
             amount,

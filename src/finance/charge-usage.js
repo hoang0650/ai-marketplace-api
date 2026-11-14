@@ -1,7 +1,7 @@
 const WalletTx = require('../models/WalletTx');
 const { settleSale } = require('./settlement-engine');
 const { taxCategoryFromProduct } = require('./tax-category');
-const { getSpendableBalance, releaseHold } = require('../utils/wallet');
+const { getAvailableBalance, purchaseFundsError, releaseHold } = require('../utils/wallet');
 const { withWalletLock } = require('../utils/wallet-lock');
 
 const round6 = (n) => Math.round((Number(n) || 0) * 1e6) / 1e6;
@@ -79,16 +79,19 @@ async function chargeUsage({
   return withWalletLock(buyerId, async () => {
     let settlement = settleFor(cost);
     const hold = holdId ? await WalletTx.findOne({ _id: holdId, user: buyerId, status: 'pending' }).lean() : null;
-    const spendable = round6((await getSpendableBalance(buyerId)) + (Number(hold?.amount) || 0));
+    const summary = await getAvailableBalance(buyerId);
+    const holdAmount = Number(hold?.amount) || 0;
+    const spendable = round6(summary.spendable + holdAmount);
+    const withHold = {
+      ...summary,
+      spendable,
+      payoutRaw: round6((summary.payoutRaw || 0) + holdAmount),
+    };
     let shortfall = 0;
     if (settlement.grossAmount > spendable + 1e-9) {
       if (funds === 'require') {
         if (hold) await releaseHold(hold._id);
-        const err = new Error(`Insufficient available wallet balance (need ${settlement.grossAmount.toFixed(4)} ${currency}).`);
-        err.status = 402;
-        err.code = 'INSUFFICIENT_WALLET';
-        err.body = { amount: settlement.grossAmount, available: spendable, currency };
-        throw err;
+        throw purchaseFundsError({ need: settlement.grossAmount, summary: withHold, currency });
       }
       // Never drive the ledger negative: bill what the buyer can cover and record the rest.
       shortfall = round6(settlement.grossAmount - spendable);
