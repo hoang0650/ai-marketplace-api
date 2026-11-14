@@ -56,7 +56,7 @@ Buyer **đếm token từng request** ngay trong response. Tổng lịch sử (t
 
 ### 3.1. Đặt pricing `usage`
 
-Trên sản phẩm model/API, chọn **Usage-based**. `usageRate` là giá của **một** `usageUnit` đã chọn (mặc định USD; VND hoặc CNY được đổi sang USD trước khi trừ ví). Không mặc định “USD / 1K tokens”. Alias lúc ghi là `unit` và `rate`, lưu thành `usageUnit` và `usageRate`. `computeUsageCost()` tính theo hợp đồng mục 9 (`exact_pro_rata_round6`), không chỉ theo token.
+Trên sản phẩm model/API, chọn **Usage-based**. `usageRate` là giá của **một** `usageUnit` đã chọn (mặc định USD; VND hoặc CNY được đổi sang USD theo tỷ giá lấy từ ExchangeRate-API, https://www.exchangerate-api.com, trước khi trừ ví). Không mặc định “USD / 1K tokens”. Alias lúc ghi là `unit` và `rate`, lưu thành `usageUnit` và `usageRate`. `computeUsageCost()` tính theo hợp đồng mục 9 (`exact_pro_rata_round6`), không chỉ theo token.
 
 ### 3.2. Product slug = model id
 

@@ -204,4 +204,6 @@ orderSchema.virtual('id').get(function idVirtual() {
 orderSchema.set('toJSON', { virtuals: true });
 orderSchema.set('toObject', { virtuals: true });
 
+require('../finance/stamp-exchange-rate').attachExchangeRateStamp(orderSchema);
+
 module.exports = mongoose.model('Order', orderSchema);

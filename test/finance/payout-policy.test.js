@@ -47,7 +47,13 @@ test('household business / company sellers have no tax in the withdraw policy', 
   assert.equal(policyFor('seller', { sellerType: 'INDIVIDUAL' }).taxRate, 0.07);
 });
 
-test('employer pays 1% and needs the VND minimum balance', () => {
+test('employer pays 1% and needs the VND minimum balance', (t) => {
+  const prev = process.env.EXCHANGE_RATE_VND_OVERRIDE;
+  process.env.EXCHANGE_RATE_VND_OVERRIDE = '25000';
+  t.after(() => {
+    if (prev === undefined) delete process.env.EXCHANGE_RATE_VND_OVERRIDE;
+    else process.env.EXCHANGE_RATE_VND_OVERRIDE = prev;
+  });
   const policy = policyFor('employer');
   assert.equal(policy.platformFeeRate, EMPLOYER_FEE_RATE);
   assert.equal(policy.taxRate, 0);

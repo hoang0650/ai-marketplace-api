@@ -15,45 +15,48 @@ test('transfer content format and uniqueness', () => {
   assert.equal(randomNonce().length, 6);
 });
 
-test('USD -> VND conversion at 26500, exact (no rounding)', () => {
-  assert.deepEqual(convertAmount({ amount: 1, currency: 'USD' }, 26500), { amountUsd: 1, amountVnd: 26500, vndPerUsd: 26500 });
-  assert.deepEqual(convertAmount({ amount: 1.01, currency: 'USD' }, 26500), { amountUsd: 1.01, amountVnd: 26765, vndPerUsd: 26500 });
-  assert.deepEqual(convertAmount({ amount: 10, currency: 'USD' }, 26500), { amountUsd: 10, amountVnd: 265000, vndPerUsd: 26500 });
-  assert.deepEqual(convertAmount({ amount: 1.5, currency: 'USD' }, 26500), { amountUsd: 1.5, amountVnd: 39750, vndPerUsd: 26500 });
+const SAMPLE = 25000;
+
+test('USD -> VND conversion uses the rate it is given', () => {
+  assert.deepEqual(convertAmount({ amount: 1, currency: 'USD' }, SAMPLE), { amountUsd: 1, amountVnd: 25000, vndPerUsd: SAMPLE });
+  assert.deepEqual(convertAmount({ amount: 1.01, currency: 'USD' }, SAMPLE), { amountUsd: 1.01, amountVnd: 25250, vndPerUsd: SAMPLE });
+  assert.deepEqual(convertAmount({ amount: 10, currency: 'USD' }, SAMPLE), { amountUsd: 10, amountVnd: 250000, vndPerUsd: SAMPLE });
+  assert.deepEqual(convertAmount({ amount: 1.5, currency: 'USD' }, SAMPLE), { amountUsd: 1.5, amountVnd: 37500, vndPerUsd: SAMPLE });
+  assert.equal(convertAmount({ amount: 1, currency: 'USD' }, 0), null);
 });
 
 test('VND -> USD conversion', () => {
-  assert.deepEqual(convertAmount({ amount: 26500, currency: 'VND' }, 26500), { amountUsd: 1, amountVnd: 26500, vndPerUsd: 26500 });
-  assert.deepEqual(convertAmount({ amount: 12345, currency: 'VND' }, 26500), { amountUsd: 0.47, amountVnd: 12345, vndPerUsd: 26500 });
-  assert.deepEqual(convertAmount({ amount: 530000, currency: 'VND' }, 26500), { amountUsd: 20, amountVnd: 530000, vndPerUsd: 26500 });
-  assert.deepEqual(convertAmount({ amount: 100000, currency: 'vnd' }, 26500), { amountUsd: 3.77, amountVnd: 100000, vndPerUsd: 26500 });
+  assert.deepEqual(convertAmount({ amount: 25000, currency: 'VND' }, SAMPLE), { amountUsd: 1, amountVnd: 25000, vndPerUsd: SAMPLE });
+  assert.deepEqual(convertAmount({ amount: 12345, currency: 'VND' }, SAMPLE), { amountUsd: 0.49, amountVnd: 12345, vndPerUsd: SAMPLE });
+  assert.deepEqual(convertAmount({ amount: 500000, currency: 'VND' }, SAMPLE), { amountUsd: 20, amountVnd: 500000, vndPerUsd: SAMPLE });
+  assert.deepEqual(convertAmount({ amount: 100000, currency: 'vnd' }, SAMPLE), { amountUsd: 4, amountVnd: 100000, vndPerUsd: SAMPLE });
 });
 
 test('invalid amounts rejected', () => {
-  for (const a of [0, -5, 'abc', NaN, null]) assert.equal(convertAmount({ amount: a, currency: 'USD' }, 26500), null);
-  assert.equal(convertAmount({ amount: 10, currency: 'EUR' }, 26500), null);
+  for (const a of [0, -5, 'abc', NaN, null]) assert.equal(convertAmount({ amount: a, currency: 'USD' }, SAMPLE), null);
+  assert.equal(convertAmount({ amount: 10, currency: 'EUR' }, SAMPLE), null);
 });
 
-test('config reads env, default rate 26500, no hardcoded account', () => {
+test('config reads env and does not carry a conversion rate', () => {
   const off = bankTransferConfig({});
   assert.equal(off.enabled, false);
-  assert.equal(off.vndPerUsd, 26500);
+  assert.equal(off.vndPerUsd, undefined);
   assert.equal(off.accountNumber, '');
   const on = bankTransferConfig({ BANK_ACCOUNT: '123456789', BANK_ACCOUNT_NAME: 'cong ty abc', BANK_BIN: '970432', VND_USD_RATE: '25000' });
   assert.equal(on.enabled, true);
   assert.equal(on.accountName, 'CONG TY ABC');
-  assert.equal(on.vndPerUsd, 25000);
+  assert.equal(on.vndPerUsd, undefined);
 });
 
 test('VietQR payload: EMV structure + valid CRC', () => {
-  const p = buildVietQrPayload({ bin: '970432', accountNumber: '123456789', amountVnd: 265000, content: 'AIM B8C9D0 K7QX9M' });
+  const p = buildVietQrPayload({ bin: '970432', accountNumber: '123456789', amountVnd: 180000, content: 'AIM B8C9D0 K7QX9M' });
   assert.ok(p.startsWith('000201010212'));
   assert.ok(p.includes('0010A000000727'));
   assert.ok(p.includes('0006970432'));
   assert.ok(p.includes('0109123456789'));
   assert.ok(p.includes('0208QRIBFTTA'));
   assert.ok(p.includes('5303704'));
-  assert.ok(p.includes('5406265000'));
+  assert.ok(p.includes('5406180000'));
   assert.ok(p.includes('5802VN'));
   assert.ok(p.includes('0817AIM B8C9D0 K7QX9M'));
   assert.equal(p.slice(-4), crc16(p.slice(0, -4)));

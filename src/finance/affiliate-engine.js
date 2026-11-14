@@ -29,8 +29,12 @@ function effectiveAffiliateRate(product, sellerProfile) {
   return parsed.ok ? parsed.rate || 0 : 0;
 }
 
-function toVnd(amount, currency, cfg) {
-  return String(currency || 'USD').toUpperCase() === 'VND' ? amount : amount * cfg.pit.vndPerUsd;
+function toVnd(amount, currency, cfg, vndPerUsd) {
+  const n = Number(amount) || 0;
+  if (String(currency || 'USD').toUpperCase() === 'VND') return n;
+  const rate = Number(vndPerUsd) > 0 ? Number(vndPerUsd) : Number(cfg?.pit?.vndPerUsd);
+  if (!(rate > 0)) return null;
+  return n * rate;
 }
 
 /**
@@ -38,12 +42,14 @@ function toVnd(amount, currency, cfg) {
  * Credited GROSS to the affiliate: PIT is withheld when the affiliate withdraws
  * (see quoteAffiliateWithdrawal), not per commission.
  */
-function calculateAffiliateCommission({ baseAmount, rate, currency = 'USD', digits = 2, config } = {}) {
+function calculateAffiliateCommission({ baseAmount, rate, currency = 'USD', digits = 2, config, vndPerUsd } = {}) {
   const cfg = config || affiliateConfig();
   const r = parseAffiliateRate(rate);
   const appliedRate = r.ok ? r.rate || 0 : 0;
   const base = roundMoney(Math.max(0, Number(baseAmount) || 0), digits);
   const amount = roundMoney(base * appliedRate, digits);
+  const rateUsed = Number(vndPerUsd) > 0 ? Number(vndPerUsd) : Number(cfg.pit.vndPerUsd) > 0 ? Number(cfg.pit.vndPerUsd) : null;
+  const vnd = toVnd(amount, currency, cfg, rateUsed);
   return {
     rate: appliedRate,
     baseAmount: base,
@@ -52,8 +58,9 @@ function calculateAffiliateCommission({ baseAmount, rate, currency = 'USD', digi
     pitAmount: 0,
     netAmount: amount,
     pitRule: amount > 0 && cfg.pit.enabled ? 'PIT_AT_WITHDRAWAL' : '',
-    /** Commission in VND at credit time (informational). */
-    amountVnd: roundMoney(toVnd(amount, currency, cfg), 0),
+    /** Commission in VND at credit time, at the rate stored on the order. */
+    amountVnd: vnd == null ? null : roundMoney(vnd, 0),
+    vndPerUsd: rateUsed,
   };
 }
 

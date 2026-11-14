@@ -70,6 +70,9 @@ OPENWEBUI_SSO_SECRET=<min-32-chars>
 PAPERCLIP_SSO_SECRET=<min-32-chars, khác OPENWEBUI_SSO_SECRET>
 OPENWEBUI_AIMARKETS_PUBLIC_URL_TEMPLATE=https://{userId}.openwebui.aimarkets.vn
 PAPERCLIP_AIMARKETS_PUBLIC_URL_TEMPLATE=https://{userId}.paperclip.aimarkets.vn
+# ExchangeRate-API (https://www.exchangerate-api.com). Required for VND/CNY conversion.
+# Set this on Dokploy → Environment. Do not commit the key. There is no built-in rate.
+EXCHANGE_RATE_API_KEY=
 ```
 
 **OpenClaw auto-login / auto-approve:** Launch trả URL hash `#gatewayUrl&token&autoConnect` (giống hotelapp). Khi API có cả `AIMARKETS_SERVICE_SECRET` và `OPENCLAW_MARKET_TICKET_SECRET`, token trong URL là token AI Markets suy ra từ hai secret này (gateway cũng tự suy ra, chỉ chấp nhận trên `*.openclaw.aimarkets.vn`), nên API không cần `OPENCLAW_GATEWAY_TOKEN` của PHHotel. Gateway và PHGroup-AI vẫn phải cùng `OPENCLAW_GATEWAY_TOKEN` cho PHHotel và cho auto-approve device pairing. Thiếu/sai token → Control UI `unauthorized` / `token_mismatch`, không tới bước device pairing approve.

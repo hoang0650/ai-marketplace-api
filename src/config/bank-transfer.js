@@ -8,12 +8,9 @@
  *   BANK_ACCOUNT=<account number>
  *   BANK_ACCOUNT_NAME=<account holder, uppercase no diacritics>
  *   BANK_BIN=970432            (NAPAS BIN, VPBank = 970432)
- *   VND_USD_RATE=26500         (last-resort fallback only; live rate is the exchange-rate service)
  *   BANK_TOPUP_MIN_VND=10000   BANK_TOPUP_MAX_VND=500000000
  *   BANK_TOPUP_EXPIRE_HOURS=72
  */
-const { DEFAULT_VND_PER_USD } = require('./fx');
-
 function num(v, d) {
   const n = Number(v);
   return Number.isFinite(n) && n > 0 ? n : d;
@@ -30,7 +27,6 @@ function bankTransferConfig(env = process.env) {
     accountNumber,
     accountName,
     bin,
-    vndPerUsd: num(env.VND_USD_RATE, DEFAULT_VND_PER_USD),
     minVnd: num(env.BANK_TOPUP_MIN_VND, 10000),
     maxVnd: num(env.BANK_TOPUP_MAX_VND, 500_000_000),
     expireHours: num(env.BANK_TOPUP_EXPIRE_HOURS, 72),

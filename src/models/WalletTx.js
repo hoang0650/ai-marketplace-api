@@ -54,4 +54,6 @@ walletTxSchema.virtual('id').get(function idVirtual() {
 walletTxSchema.set('toJSON', { virtuals: true });
 walletTxSchema.set('toObject', { virtuals: true });
 
+require('../finance/stamp-exchange-rate').attachExchangeRateStamp(walletTxSchema);
+
 module.exports = mongoose.model('WalletTx', walletTxSchema);

@@ -155,7 +155,7 @@ function applyAllowedOverrides(product, resolved, requested = {}) {
   return { provider, model, endpointId, rerouted, ignored };
 }
 
-const { toUsd, charCount, tokenUnitSize, charUnitSize, timeUnitSeconds } = require('./usage-pricing');
+const { toUsd, charCount, tokenUnitSize, charUnitSize, timeUnitSeconds, needsFx, assertConvertible } = require('./usage-pricing');
 const {
   unitByCode,
   measureGatewayUsage,
@@ -239,6 +239,10 @@ function explainUsageCharge(product, usage, input = {}, providerCost = 0) {
   if (pricing.model !== 'usage' && !voice) return packCharge(pricing, 0);
   if (usage?.sandbox) return packCharge(pricing, 0, { unbilled: 'sandbox' });
   if (!isBillableUsage(usage)) return packCharge(pricing, 0, { unbilled: 'http_status', measured: true });
+  const currency = pricing.currency || 'USD';
+  if (needsFx(currency)) {
+    assertConvertible(currency, 1, pricing.usageRate, pricing.inputRate, pricing.outputRate, pricing.cachedInputRate, pricing.minCharge);
+  }
 
   const parts = providerCostParts(providerCost);
 
@@ -302,7 +306,6 @@ function explainUsageCharge(product, usage, input = {}, providerCost = 0) {
     });
   }
 
-  const currency = pricing.currency || 'USD';
   const productUnit = String(pricing.usageUnit || (voice ? 'characters' : 'tokens'));
   const unit = String(usage?.unit || productUnit);
   const rate = toUsd(Number(pricing.usageRate) || 0, currency);

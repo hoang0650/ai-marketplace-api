@@ -1,5 +1,4 @@
 const { detectWebhookKind } = require('../utils/gpay-client');
-const { DEFAULT_VND_PER_USD } = require('../config/fx');
 
 const roundMoney = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
@@ -75,7 +74,16 @@ async function settleOrderEvent(event, { WalletTx, vndPerUsd, mapWallet = (t) =>
   // The rate locked on the deposit wins, so a later webhook cannot reprice the credit.
   const locked = Number(tx.meta?.vndPerUsd);
   const passed = Number(vndPerUsd);
-  const rate = locked > 0 ? locked : passed > 0 ? passed : DEFAULT_VND_PER_USD;
+  const rate = locked > 0 ? locked : passed > 0 ? passed : 0;
+  if (!(rate > 0)) {
+    return {
+      status: 503,
+      body: {
+        message: 'Exchange rate is unavailable. This deposit has no stored rate, and ExchangeRate-API (https://www.exchangerate-api.com) has not returned one.',
+        code: 'EXCHANGE_RATE_UNAVAILABLE',
+      },
+    };
+  }
   const billedVnd = Number(tx.meta?.amountVnd) || 0;
   const paidVnd = event.paidVnd > 0 ? event.paidVnd : billedVnd;
   const amountUsd = paidVnd === billedVnd ? tx.amount : roundMoney(paidVnd / rate);
@@ -95,8 +103,17 @@ async function settleOrderEvent(event, { WalletTx, vndPerUsd, mapWallet = (t) =>
           gpayTransactionId: event.gpayTransId || event.requestId,
           reviewedAt: new Date(),
           'meta.paidVnd': paidVnd,
+          'meta.vndPerUsd': rate,
           'meta.gpayStatus': event.status,
           'meta.userPaymentMethod': event.userPaymentMethod,
+          exchangeRate: {
+            base: 'USD',
+            vndPerUsd: rate,
+            cnyPerUsd: Number(tx.meta?.cnyPerUsd) > 0 ? Number(tx.meta.cnyPerUsd) : null,
+            source: tx.meta?.exchangeRateSource || null,
+            updatedAt: tx.meta?.exchangeRateUpdatedAt || null,
+            fetchedAt: tx.meta?.exchangeRateFetchedAt || null,
+          },
         },
       },
       { new: true },

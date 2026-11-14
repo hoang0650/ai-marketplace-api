@@ -239,7 +239,7 @@ Response: `{ "ok": true, "billedCost": 0.42, "billedMinutes": 21 }`
 
 A **stream session** is a separate ledger from `exact_pro_rata_round6`. It does **not** apply `pricing.minCharge`.
 
-- Time units become USD per hour: `ratePerHour = toUsd(usageRate, currency) × (3600 / unitSeconds)` (`1`, `60`, or `3600`). VND and CNY use the live rate. `1_request` is not a time unit, so the session ledger treats `usageRate` as already USD per hour.
+- Time units become USD per hour: `ratePerHour = toUsd(usageRate, currency) × (3600 / unitSeconds)` (`1`, `60`, or `3600`). VND and CNY use the rate from ExchangeRate-API (https://www.exchangerate-api.com). `1_request` is not a time unit, so the session ledger treats `usageRate` as already USD per hour.
 - `ratePerHour`, `billedCost`, `usedCost`, and `estimatedCharge` are USD. Heartbeat `currency` is the listing `pricing.currency` (USD, VND, or CNY).
 - Before start: available USD balance must be `≥ max(ratePerHour / 60, 0.01)`, else 402 `INSUFFICIENT_BALANCE` or `PAYOUT_HELD`.
 - A worker debits whole minutes (`GAME_BILLING_TICK_MS`, default 60 s) in cents: sub-cent remainders carry and round down while the session runs. On stop the last partial minute rounds up (minimum 1 minute if any time elapsed) and the remaining cents round up.

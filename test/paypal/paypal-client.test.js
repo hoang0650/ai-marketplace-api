@@ -4,7 +4,8 @@ const { toPaypalUsd, paypalBase, SANDBOX_BASE, buildCheckoutOrder } = require('.
 
 describe('PayPal client helpers (phhotel-api Orders v2 pattern)', () => {
   test('converts VND to USD cents and rejects empty amounts', () => {
-    assert.equal(toPaypalUsd(26500, 'VND', 26500), '1.00');
+    assert.equal(toPaypalUsd(25000, 'VND', 25000), '1.00');
+    assert.equal(toPaypalUsd(25000, 'VND', null), null);
     assert.equal(toPaypalUsd(5.5, 'USD'), '5.50');
     assert.equal(toPaypalUsd(0, 'USD'), null);
     assert.equal(toPaypalUsd(100, 'EUR'), null);

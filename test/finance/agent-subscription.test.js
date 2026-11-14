@@ -1,4 +1,4 @@
-const test = require('node:test');
+const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const mongoose = require('mongoose');
 const WalletTx = require('../../src/models/WalletTx');
@@ -15,9 +15,15 @@ const {
   subscribeAgent,
   refundFailedRental,
 } = require('../../src/finance/agent-subscription');
-const { VND_PER_USD } = require('../../src/finance/payout-policy');
-
 const DAY_MS = 24 * 60 * 60 * 1000;
+const SAMPLE_VND_PER_USD = 25000;
+
+before(() => {
+  process.env.EXCHANGE_RATE_VND_OVERRIDE = String(SAMPLE_VND_PER_USD);
+});
+after(() => {
+  delete process.env.EXCHANGE_RATE_VND_OVERRIDE;
+});
 
 function stubWallet(t, balance) {
   t.mock.method(WalletTx, 'aggregate', async () => [{ balance }]);
@@ -43,7 +49,7 @@ test('monthly fee defaults to 199,000 VND per 30 days, overridable per agent', (
   const fee = monthlyFee('openclaw');
   assert.equal(fee.vnd, 199000);
   assert.equal(fee.periodDays, 30);
-  assert.equal(fee.amount, Math.round((199000 / VND_PER_USD) * 100) / 100);
+  assert.equal(fee.amount, Math.round((199000 / SAMPLE_VND_PER_USD) * 100) / 100);
 
   process.env.AGENT_MONTHLY_FEE_VND_HERMES = '99000';
   t.after(() => delete process.env.AGENT_MONTHLY_FEE_VND_HERMES);

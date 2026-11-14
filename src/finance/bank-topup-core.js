@@ -29,14 +29,14 @@ function makeTransferContent(userId, nonce = randomNonce()) {
 function convertAmount({ amount, currency = 'USD' }, vndPerUsd) {
   const rate = Number(vndPerUsd);
   const n = Number(amount);
-  if (!Number.isFinite(rate) || rate <= 0) throw new Error('Invalid rate');
+  if (!Number.isFinite(rate) || rate <= 0) return null;
   if (!Number.isFinite(n) || n <= 0) return null;
   const cur = String(currency || 'USD').toUpperCase();
   let amountUsd;
   let amountVnd;
   if (cur === 'USD') {
     amountUsd = Math.round(n * 100) / 100;
-    // Integer math on cents avoids float drift (e.g. 1.01 * 26500).
+    // Integer math on cents avoids float drift (cents × rate / 100).
     amountVnd = Math.round((Math.round(n * 100) * rate) / 100);
   } else if (cur === 'VND') {
     amountVnd = Math.round(n);

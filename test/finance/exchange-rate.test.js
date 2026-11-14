@@ -8,6 +8,7 @@ const {
   resetExchangeRates,
   setExchangeRateFetcher,
   fxAudit,
+  toPublicExchangeRate,
 } = require('../../src/finance/exchange-rate');
 const { toUsd } = require('../../src/utils/usage-pricing');
 
@@ -46,23 +47,30 @@ test('provider quote is cached for the TTL and exposes source + updatedAt', asyn
   assert.equal(first.provider, 'exchangerate-api');
   assert.equal(first.vndPerUsd, 26123.5);
   assert.equal(first.cnyPerUsd, 7.123456);
-  assert.equal(first.source, 'exchangerate-api');
+  assert.equal(first.source, 'exchangerate-api.com');
+  assert.equal(first.available, true);
   assert.equal(first.updatedAt, new Date(1_700_000_000 * 1000).toISOString());
+  assert.ok(first.fetchedAt);
   assert.equal(first.stale, false);
+  const pub = toPublicExchangeRate(first);
+  assert.equal(pub.status, 200);
+  assert.equal(pub.body.base, 'USD');
+  assert.equal(pub.body.rates.VND, 26123.5);
+  assert.equal(pub.body.rates.CNY, 7.123456);
+  assert.equal(pub.body.source, 'exchangerate-api.com');
+  assert.equal(pub.body.fetchedAt, first.fetchedAt);
   assert.equal(first.rates.USD, 1);
   assert.deepEqual(second.vndPerUsd, first.vndPerUsd);
   assert.equal(currentVndPerUsd(), 26123.5);
 });
 
-test('a failed refresh keeps the last good rate; with none, the env fallback and a warning', async (t) => {
+test('a failed refresh keeps the last good rate; with none, it reports unavailable', async (t) => {
   t.after(() => resetExchangeRates());
   restoreEnv(t, 'EXCHANGE_RATE_TTL_MS');
   restoreEnv(t, 'EXCHANGE_RATE_RETRY_MS');
-  restoreEnv(t, 'VND_USD_RATE');
   restoreEnv(t, 'EXCHANGE_RATE_API_KEY');
   process.env.EXCHANGE_RATE_TTL_MS = '0';
   process.env.EXCHANGE_RATE_RETRY_MS = '0';
-  delete process.env.VND_USD_RATE;
   process.env.EXCHANGE_RATE_API_KEY = 'super-secret-key';
 
   setExchangeRateFetcher(okFetch(payload(25000, 7.2)));
@@ -80,22 +88,45 @@ test('a failed refresh keeps the last good rate; with none, the env fallback and
     throw new Error('network down super-secret-key');
   });
   const cached = await getExchangeRates();
-  assert.equal(cached.source, 'cache');
+  assert.equal(cached.source, 'exchangerate-api.com');
   assert.equal(cached.vndPerUsd, 25000);
   assert.equal(cached.stale, true);
   assert.equal(warns.length, 1);
-  assert.match(warns[0], /last cached/);
+  assert.match(warns[0], /last good rate/);
   assert.equal(warns[0].includes('super-secret-key'), false);
 
   resetExchangeRates();
   setExchangeRateFetcher(async () => {
     throw new Error('still down');
   });
-  const fallback = await getExchangeRates();
-  assert.equal(fallback.source, 'fallback');
-  assert.equal(fallback.vndPerUsd, 26500);
-  assert.equal(fallback.cnyPerUsd, 7.25);
-  assert.match(warns[1], /fallback/);
+  const missing = await getExchangeRates();
+  assert.equal(missing.available, false);
+  assert.equal(missing.source, null);
+  assert.equal(missing.vndPerUsd, null);
+  assert.equal(missing.cnyPerUsd, null);
+  assert.equal(missing.error, 'EXCHANGE_RATE_UNAVAILABLE');
+  assert.equal(missing.rates.VND, null);
+  const denied = toPublicExchangeRate(missing);
+  assert.equal(denied.status, 503);
+  assert.equal(denied.body.rates.VND, null);
+  assert.equal(denied.body.rates.CNY, null);
+  assert.equal(denied.body.error, 'EXCHANGE_RATE_UNAVAILABLE');
+  assert.match(warns[1], /no persisted rate/);
+});
+
+test('the fetcher is called on the keyed v6 URL and the key is not a fallback figure', async (t) => {
+  t.after(() => resetExchangeRates());
+  restoreEnv(t, 'EXCHANGE_RATE_API_KEY');
+  process.env.EXCHANGE_RATE_API_KEY = 'owner-key';
+  let seen = '';
+  setExchangeRateFetcher(async (url) => {
+    seen = url;
+    return { ok: true, status: 200, json: async () => payload(25111, 7.01) };
+  });
+  const quote = await getExchangeRates();
+  assert.equal(seen, 'https://v6.exchangerate-api.com/v6/owner-key/latest/USD');
+  assert.equal(quote.source, 'exchangerate-api.com');
+  assert.equal(quote.vndPerUsd, 25111);
 });
 
 test('env override then admin override win; clearing the admin override returns to env', async (t) => {

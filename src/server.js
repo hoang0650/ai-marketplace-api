@@ -59,7 +59,8 @@ connectDb()
   .then(() => ensureUsageUnits().catch((err) => console.error('[catalog] usage unit backfill failed:', err.message)))
   .then(() => warmExchangeRates())
   .then((fx) => {
-    if (fx) console.log(`[exchange-rate] ${fx.source} VND/USD=${fx.vndPerUsd} CNY/USD=${fx.cnyPerUsd}`);
+    if (fx?.available) console.log(`[exchange-rate] source=${fx.source} fetchedAt=${fx.fetchedAt || ''}`);
+    else console.error('[exchange-rate] unavailable: ExchangeRate-API returned no rate and none is persisted');
   })
   .then(() => unpublishSpacebotListings({ Product: require('./models/Product'), AgentTemplate: require('./models/AgentTemplate') }))
   .then((spacebot) => {

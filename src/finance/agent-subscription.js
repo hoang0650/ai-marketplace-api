@@ -66,11 +66,12 @@ const iso = (d) => (d ? new Date(d).toISOString() : null);
 function describe(agentId, doc, { exempt = false, now = new Date() } = {}) {
   const fee = monthlyFee(agentId);
   const paidUntil = doc?.paidUntil ? new Date(doc.paidUntil) : null;
-  const active = exempt || fee.amount <= 0 || Boolean(paidUntil && paidUntil.getTime() > now.getTime());
+  const active = exempt || fee.amount === 0 || Boolean(paidUntil && paidUntil.getTime() > now.getTime());
   return {
     agentId,
     active,
-    exempt: exempt || fee.amount <= 0,
+    exempt: exempt || fee.amount === 0,
+    rateUnavailable: fee.vnd > 0 && fee.amount == null,
     paidUntil: iso(paidUntil),
     daysLeft: paidUntil ? Math.max(0, Math.ceil((paidUntil.getTime() - now.getTime()) / DAY_MS)) : 0,
     autoRenew: doc ? doc.autoRenew !== false : true,
@@ -172,7 +173,11 @@ async function subscribeAgent(user, agentId, { now = new Date(), source = 'manua
   await getExchangeRates();
   if (id === 'spacebot') throw spacebotUnlistedError();
   const fee = monthlyFee(id);
-  if (isAdmin(user) || fee.amount <= 0) {
+  if (fee.vnd > 0 && !(fee.amount > 0)) {
+    const { exchangeRateUnavailableError } = require('./exchange-rate');
+    throw exchangeRateUnavailableError();
+  }
+  if (isAdmin(user) || fee.amount === 0) {
     return { ...(await getSubscriptionStatus(user, id)), charged: false };
   }
 

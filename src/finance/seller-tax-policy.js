@@ -16,7 +16,11 @@ function productTaxKind(taxCategory) {
 }
 
 function toVnd(amount, currency, cfg) {
-  return String(currency || 'USD').toUpperCase() === 'VND' ? Number(amount) || 0 : (Number(amount) || 0) * cfg.vndPerUsd;
+  const n = Number(amount) || 0;
+  if (String(currency || 'USD').toUpperCase() === 'VND') return n;
+  const rate = Number(cfg?.vndPerUsd);
+  if (!(rate > 0)) return null;
+  return n * rate;
 }
 
 /**
@@ -72,8 +76,11 @@ function calculateSellerTax({
 
   const threshold = cfg.individual.annualThresholdVnd;
   if (threshold > 0 && sellerAnnualRevenueVnd !== undefined && sellerAnnualRevenueVnd !== null) {
-    const projected = (Number(sellerAnnualRevenueVnd) || 0) + toVnd(base, currency, cfg);
-    if (projected <= threshold) return empty('INDIVIDUAL_BELOW_ANNUAL_THRESHOLD');
+    const extra = toVnd(base, currency, cfg);
+    if (extra != null) {
+      const projected = (Number(sellerAnnualRevenueVnd) || 0) + extra;
+      if (projected <= threshold) return empty('INDIVIDUAL_BELOW_ANNUAL_THRESHOLD');
+    }
   }
 
   const rates = kind === 'GOODS' ? cfg.individual.goods : cfg.individual.digital;

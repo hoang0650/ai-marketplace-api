@@ -75,6 +75,9 @@ async function mapBankDeposit(tx, cfg = bankTransferConfig(), { withQr = true } 
 async function createBankDeposit(userId, { amount, currency }, cfg = bankTransferConfig()) {
   if (!cfg.enabled) throw httpError(503, 'Bank transfer top-up is not configured', 'BANK_TOPUP_DISABLED');
   const fx = await getExchangeRates();
+  if (!(fx.vndPerUsd > 0)) {
+    throw httpError(503, 'Exchange rate is unavailable. Conversion waits for a rate from ExchangeRate-API (https://www.exchangerate-api.com).', 'EXCHANGE_RATE_UNAVAILABLE');
+  }
   const conv = convertAmount({ amount, currency }, fx.vndPerUsd);
   if (!conv) throw httpError(400, 'Invalid amount', 'INVALID_AMOUNT');
   if (conv.amountVnd < cfg.minVnd || conv.amountVnd > cfg.maxVnd) {

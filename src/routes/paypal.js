@@ -31,6 +31,12 @@ router.post('/create-order', authenticate, async (req, res, next) => {
     }
     const currency = String(req.body?.currency || 'USD').toUpperCase();
     const fx = await getExchangeRates();
+    if ((currency === 'VND' || currency === 'VNĐ') && !(fx.vndPerUsd > 0)) {
+      return res.status(503).json({
+        message: 'Exchange rate is unavailable. Conversion waits for a rate from ExchangeRate-API (https://www.exchangerate-api.com).',
+        code: 'EXCHANGE_RATE_UNAVAILABLE',
+      });
+    }
     const amountUsd = toPaypalUsd(req.body?.amount, currency, fx.vndPerUsd);
     if (!amountUsd) {
       return res.status(400).json({ message: 'Invalid amount for PayPal (USD or VND)' });

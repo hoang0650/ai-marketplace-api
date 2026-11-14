@@ -72,6 +72,7 @@ async function recordAffiliateCommission({ order, settlement, click, holdUntil }
     baseAmount: settlement.grossAmount,
     rate: settlement.affiliateRate,
     currency: order.currency,
+    vndPerUsd: order.exchangeRate?.vndPerUsd,
   });
   let commission;
   try {
@@ -92,6 +93,17 @@ async function recordAffiliateCommission({ order, settlement, click, holdUntil }
     pitAmount: calc.pitAmount,
     pitRule: calc.pitRule,
     amountVnd: calc.amountVnd,
+    vndPerUsd: calc.vndPerUsd,
+    exchangeRate: calc.vndPerUsd
+      ? {
+          base: 'USD',
+          vndPerUsd: calc.vndPerUsd,
+          cnyPerUsd: Number(order.exchangeRate?.cnyPerUsd) > 0 ? order.exchangeRate.cnyPerUsd : null,
+          source: order.exchangeRate?.source || null,
+          updatedAt: order.exchangeRate?.updatedAt || null,
+          fetchedAt: order.exchangeRate?.fetchedAt || null,
+        }
+      : undefined,
     pitCommitmentApplied: false,
     netAmount: calc.netAmount,
     holdUntil,

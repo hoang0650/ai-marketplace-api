@@ -1,5 +1,4 @@
 require('dotenv').config();
-const { DEFAULT_VND_PER_USD } = require('./fx');
 
 const DEV_JWT_FALLBACK = 'phai-market-dev-secret';
 
@@ -93,10 +92,10 @@ const config = {
   paypalClientSecret: (process.env.PAYPAL_CLIENT_SECRET || '').trim(),
   paypalSandbox: process.env.PAYPAL_SANDBOX !== 'false',
   /**
-   * Legacy. Wallet conversion uses src/finance/exchange-rate.js.
-   * PAYPAL_VND_PER_USD / GPAY_VND_PER_USD no longer pin the rate.
+   * Legacy. Wallet conversion uses the ExchangeRate-API service.
+   * PAYPAL_VND_PER_USD does not pin a rate.
    */
-  paypalVndPerUsd: Number(process.env.PAYPAL_VND_PER_USD || DEFAULT_VND_PER_USD),
+  paypalVndPerUsd: null,
   /**
    * GPay (G-Pay Vietnam) — runs alongside PayPal for wallet top-up.
    * Virtual Account = VND collection account per user (webhook credits the wallet).
@@ -138,8 +137,8 @@ const config = {
   gpayBankCode: (process.env.GPAY_BANK_CODE || 'VCCB').trim(),
   gpayVaBankCode: (process.env.GPAY_VA_BANK_CODE || process.env.GPAY_BANK_CODE || 'VCCB').trim(),
   gpayAccountType: (process.env.GPAY_ACCOUNT_TYPE || 'M').trim(),
-  /** @deprecated Live VND→USD credit uses the exchange-rate service, not this number. */
-  gpayVndPerUsd: Number(process.env.GPAY_VND_PER_USD || process.env.PAYPAL_VND_PER_USD || DEFAULT_VND_PER_USD),
+  /** @deprecated Live conversion uses the ExchangeRate-API service. */
+  gpayVndPerUsd: null,
   gpayMinTopupVnd: Number(process.env.GPAY_MIN_TOPUP_VND || 10000),
   appleIapSharedSecret: (process.env.APPLE_IAP_SHARED_SECRET || '').trim(),
   appleIapIssuerId: (process.env.APPLE_IAP_ISSUER_ID || '').trim(),

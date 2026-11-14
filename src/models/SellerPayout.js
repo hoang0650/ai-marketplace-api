@@ -27,4 +27,6 @@ const sellerPayoutSchema = new mongoose.Schema(
 
 sellerPayoutSchema.index({ sellerId: 1, createdAt: -1 });
 
+require('../finance/stamp-exchange-rate').attachExchangeRateStamp(sellerPayoutSchema);
+
 module.exports = mongoose.model('SellerPayout', sellerPayoutSchema);

@@ -1,4 +1,4 @@
-const test = require('node:test');
+const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const mongoose = require('mongoose');
 const WalletTx = require('../../src/models/WalletTx');
@@ -6,7 +6,14 @@ const LedgerEntry = require('../../src/models/LedgerEntry');
 const Order = require('../../src/models/Order');
 const UsageEvent = require('../../src/models/UsageEvent');
 const { listingFee, assertCanPayListingFee, chargeListingFee } = require('../../src/finance/work-listing-fee');
-const { VND_PER_USD } = require('../../src/finance/payout-policy');
+const SAMPLE_VND_PER_USD = 25000;
+
+before(() => {
+  process.env.EXCHANGE_RATE_VND_OVERRIDE = String(SAMPLE_VND_PER_USD);
+});
+after(() => {
+  delete process.env.EXCHANGE_RATE_VND_OVERRIDE;
+});
 
 function stubWallet(t, balance) {
   t.mock.method(WalletTx, 'aggregate', async () => [{ balance }]);
@@ -18,7 +25,7 @@ test('listing fee defaults to 20,000 VND converted to USD', () => {
   const fee = listingFee();
   assert.equal(fee.vnd, 20000);
   assert.equal(fee.currency, 'USD');
-  assert.equal(fee.amount, Math.round((20000 / VND_PER_USD) * 100) / 100);
+  assert.equal(fee.amount, Math.round((20000 / SAMPLE_VND_PER_USD) * 100) / 100);
 });
 
 test('posting without enough wallet balance is rejected with 402', async (t) => {

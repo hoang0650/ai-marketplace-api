@@ -1,7 +1,6 @@
 'use strict';
 
-const { DEFAULT_VND_PER_USD } = require('../config/fx');
-const { currentVndPerUsd, currentCnyPerUsd } = require('../finance/exchange-rate');
+const { currentVndPerUsd, currentCnyPerUsd, exchangeRateUnavailableError } = require('../finance/exchange-rate');
 
 /**
  * Shared helpers for metered (usage) billing: currency → USD, token/character
@@ -9,33 +8,49 @@ const { currentVndPerUsd, currentCnyPerUsd } = require('../finance/exchange-rate
  * Wallets are USD, so every rate must pass through `toUsd` before charging.
  */
 
+function needsFx(currency) {
+  const code = String(currency || 'USD').trim().toUpperCase();
+  return code === 'VND' || code === 'VNĐ' || code === 'CNY' || code === 'RMB';
+}
+
 /**
- * VND per USD. An explicit env bag (unit tests) still reads `VND_USD_RATE`.
- * The process environment does not pin the rate — that is only the fallback
- * inside the exchange-rate service, after the live provider and its cache.
+ * VND per USD. An explicit env bag (unit tests) may pass `VND_USD_RATE`.
+ * The process environment does not pin a figure — that comes from ExchangeRate-API.
+ * Returns null when no rate is available.
  */
 function vndPerUsd(env) {
   if (arguments.length && env !== process.env) {
     const n = Number(env && env.VND_USD_RATE);
-    return Number.isFinite(n) && n > 0 ? n : DEFAULT_VND_PER_USD;
+    return Number.isFinite(n) && n > 0 ? n : null;
   }
   return currentVndPerUsd();
 }
 
 /**
  * Convert an amount in `currency` to USD.
- * USD amounts are unchanged. VND uses the shared rate (3rd arg or the live rate).
- * CNY uses the live CNY rate. Anything else is treated as already USD.
+ * USD amounts are unchanged. VND uses the 3rd arg or the live rate.
+ * CNY uses the live CNY rate. Returns null when a required rate is missing.
  */
 function toUsd(amount, currency = 'USD', rate = vndPerUsd()) {
   const n = Number(amount) || 0;
   const code = String(currency || 'USD').trim().toUpperCase();
-  if (code === 'VND' || code === 'VNĐ') return rate > 0 ? n / rate : n;
+  if (code === 'VND' || code === 'VNĐ') return rate > 0 ? n / rate : null;
   if (code === 'CNY' || code === 'RMB') {
     const cny = currentCnyPerUsd();
-    return cny > 0 ? n / cny : n;
+    return cny > 0 ? n / cny : null;
   }
   return n;
+}
+
+/** Throw when a positive VND/CNY price cannot be converted. No substitute figure. */
+function assertConvertible(currency, quantity, ...rawAmounts) {
+  if (!needsFx(currency)) return false;
+  const listed = rawAmounts.some((a) => Number(a) > 0);
+  if (!listed) return false;
+  const sample = rawAmounts.find((a) => Number(a) > 0);
+  if (toUsd(sample, currency) != null) return false;
+  if (Number(quantity) > 0) throw exchangeRateUnavailableError();
+  return true;
 }
 
 /** Count user-visible characters: NFC code points (emoji = 1, precomposed Vietnamese = 1). */
@@ -106,12 +121,16 @@ function timeUnitSeconds(unit) {
 function ratePerHourUsd(rate, unit, currency = 'USD') {
   const sec = timeUnitSeconds(unit);
   if (!sec) return null;
-  return toUsd(Number(rate) || 0, currency) * (3600 / sec);
+  const usd = toUsd(Number(rate) || 0, currency);
+  if (usd == null) throw exchangeRateUnavailableError();
+  return usd * (3600 / sec);
 }
 
 module.exports = {
+  needsFx,
   vndPerUsd,
   toUsd,
+  assertConvertible,
   charCount,
   tokenUnitSize,
   charUnitSize,

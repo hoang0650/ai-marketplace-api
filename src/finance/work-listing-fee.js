@@ -17,9 +17,18 @@ function listingFee() {
 }
 
 /** Checks the wallet without writing anything (call before creating the listing). */
+function requireListingRate(fee) {
+  if (fee.vnd > 0 && !(fee.amount > 0)) {
+    const { exchangeRateUnavailableError } = require('./exchange-rate');
+    throw exchangeRateUnavailableError();
+  }
+}
+
 async function assertCanPayListingFee(user) {
+  await getExchangeRates();
   const fee = listingFee();
-  if (isAdmin(user) || fee.amount <= 0) return { ...fee, charged: false };
+  if (isAdmin(user) || fee.amount === 0) return { ...fee, charged: false };
+  requireListingRate(fee);
   await requireAvailableFunds(user._id, fee.amount, { currency: fee.currency });
   return { ...fee, charged: true };
 }
@@ -27,7 +36,8 @@ async function assertCanPayListingFee(user) {
 async function chargeListingFee(user, { listingType, listingId, title }) {
   await getExchangeRates();
   const fee = listingFee();
-  if (isAdmin(user) || fee.amount <= 0) return { ...fee, charged: false };
+  if (isAdmin(user) || fee.amount === 0) return { ...fee, charged: false };
+  requireListingRate(fee);
   const meta = { kind: 'work_listing_fee', listingType, listingId: String(listingId), feeVnd: fee.vnd, ...fxAudit(publicQuote()) };
   await WalletTx.create({
     user: user._id,
