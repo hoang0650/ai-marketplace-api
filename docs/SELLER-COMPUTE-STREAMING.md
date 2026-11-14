@@ -207,7 +207,9 @@ Keep-alive (every `heartbeatMs`):
 POST /v1/game-sessions/{sessionId}/heartbeat
 ```
 
-Response: `{ "ok": true, "status": "live", "device": "pc", "heartbeatMs": 30000, "ratePerHour": 1.2, "billedMinutes": 12, "billedCost": 0.24, "currency": "USD", "available": 9.76, "minutesLeft": 488 }`
+Response: `{ "ok": true, "status": "live", "device": "pc", "heartbeatMs": 30000, "ratePerHour": 1.2, "billedMinutes": 12, "billedCost": 0.24, "currency": "USD", "usedMinutes": 12, "usedCost": 0.24, "estimatedCharge": 0.24, "available": 9.76, "minutesLeft": 488 }`
+
+`ratePerHour`, `billedCost`, `usedCost`, `estimatedCharge`, and `available` are USD. `currency` is the listing `pricing.currency`. The heartbeat does not itself charge; the billing worker does.
 
 Other endpoints: `GET /v1/game-sessions/{sessionId}` (status), `GET .../player`, `.../proxy/*`.
 
@@ -231,15 +233,22 @@ Response: `{ "ok": true, "billedCost": 0.42, "billedMinutes": 21 }`
 | 502 | `WEBHOOK_FAILED` | Seller webhook returned non-2xx |
 | 503 | `NO_COMPUTE_NODE` | No online node for this device yet (`supportedDevices` in body) |
 
-## 4. Billing (per minute)
+## 4. Billing (session minutes vs gateway pro-rata)
 
-- Applies to `pricing.model = usage`; rate is normalized to USD per hour (`ratePerHour`).
-- Before start: available wallet balance must cover at least 1 minute.
-- A worker debits the buyer **every minute** while the session is live (`GAME_BILLING_TICK_MS`, default 60 s). On stop, the last partial minute is rounded up (minimum 1 minute per session).
-- Under ~5 minutes left (`GAME_LOW_BALANCE_MINUTES`) the buyer gets a low-balance notification; when funds run out the session stops with `insufficient_funds`.
-- No heartbeat for 5 minutes (`GAME_IDLE_MS`) → session stops (`idle`). Clients that never heartbeat are capped at 4 hours (`GAME_NO_HEARTBEAT_MAX_MS`).
-- Each charge writes a `UsageEvent` (`source: "gpu"`, `usageType` `GAME_RUNTIME` or `GPU_HOUR`) and adds `UsageStat.gpuHours` for the seller.
-- Seller receives the net amount after the 20% platform fee (`PLATFORM_COMMISSION_RATE`). Sellers playing their own listing are not charged.
+`gpu-compute` and `game-server` may use `1_second`, `1_minute`, `1_hour`, or `1_request` (`GET /v1/usage/units`). Write aliases `second`, `minute`, and `hour` are stored as those codes. Listings already stored as `"hour"`, `"phút"`, or `"GPU hour"` still convert when `ratePerHour` is computed.
+
+A **stream session** is a separate ledger from `exact_pro_rata_round6`. It does **not** apply `pricing.minCharge`.
+
+- Time units become USD per hour: `ratePerHour = toUsd(usageRate, currency) × (3600 / unitSeconds)` (`1`, `60`, or `3600`). VND and CNY use the live rate. `1_request` is not a time unit, so the session ledger treats `usageRate` as already USD per hour.
+- `ratePerHour`, `billedCost`, `usedCost`, and `estimatedCharge` are USD. Heartbeat `currency` is the listing `pricing.currency` (USD, VND, or CNY).
+- Before start: available USD balance must be `≥ max(ratePerHour / 60, 0.01)`, else 402 `INSUFFICIENT_BALANCE` or `PAYOUT_HELD`.
+- A worker debits whole minutes (`GAME_BILLING_TICK_MS`, default 60 s) in cents: sub-cent remainders carry and round down while the session runs. On stop the last partial minute rounds up (minimum 1 minute if any time elapsed) and the remaining cents round up.
+- Under ~5 minutes left (`GAME_LOW_BALANCE_MINUTES`) the buyer is notified; when the balance cannot cover the next minute the session stops with `insufficient_funds`.
+- No heartbeat for 5 minutes (`GAME_IDLE_MS`) stops a stream (`idle`). Dedicated game servers use `GAME_SERVER_IDLE_MS` (default 10 minutes). The JSON field `idleTimeoutMs` is the 5-minute stream window. Clients that never heartbeat are capped at 4 hours (`GAME_NO_HEARTBEAT_MAX_MS`).
+- Dedicated servers bill from `readyAt` at `(podCostPerHour + diskGb × storageRunningGbMonth / 730) × (1 + markup)` (defaults storage `0.10` USD/GB-month and markup `0.32`). A failed launch (`launch_failed`) is not billed.
+- A **single gateway call** on these categories (not this session) stays `exact_pro_rata_round6`: `duration_seconds`, `durationSec`, or `billed_seconds`, otherwise the gateway wall clock. Minutes and hours are pro-rata, not rounded up. `minCharge` applies only there, and only when the measured cost is greater than 0 and below the floor. Non-2xx is not charged.
+- Each session charge writes a `UsageEvent` (`source: "gpu"`, `usageType` `GAME_RUNTIME` or `GPU_HOUR`, `quantity` = minutes / 60) and adds `UsageStat.gpuHours`.
+- Seller net is after the 20% platform fee (`PLATFORM_COMMISSION_RATE`) and any tax withheld for that seller profile. A seller calling their own listing is not charged.
 
 ## 5. Security notes
 
