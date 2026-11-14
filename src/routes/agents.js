@@ -5,7 +5,8 @@ const UsageStat = require('../models/UsageStat');
 const { authenticate } = require('../middleware/auth');
 const { getAvailableBalance } = require('../utils/wallet');
 const { chargeUsage } = require('../finance/charge-usage');
-const { resolveProviderForProduct, computeUsageCost } = require('../utils/provider-resolve');
+const { noteUpstreamStatus, eventMeter } = require('../finance/usage-units');
+const { resolveProviderForProduct, computeUsageCost, explainUsageCharge } = require('../utils/provider-resolve');
 const { agentTurnWithFallback } = require('../utils/denglish-client');
 const { productSlugQuery } = require('../utils/product-slug');
 
@@ -77,7 +78,10 @@ router.post('/chat', authenticate, async (req, res, next) => {
     };
     const inputTokens = Number(usage.input_tokens) || 0;
     const outputTokens = Number(usage.output_tokens) || 0;
-    const cost = computeUsageCost(product, usage, {});
+    noteUpstreamStatus(usage, ai);
+    const explained = explainUsageCharge(product, usage, { prompt: message, text: message });
+    const meter = eventMeter(explained, usage);
+    const cost = explained.costUsd;
 
     const buyerId = req.user._id;
     const sellerId = product.creator;
@@ -118,13 +122,15 @@ router.post('/chat', authenticate, async (req, res, next) => {
       seller: sellerId,
       inputTokens,
       outputTokens,
+      cachedTokens: meter.cachedTokens,
       cost: charged,
       platformFee,
       sellerNet,
       provider: ai.provider || provider,
-      unit: usage.unit || 'tokens',
-      quantity: Number(usage.quantity) || inputTokens + outputTokens,
-      rawUsage: usage,
+      unit: meter.unit,
+      quantity: meter.quantity,
+      rate: meter.rate,
+      rawUsage: { ...usage, bill: meter.bill },
       source: 'api',
     });
 

@@ -25,7 +25,7 @@ const usageProduct = (pricing, category = 'inference') => ({
 test('the unit catalog is a fixed enum with VI and EN labels', () => {
   const catalog = usageUnitCatalog();
   const codes = catalog.units.map((unit) => unit.code);
-  for (const code of ['1k_characters', '1m_characters', '1k_tokens', '1m_tokens', '1_second', '1_minute', '1_hour', '1_request', '1_image', '1_day', '1_week', '1_month', '1_year']) {
+  for (const code of ['1k_characters', '1m_characters', '1_token', '1k_tokens', '1m_tokens', '1_second', '1_minute', '1_hour', '1_request', '1_image', '1_day', '1_week', '1_month', '1_year']) {
     assert.equal(codes.includes(code), true, code);
   }
   const day = catalog.units.find((unit) => unit.code === '1_day');
@@ -59,7 +59,8 @@ test('unambiguous free text migrates and the rest is flagged', () => {
   assert.equal(migrateUsageUnit('megapixel', 'text-to-image').status, 'needs_review');
   assert.equal(migrateUsageUnit('video', 'text-to-video').status, 'needs_review');
   assert.equal(migrateUsageUnit('day', 'gpu-compute').status, 'needs_review');
-  assert.equal(migrateUsageUnit('per token', 'inference').status, 'needs_review');
+  assert.equal(migrateUsageUnit('per token', 'inference').usageUnit, '1_token');
+  assert.equal(migrateUsageUnit('token', 'text-to-text').status, 'canonical');
   assert.equal(migrateUsageUnit('1K characters', 'text-to-image').status, 'needs_review');
   assert.equal(migrateUsageUnit('1K characters', 'voice-clone', { charactersPerCredit: 100 }).status, 'needs_review');
 
