@@ -35,6 +35,7 @@ function matches(doc, q = {}) {
         if (op === '$gt') return v != null && v > x;
         if (op === '$gte') return v != null && v >= x;
         if (op === '$in') return x.some((y) => eq(v ?? 'completed', y));
+        if (op === '$nin') return !x.some((y) => eq(v, y));
         if (op === '$ne') return !eq(v, x);
         return false;
       });
@@ -50,7 +51,7 @@ function installFakeLedger({ saved }) {
     saved.push([obj, key, obj[key]]);
     obj[key] = fn;
   };
-  const db = { tx: [], locks: new Map(), claims: [], events: [], lockWaits: 0 };
+  const db = { tx: [], commissions: [], locks: new Map(), claims: [], events: [], lockWaits: 0 };
 
   stub(WalletTx, 'create', async (doc) => {
     await tick();
@@ -84,6 +85,7 @@ function installFakeLedger({ saved }) {
     if (i >= 0) db.tx.splice(i, 1);
     return { deletedCount: i >= 0 ? 1 : 0 };
   });
+  stub(WalletTx, 'find', (q) => chain(clone(db.tx.filter((r) => matches(r, q || {})))));
   stub(WalletTx, 'updateMany', async (q, u) => {
     await tick();
     const rows = db.tx.filter((r) => matches(r, q));
@@ -154,7 +156,7 @@ function installFakeLedger({ saved }) {
   });
   stub(UsageEvent, 'findOne', async () => null);
   stub(UsageStat, 'updateOne', async () => ({}));
-  stub(AffiliateCommission, 'find', () => chain([]));
+  stub(AffiliateCommission, 'find', (q) => chain(clone(db.commissions.filter((r) => matches(r, q || {})))));
   stub(SellerTaxProfile, 'findOne', () => chain(null));
   stub(SellerProfile, 'findOne', () => chain(null));
 

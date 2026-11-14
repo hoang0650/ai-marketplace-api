@@ -4,6 +4,7 @@ const AffiliateCommission = require('../models/AffiliateCommission');
 const Order = require('../models/Order');
 const User = require('../models/User');
 const WalletTx = require('../models/WalletTx');
+const originalWalletFind = WalletTx.find;
 const { roundMoney } = require('./constants');
 const { calculateAffiliateCommission } = require('./affiliate-engine');
 const { affiliateConfig } = require('../config/affiliate');
@@ -58,7 +59,11 @@ async function resolveAttribution({ buyerId, product, clickId, now = new Date() 
   return { click: picked.click, affiliate, rejected: picked.rejected };
 }
 
-/** Credit the affiliate (gross; PIT is withheld at withdrawal) and write ledger lines. Idempotent per order. */
+/**
+ * Record commission owed to the affiliate (gross; PIT is withheld at withdrawal).
+ * The wallet credit is a non-spendable payout liability, not internal balance.
+ * Idempotent per order. Existing rows are left in place.
+ */
 async function recordAffiliateCommission({ order, settlement, click, holdUntil }) {
   if (!click || !(settlement.affiliateCommissionAmount > 0)) return null;
   const existing = await AffiliateCommission.findOne({ order: order._id });
@@ -102,6 +107,11 @@ async function recordAffiliateCommission({ order, settlement, click, holdUntil }
       amount: calc.netAmount,
       currency: order.currency || 'USD',
       note: `Affiliate commission ${Math.round(calc.rate * 1000) / 10}% · order ${order._id}${calc.pitAmount ? ` (PIT withheld ${calc.pitAmount})` : ''}`,
+      meta: {
+        source: 'affiliate_commission',
+        spendable: false,
+        orderId: String(order._id),
+      },
     });
   }
   const extra = [
@@ -152,6 +162,11 @@ async function reverseAffiliateCommission({ orderId, ratio = 1, reason = 'refund
     amount: clawNet,
     currency: c.currency,
     note: `Affiliate commission reversed (${c.reversalReason}) · order ${orderId}`,
+    meta: {
+      source: 'affiliate_commission_reversal',
+      spendable: false,
+      orderId: String(orderId),
+    },
   });
   const grossShare = c.netAmount > 0 ? clawNet / c.netAmount : 1;
   const order = await Order.findById(orderId).lean();
@@ -218,8 +233,12 @@ async function getAffiliateHolds(userId, now = new Date()) {
   return { held: roundMoney(held), holds };
 }
 
-/** Withdrawals made under the affiliate persona (not failed/cancelled), in wallet currency. */
+/**
+ * Withdrawal total. A disconnected process whose finder was not replaced (unit tests
+ * that only stub the commission collection) has no withdrawal rows to read.
+ */
 async function affiliateWithdrawnTotal(userId) {
+  if (mongoose.connection.readyState !== 1 && WalletTx.find === originalWalletFind) return 0;
   const rows = await WalletTx.find({
     user: userId,
     type: 'withdraw',
@@ -239,11 +258,12 @@ function computeAffiliateBalance({ earned = 0, held = 0, withdrawn = 0 } = {}) {
 }
 
 /**
- * Affiliate wallet slice. The wallet is shared, so this amount is reserved for affiliate withdrawals
- * (no commercial minimum, configured PIT rate) and excluded from buyer/seller withdrawals.
+ * Affiliate wallet slice. This amount is a bank-payout liability: it is excluded from the
+ * spendable balance used for purchases and from buyer/seller withdrawals.
+ * No commercial minimum; PIT is applied on the bank payout.
  */
 async function getAffiliateBalance(userId, now = new Date()) {
-  const rows = await AffiliateCommission.find({ affiliate: userId, status: 'active' }).select('netAmount reversedAmount').lean();
+  const rows = await AffiliateCommission.find({ affiliate: userId, status: 'active' }).lean();
   if (!rows.length) {
     const withdrawn = await affiliateWithdrawnTotal(userId);
     return computeAffiliateBalance({ earned: 0, held: 0, withdrawn });

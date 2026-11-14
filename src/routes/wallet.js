@@ -17,8 +17,10 @@ const { isVietqrDepositWithdrawalRequest } = require('../finance/buyer-deposit-w
 const router = express.Router();
 
 /**
- * Affiliate commissions sit in the same wallet but are withdrawn only under the affiliate persona
- * (no commercial minimum, configured PIT rate). Other personas cannot spend that slice on withdrawal.
+ * Affiliate commission shares the ledger as a payout liability. It is excluded from the
+ * spendable balance used for purchases, and it cannot be converted into internal balance.
+ * The only withdrawal is a bank payout to the affiliate's own registered account
+ * (no commercial minimum, configured PIT rate, paid within 7 working days after the 48h hold).
  */
 async function affiliateSlice(userId) {
   const { getAffiliateBalance } = require('../finance/affiliate-service');
@@ -68,9 +70,10 @@ router.get('/summary', authenticate, async (req, res, next) => {
       };
     }
     const { summaryPayable, loadSellerEarnedAvailable } = require('../finance/withdrawable-balance');
+    const payoutPool = summary.payoutAvailable ?? summary.available;
     const poolForPersona = persona === 'affiliate'
-      ? summary.available
-      : Math.max(0, Math.round((summary.available - affiliateAvailable) * 100) / 100);
+      ? payoutPool
+      : Math.max(0, Math.round((payoutPool - affiliateAvailable) * 100) / 100);
     const earned = persona === 'buyer' || persona === 'affiliate'
       ? { available: 0 }
       : await loadSellerEarnedAvailable(req.user._id);
@@ -268,10 +271,23 @@ router.post('/withdraw', authenticate, async (req, res, next) => {
       }
     }
 
-    // Payout bank account: from the request, else the user's saved account. Buyer withdrawals
-    // are rejected above; this path is only for payout-bearing personas.
+    // Seller payouts may name a bank account that matches eKYC. Affiliate commission
+    // can be paid only to the account already registered on that affiliate.
+    const {
+      decideAffiliateWithdrawal,
+      forbiddenCommissionUse,
+      COMMISSION_BANK_ONLY_MESSAGE,
+      COMMISSION_BANK_ONLY_CODE,
+    } = require('../finance/affiliate-use-policy');
+    if (persona === 'affiliate' && forbiddenCommissionUse(req.body)) {
+      return res.status(403).json({
+        message: COMMISSION_BANK_ONLY_MESSAGE,
+        code: COMMISSION_BANK_ONLY_CODE,
+        persona,
+      });
+    }
     let payoutAccount = null;
-    if (req.body?.bankAccount) {
+    if (persona !== 'affiliate' && req.body?.bankAccount) {
       const resolved = await resolveWithdrawAccount(req.user._id, req.body?.bankAccount, {
         save: req.body?.saveAccount === true,
       });
@@ -288,15 +304,39 @@ router.post('/withdraw', authenticate, async (req, res, next) => {
     const settled = await withWalletLock(req.user._id, async () => {
       // Affiliate persona: no commercial minimum. USD with 2 decimals; sub-cent amounts are precision.
       // PIT uses the configured rate unless an approved Mẫu 08/CK-TNCN applies.
+      // The payout account is the one registered to this affiliate, not a free-typed account.
       let affiliateQuote = null;
       let payAmount = amount;
       if (persona === 'affiliate') {
+        const User = require('../models/User');
         const { quoteAffiliateWithdrawal } = require('../finance/affiliate-engine');
+        const lockedUser = await User.findById(req.user._id).select('kyc payoutAccount role');
         const slice = await affiliateSlice(req.user._id);
         const overall = await getAvailableBalance(req.user._id);
+        const payoutPool = overall.payoutAvailable ?? overall.available;
+        const bank = decideAffiliateWithdrawal({
+          body: req.body,
+          registered: lockedUser?.payoutAccount,
+          payoutPool,
+          affiliateAvailable: slice.available,
+        });
+        if (!bank.ok) {
+          return { status: bank.status, body: { message: bank.message, code: bank.code, persona } };
+        }
+        if (req.user.role !== 'admin' && !holderMatchesKyc(bank.account.accountName, lockedUser?.kyc)) {
+          return {
+            status: 400,
+            body: {
+              message: 'The account holder name must match your verified eKYC name',
+              code: 'ACCOUNT_NAME_MISMATCH',
+              persona,
+            },
+          };
+        }
+        payoutAccount = bank.account;
         affiliateQuote = quoteAffiliateWithdrawal({
           amount: req.body?.amount,
-          available: Math.min(slice.available, overall.available),
+          available: Math.min(slice.available, payoutPool),
           currency: 'USD',
           digits: 2,
           pitCommitmentApproved: !!policy.pitCommitmentApproved,
@@ -343,12 +383,13 @@ router.post('/withdraw', authenticate, async (req, res, next) => {
 
       const summaryNow = await getAvailableBalance(req.user._id);
       const { held, balance } = summaryNow;
-      let available = summaryNow.available;
+      const payoutPool = summaryNow.payoutAvailable ?? summaryNow.available;
+      let available = payoutPool;
       if (persona !== 'affiliate') {
         // Reserve the affiliate slice: it can only leave through the affiliate persona (PIT applies).
         // Seller net snapshots are already net of affiliate commission, so this does not subtract those earnings again.
         const slice = await affiliateSlice(req.user._id);
-        available = Math.max(0, Math.round((available - slice.available) * 100) / 100);
+        available = Math.max(0, Math.round((payoutPool - slice.available) * 100) / 100);
       }
       if (persona !== 'affiliate') {
         const { payoutCap, loadSellerEarnedAvailable, PREPAID_MESSAGE } = require('../finance/withdrawable-balance');
@@ -451,6 +492,7 @@ router.post('/withdraw', authenticate, async (req, res, next) => {
           ...fxAudit(fx),
           channel: 'payout',
           persona,
+          ...(persona === 'affiliate' ? require('../finance/payout-due').affiliatePayoutDueMetadata({ requestedAt: new Date() }) : {}),
           ...(SELLER_LIKE.has(persona) ? require('../finance/payout-due').sellerPayoutDueMetadata({ requestedAt: new Date() }) : {}),
           grossAmount: quote.gross,
           platformFeeRate: policy.platformFeeRate,
@@ -546,7 +588,8 @@ async function buyerDepositWithdrawFor(userId, user) {
   } catch {
     poolKnown = false;
   }
-  const pool = poolKnown ? Math.max(0, Math.round((summary.available - affiliateAvailable) * 100) / 100) : 0;
+  const payoutPool = summary.payoutAvailable ?? summary.available;
+  const pool = poolKnown ? Math.max(0, Math.round((payoutPool - affiliateAvailable) * 100) / 100) : 0;
   const rows = await WalletTx.find({ user: userId, type: { $in: ['deposit', 'debit', 'withdraw', 'credit'] } })
     .select('type amount status paymentMethod createdAt meta')
     .sort({ createdAt: 1, _id: 1 })
@@ -619,8 +662,9 @@ async function withdrawVietqrCompanyBank(req, res, next) {
       } catch {
         poolKnown = false;
       }
+      const payoutPoolNow = summaryNow.payoutAvailable ?? summaryNow.available;
       const pool = poolKnown
-        ? Math.max(0, Math.round((summaryNow.available - affiliateAvailable) * 100) / 100)
+        ? Math.max(0, Math.round((payoutPoolNow - affiliateAvailable) * 100) / 100)
         : 0;
       const rows = await WalletTx.find({
         user: req.user._id,
