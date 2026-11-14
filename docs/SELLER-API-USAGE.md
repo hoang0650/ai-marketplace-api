@@ -56,7 +56,7 @@ Buyer **đếm token từng request** ngay trong response. Tổng lịch sử (t
 
 ### 3.1. Đặt pricing `usage`
 
-Trên sản phẩm model/API, chọn **Usage-based** và cấu hình `usageRate` (ví dụ USD / 1K tokens). Hệ thống dùng `computeUsageCost()` để tính phí từ token provider trả về.
+Trên sản phẩm model/API, chọn **Usage-based**. `usageRate` là giá của **một** `usageUnit` đã chọn (mặc định USD; VND hoặc CNY được đổi sang USD trước khi trừ ví). Không mặc định “USD / 1K tokens”. Alias lúc ghi là `unit` và `rate`, lưu thành `usageUnit` và `usageRate`. `computeUsageCost()` tính theo hợp đồng mục 9 (`exact_pro_rata_round6`), không chỉ theo token.
 
 ### 3.2. Product slug = model id
 
@@ -175,7 +175,7 @@ A: `POST /deployments/:id/invoke` có thể nhận token client báo cáo — ư
 
 ## 9. Hợp đồng tính tiền (pricing units)
 
-Seller đặt giá trên `pricing` của sản phẩm `model: "usage"`. Trường lưu là `usageUnit` và `usageRate`. Khi tạo hoặc sửa, có thể gửi alias `unit` và `rate`; server đổi về mã cố định. Sản phẩm cũ với `usageUnit` dạng `"tokens"` (mỗi 1M token) hoặc `"hour"` / `"phút"` vẫn tính đúng, không cần migration.
+Seller đặt giá trên `pricing` của sản phẩm `model: "usage"`. Trường lưu là `usageUnit` và `usageRate`. Khi tạo hoặc sửa, có thể gửi alias `unit` và `rate`; server đổi về mã cố định. Sản phẩm cũ với `usageUnit` dạng `"tokens"` (mỗi 1M token), `"hour"`, `"phút"` hoặc `"GPU hour"` vẫn tính đúng, không cần migration.
 
 ### 9.1. Trường giá
 
@@ -259,7 +259,7 @@ tiền USD = làm_tròn_nửa_lên_6_chữ_số( (quantity / cỡ_đơn_vị) ×
 - Phút và giờ: **pro-rata**, không làm tròn lên cả phút/giờ. `90` giây ở `$0.60/phút` = `$0.90`, không phải `$1.20`.
 - Đơn vị nhỏ nhất của ví cho usage là `$0.000001` (half-up). `$0.0000005` → `$0.000001`; `$0.0000004` → `$0`.
 - Phí sàn: **20%** giá trị đơn (`PLATFORM_COMMISSION_RATE`) sau giảm giá, qua cùng settlement với checkout. Buyer trả từ ví; seller nhận phần còn lại trên sổ phải trả. Self-use (buyer là seller) không trừ ví.
-- Phiên GPU/game stream dài vẫn chốt theo phút nguyên; phút lẻ cuối cùng làm tròn lên lúc dừng. Đó là sổ phiên, không phải đồng hồ của một request gateway.
+- Phiên GPU/game stream là sổ riêng, không dùng `exact_pro_rata_round6` và không áp `minCharge`. Worker (`GAME_BILLING_TICK_MS`, mặc định 60 giây) trừ theo **phút nguyên**, theo cent: lúc chạy làm tròn xuống và cộng dồn phần lẻ dưới 1 cent; lúc dừng, phút lẻ cuối làm tròn lên (tối thiểu 1 phút nếu phiên đã chạy) và phần cent còn lại làm tròn lên. `ratePerHour` và `billedCost` là USD. `currency` trên heartbeat là `pricing.currency` của listing (USD, VND hoặc CNY), không phải đơn vị của số tiền đã trừ. Trước khi start, số dư khả dụng (USD) phải ≥ `max(ratePerHour / 60, 0.01)`; thiếu thì 402 `INSUFFICIENT_BALANCE` hoặc `PAYOUT_HELD`. Một request gateway trên cùng category vẫn pro-rata như các gạch đầu dòng phía trên.
 
 ### 9.4. Seller runtime báo usage
 
